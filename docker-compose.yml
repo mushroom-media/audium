@@ -1,0 +1,26 @@
+# audium example deployment. Copy this file, adjust the music paths, then run:
+#   docker compose up -d
+#   docker compose logs audium | grep setup_token     # one-time token for the first admin
+#
+# audium only sees what you mount here. Mount every music folder read-only below /music;
+# each top-level folder (here: /music/main and /music/nas) becomes its own library folder.
+services:
+  audium:
+    build: .                           # until a published image exists: build from this repository
+    image: audium:latest
+    container_name: audium
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data                     # database, cover cache; back this up
+      - /path/to/music:/music/main:ro    # read-only: audium never changes your files
+      # - /mnt/nas/music:/music/nas:ro
+    environment:
+      TZ: Europe/Berlin
+      # AUDIUM_BASE_PATH: /audium      # when served under a sub-path by a reverse proxy
+      # AUDIUM_TRUSTED_PROXIES: "*"    # trust X-Forwarded-* from your reverse proxy
+      # AUDIUM_SCAN_INTERVAL_MINUTES: 360
+    # The container runs as uid 1000. If ./data belongs to another user, either
+    # `chown -R 1000:1000 ./data` or uncomment and set your uid:gid:
+    # user: "1000:1000"

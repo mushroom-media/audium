@@ -1,0 +1,294 @@
+"""Table definitions (SQLAlchemy Core).
+
+Conventions:
+- Integer primary keys everywhere; timestamps are UTC unix milliseconds (BigInteger).
+- Columns used for keyset pagination are NOT NULL (NULL breaks row-value comparison).
+- `*_sort` / `*_norm` columns are precomputed with audium.util.sort_key / norm.
+- Full-text search tables are SQLite-specific and live in the migrations (see db/search).
+"""
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    PrimaryKeyConstraint,
+    Table,
+    Text,
+    UniqueConstraint,
+)
+
+metadata = MetaData(
+    naming_convention={
+        "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+        "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        "pk": "pk_%(table_name)s",
+    }
+)
+
+app_state = Table(
+    "app_state",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("value", Text, nullable=False),
+    Column("updated_at", BigInteger, nullable=False),
+)
+
+# --- Library -------------------------------------------------------------------------------
+
+library_roots = Table(
+    "library_roots",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("path", Text, nullable=False, unique=True),
+    Column("enabled", Boolean, nullable=False, default=True),
+    Column("status", Text, nullable=False, default="new"),  # new | online | offline
+    Column("status_message", Text),
+    Column("last_scan_at", BigInteger),
+    Column("track_count", Integer, nullable=False, default=0),
+    Column("created_at", BigInteger, nullable=False),
+)
+
+library_excludes = Table(
+    "library_excludes",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("root_id", Integer, ForeignKey("library_roots.id", ondelete="CASCADE"), nullable=False),
+    Column("rel_path", Text, nullable=False),
+    UniqueConstraint("root_id", "rel_path"),
+)
+
+covers = Table(
+    "covers",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("hash", Text, nullable=False, unique=True),
+    Column("source", Text, nullable=False),  # embedded | folder
+    Column("width", Integer),
+    Column("height", Integer),
+    Column("created_at", BigInteger, nullable=False),
+)
+
+artists = Table(
+    "artists",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("name_sort", Text, nullable=False),
+    Column("name_norm", Text, nullable=False, unique=True),
+    Column("mb_artist_id", Text),
+    Column("cover_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    Column("album_count", Integer, nullable=False, default=0),
+    Column("track_count", Integer, nullable=False, default=0),
+    Column("created_at", BigInteger, nullable=False),
+    Index(None, "name_sort", "id"),
+)
+
+albums = Table(
+    "albums",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    # mb:<release id> | aa:<album artist>\x1f<title> | dir:<root>:<dir>\x1f<title>
+    Column("group_key", Text, nullable=False, unique=True),
+    Column("title", Text, nullable=False),
+    Column("title_sort", Text, nullable=False),
+    Column("album_artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("artist_sort", Text, nullable=False),
+    Column("year", Integer, nullable=False, default=0),  # 0 = unknown
+    Column("compilation", Boolean, nullable=False, default=False),
+    Column("cover_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    Column("mb_release_id", Text),
+    Column("track_count", Integer, nullable=False, default=0),
+    Column("duration_ms", BigInteger, nullable=False, default=0),
+    Column("added_at", BigInteger, nullable=False),
+    Column("created_at", BigInteger, nullable=False),
+    Index(None, "album_artist_id", "year", "id"),
+)
+
+tracks = Table(
+    "tracks",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("root_id", Integer, ForeignKey("library_roots.id", ondelete="CASCADE"), nullable=False),
+    Column("rel_path", Text, nullable=False),
+    Column("size", BigInteger, nullable=False),
+    Column("mtime_ns", BigInteger, nullable=False),
+    Column("quick_hash", Text, nullable=False),
+    Column("container", Text),
+    Column("codec", Text),
+    Column("bitrate", Integer),
+    Column("sample_rate", Integer),
+    Column("bit_depth", Integer),
+    Column("channels", Integer),
+    Column("duration_ms", Integer, nullable=False, default=0),
+    Column("title", Text, nullable=False),
+    Column("title_sort", Text, nullable=False),
+    Column("artist_name", Text, nullable=False),  # display string as tagged
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),  # primary artist
+    Column("album_id", Integer, ForeignKey("albums.id"), nullable=False),
+    Column("track_no", Integer),
+    Column("disc_no", Integer),
+    Column("year", Integer, nullable=False, default=0),
+    Column("date", Text),
+    Column("genre_raw", Text),
+    Column("cover_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    Column("mb_track_id", Text),
+    Column("mb_recording_id", Text),
+    Column("rg_track_gain", Float),
+    Column("rg_track_peak", Float),
+    Column("rg_album_gain", Float),
+    Column("rg_album_peak", Float),
+    Column("tag_status", Text, nullable=False),  # ok | partial | fallback | error
+    Column("missing_since", BigInteger),
+    Column("added_at", BigInteger, nullable=False),
+    Column("updated_at", BigInteger, nullable=False),
+    UniqueConstraint("root_id", "rel_path"),
+    Index(None, "album_id", "disc_no", "track_no"),
+    Index(None, "artist_id"),
+    Index(None, "quick_hash", "size"),
+)
+
+# --- Partial indexes for list endpoints ------------------------------------------------------
+#
+# Lists only show present tracks / non-empty albums. An index restricted to exactly those rows
+# lets SQLite answer "ORDER BY title_sort, id LIMIT 100 OFFSET 50000" from the index alone
+# (2 ms at 100k tracks instead of >100 ms with a row lookup per skipped entry). The queries
+# must repeat the same WHERE term (`missing_since IS NULL`, `track_count > 0`) to use them.
+
+
+def _partial(name: str, *columns, where) -> Index:
+    return Index(name, *columns, sqlite_where=where, postgresql_where=where)
+
+
+_present = tracks.c.missing_since.is_(None)
+_partial("ix_tracks_present_title", tracks.c.title_sort, tracks.c.id, where=_present)
+_partial("ix_tracks_present_added", tracks.c.added_at, tracks.c.id, where=_present)
+_partial("ix_tracks_present_year", tracks.c.year, tracks.c.id, where=_present)
+# Only for purging; a full index on missing_since would lure the planner away from the above.
+_partial("ix_tracks_missing", tracks.c.missing_since, where=tracks.c.missing_since.is_not(None))
+
+_visible = albums.c.track_count > 0
+_partial("ix_albums_visible_title", albums.c.title_sort, albums.c.id, where=_visible)
+_partial("ix_albums_visible_artist", albums.c.artist_sort, albums.c.year, albums.c.id, where=_visible)
+_partial("ix_albums_visible_year", albums.c.year, albums.c.id, where=_visible)
+_partial("ix_albums_visible_added", albums.c.added_at, albums.c.id, where=_visible)
+
+_partial("ix_artists_album_artists_name", artists.c.name_sort, artists.c.id, where=artists.c.album_count > 0)
+
+track_artists = Table(
+    "track_artists",
+    metadata,
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("artist_id", Integer, ForeignKey("artists.id", ondelete="CASCADE"), nullable=False),
+    Column("role", Text, nullable=False),  # main | album
+    Column("position", Integer, nullable=False, default=0),
+    PrimaryKeyConstraint("track_id", "artist_id", "role"),
+    Index(None, "artist_id"),
+)
+
+# --- Users & auth --------------------------------------------------------------------------
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("username", Text, nullable=False, unique=True),  # stored lower-case
+    Column("display_name", Text, nullable=False),
+    Column("password_hash", Text),  # NULL for future external (OIDC) accounts
+    Column("role", Text, nullable=False),  # admin | user
+    Column("status", Text, nullable=False),  # active | disabled
+    Column("created_at", BigInteger, nullable=False),
+    Column("updated_at", BigInteger, nullable=False),
+    Column("last_login_at", BigInteger),
+)
+
+user_settings = Table(
+    "user_settings",
+    metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("settings_json", Text, nullable=False, default="{}"),
+    Column("updated_at", BigInteger, nullable=False),
+)
+
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("token_hash", Text, nullable=False, unique=True),
+    Column("created_at", BigInteger, nullable=False),
+    Column("last_seen_at", BigInteger, nullable=False),
+    Column("expires_at", BigInteger, nullable=False),
+    Column("user_agent", Text),
+    Column("ip", Text),
+    Index(None, "user_id"),
+)
+
+api_tokens = Table(
+    "api_tokens",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("token_hash", Text, nullable=False, unique=True),
+    Column("prefix", Text, nullable=False),
+    Column("created_at", BigInteger, nullable=False),
+    Column("last_used_at", BigInteger),
+    Index(None, "user_id"),
+)
+
+invites = Table(
+    "invites",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("token_hash", Text, nullable=False, unique=True),
+    Column("role", Text, nullable=False),
+    Column("created_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", BigInteger, nullable=False),
+    Column("expires_at", BigInteger, nullable=False),
+    Column("used_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("used_at", BigInteger),
+)
+
+login_attempts = Table(
+    "login_attempts",
+    metadata,
+    Column("key", Text, primary_key=True),  # ip:<addr> | user:<name>
+    Column("window_start", BigInteger, nullable=False),
+    Column("count", Integer, nullable=False),
+)
+
+# --- Jobs ----------------------------------------------------------------------------------
+
+jobs = Table(
+    "jobs",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("queue", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("payload_json", Text, nullable=False, default="{}"),
+    Column("dedupe_key", Text),
+    Column("priority", Integer, nullable=False, default=0),
+    Column("status", Text, nullable=False),  # queued | running | done | failed | cancelled
+    Column("progress", Integer, nullable=False, default=0),
+    Column("total", Integer, nullable=False, default=0),
+    Column("message", Text),
+    Column("result_json", Text),
+    Column("error", Text),
+    Column("attempts", Integer, nullable=False, default=0),
+    Column("max_attempts", Integer, nullable=False, default=3),
+    Column("cancel_requested", Boolean, nullable=False, default=False),
+    Column("worker_id", Text),
+    Column("heartbeat_at", BigInteger),
+    Column("run_after", BigInteger, nullable=False),
+    Column("created_at", BigInteger, nullable=False),
+    Column("started_at", BigInteger),
+    Column("finished_at", BigInteger),
+    Index(None, "queue", "status", "priority", "run_after"),
+    Index(None, "dedupe_key"),
+)

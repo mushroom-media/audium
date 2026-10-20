@@ -1,0 +1,30 @@
+# Development: runs tests and tools against the mounted source tree.
+#   docker compose -f docker-compose.dev.yml run --rm dev pytest
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    image: audium:dev
+    volumes:
+      - ./backend:/src/backend
+      - devdata:/data
+      - devmusic:/music
+    environment:
+      AUDIUM_LOG_FORMAT: console
+  app:
+    image: audium:dev
+    command: ["python", "-m", "audium", "serve"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/src/backend
+      - devdata:/data
+      - devmusic:/music:ro
+    environment:
+      AUDIUM_LOG_FORMAT: console
+      AUDIUM_ADMIN_USER: admin
+      AUDIUM_ADMIN_PASSWORD: admin-dev-password
+volumes:
+  devdata:
+  devmusic:
