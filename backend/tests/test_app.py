@@ -54,3 +54,32 @@ def test_error_format(client):
     r = client.get("/api/v1/auth/me")
     assert r.status_code == 401
     assert r.json() == {"error": {"code": "unauthorized", "message": "not logged in"}}
+
+
+def test_read_gate_serializes_and_is_reentrant(settings):
+    import threading
+    import time
+
+    from audium.db.engine import Database
+
+    db = Database(settings.db_url, read_concurrency=1)
+    active, peak, lock = [0], [0], threading.Lock()
+
+    def reader():
+        with db.read(), db.read():  # nested read in the same thread must not deadlock
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.02)
+            with lock:
+                active[0] -= 1
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert peak[0] == 1
+    with db.write(), db.read():  # writes are not gated, a read inside a write still works
+        pass
+    db.dispose()

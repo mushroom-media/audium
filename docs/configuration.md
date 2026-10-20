@@ -20,6 +20,7 @@ All settings are environment variables with the prefix `AUDIUM_`. Defaults fit t
 | `AUDIUM_TRUSTED_PROXIES` | `127.0.0.1` | Comma-separated proxy IPs whose `X-Forwarded-For/-Proto` headers are trusted. Use `*` if only your proxy can reach the container. |
 | `AUDIUM_COOKIE_SECURE` | `auto` | `auto` sets the `Secure` cookie flag when the request (as seen through the proxy) is HTTPS. `true`/`false` force it. |
 | `AUDIUM_ACCESS_LOG` | `false` | Log every HTTP request. |
+| `AUDIUM_API_DB_READERS` | `1` | Database reads the API runs at the same time. SQLite reads take milliseconds, and parallel connections in one process slow each other down (measured: 1 reader 41 req/s, 4 readers 25 req/s), so the default queues them. |
 
 ## Logging
 

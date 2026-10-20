@@ -20,7 +20,7 @@ CSRF_HEADER = "x-requested-with"
 
 
 def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
-    db = db or Database(settings.db_url)
+    db = db or Database(settings.db_url, read_concurrency=settings.api_db_readers)
 
     @asynccontextmanager
     async def lifespan(_app):

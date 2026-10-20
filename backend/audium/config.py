@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     trusted_proxies: str = "127.0.0.1"
     cookie_secure: Literal["auto", "true", "false"] = "auto"
     access_log: bool = False
+    api_db_readers: int = 1
 
     # Logging
     log_level: str = "info"

@@ -11,7 +11,7 @@ services:
     container_name: audium
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8091:8091"
     volumes:
       - ./data:/data                     # database, cover cache; back this up
       - /path/to/music:/music/main:ro    # read-only: audium never changes your files
