@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { get, post, type StreamQuality, type Theme } from "../lib/api";
+  import { get, post, type AnalysisStatus, type StreamQuality, type Theme } from "../lib/api";
   import { plural } from "../lib/format";
   import { player } from "../lib/player.svelte";
-  import { navigate } from "../lib/router.svelte";
+  import { href, navigate } from "../lib/router.svelte";
   import { logout, saveSettings, session } from "../lib/session.svelte";
 
   interface Root {
@@ -44,17 +44,34 @@
   let roots = $state<Root[]>([]);
   let job = $state<Job | null>(null);
   let stats = $state<Stats | null>(null);
+  let analysis = $state<AnalysisStatus | null>(null);
+  let analysisJob = $state<Job | null>(null);
+  let failures = $state<{ track_id: number; path: string; error: string | null }[]>([]);
+  const analysisPercent = $derived(
+    analysisJob && analysisJob.total ? Math.min(100, Math.round((analysisJob.progress / analysisJob.total) * 100)) : null,
+  );
+
+  async function startAnalysis() {
+    await post("/admin/analysis/start");
+    refresh();
+  }
 
   async function refresh() {
     if (!isAdmin) return;
-    const [r, j, s] = await Promise.all([
+    const [r, j, s, a, aj, f] = await Promise.all([
       get<Root[]>("/admin/roots"),
       get<{ items: Job[] }>("/admin/jobs", { queue: "scan", limit: 1 }),
       get<Stats>("/admin/stats"),
+      get<AnalysisStatus>("/admin/analysis"),
+      get<{ items: (Job & { type: string })[] }>("/admin/jobs", { queue: "analysis", limit: 5 }),
+      get<{ track_id: number; path: string; error: string | null }[]>("/admin/analysis/failures", { limit: 20 }),
     ]);
     roots = r;
     job = j.items[0] ?? null;
     stats = s;
+    analysis = a;
+    analysisJob = aj.items.find((x) => x.type === "analyze") ?? null;
+    failures = f;
   }
 
   $effect(() => {
@@ -66,7 +83,8 @@
       try {
         await refresh();
       } finally {
-        timer = setTimeout(tick, job && ["queued", "running"].includes(job.status) ? 1500 : 10000);
+        const busy = (x: Job | null) => !!x && ["queued", "running"].includes(x.status);
+        timer = setTimeout(tick, busy(job) || busy(analysisJob) ? 1500 : 10000);
       }
     };
     timer = setTimeout(tick, 1500);
@@ -159,6 +177,40 @@
           </div>
         {/if}
       </div>
+    </section>
+  {/if}
+
+  {#if isAdmin && analysis}
+    <section>
+      <h2>Audioanalyse</h2>
+      {#if analysis.backend === "none"}
+        <p class="note">
+          Auf dieser Plattform ist keine Audioanalyse verfügbar (Essentia gibt es nur für x86_64). Auto-Playlists nach
+          Genre und Jahrzehnt funktionieren trotzdem.
+        </p>
+      {:else}
+        <p class="stats">
+          {analysis.analyzed.toLocaleString("de-DE")} von {analysis.tracks.toLocaleString("de-DE")} Titeln analysiert
+          {#if analysis.pending}· {analysis.pending.toLocaleString("de-DE")} ausstehend{/if}
+          {#if analysis.failed}· {analysis.failed} nicht analysierbar{/if}
+          <span class="muted small">({analysis.backend})</span>
+        </p>
+        {#if analysisJob && (analysisJob.status === "running" || analysisJob.status === "queued")}
+          <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={analysisPercent ?? undefined}>
+            <div style:width="{analysisPercent ?? 100}%" class:indeterminate={analysisPercent === null}></div>
+          </div>
+          <p class="muted small">Läuft mit niedriger Priorität im Hintergrund. {analysisJob.message ?? ""}</p>
+        {:else if analysis.pending}
+          <button class="btn" onclick={startAnalysis}>Jetzt analysieren</button>
+        {/if}
+        {#if failures.length}
+          <details>
+            <summary class="muted small">Nicht analysierbare Dateien ({analysis.failed})</summary>
+            <ul class="failures">{#each failures as f (f.track_id)}<li><code>{f.path}</code> – {f.error}</li>{/each}</ul>
+          </details>
+        {/if}
+      {/if}
+      <p><a href={href("/discover?tab=suggested")}>Auto-Playlists verwalten →</a></p>
     </section>
   {/if}
 
@@ -288,6 +340,12 @@
     gap: 6px 18px;
     margin: 0;
     font-size: 0.9rem;
+  }
+  .failures {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    max-height: 200px;
+    overflow-y: auto;
   }
   dt {
     font-family: ui-monospace, monospace;

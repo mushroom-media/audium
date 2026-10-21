@@ -16,6 +16,7 @@
     onplay,
     onremove,
     unavailable = false,
+    note,
   }: {
     track: Track | undefined;
     number?: number | null;
@@ -24,6 +25,8 @@
     onplay: () => void;
     onremove?: () => void;
     unavailable?: boolean;
+    /** Shown instead of the album, e.g. why the track is in an auto-playlist. */
+    note?: string | null;
   } = $props();
 
   const active = $derived(track && player.current?.id === track.id);
@@ -59,7 +62,10 @@
       <div class="title">{track.title}</div>
       <a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
     </div>
-    {#if showAlbum}<a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>{/if}
+    {#if showAlbum}
+      {#if note}<span class="album note" title={note}>{note}</span>
+      {:else}<a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>{/if}
+    {/if}
     <div class="actions">
       <Heart {track} size={17} />
       {#if onremove}
@@ -201,6 +207,10 @@
   }
   .unavailable {
     opacity: 0.45;
+  }
+  .note {
+    color: var(--accent);
+    font-size: 0.82rem;
   }
   @media (max-width: 720px) {
     .row {

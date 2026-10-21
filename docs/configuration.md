@@ -53,6 +53,19 @@ All settings are environment variables with the prefix `AUDIUM_`. Defaults fit t
 | `AUDIUM_MISSING_GRACE_DAYS` | `7` | Tracks whose files disappeared are hidden immediately and deleted from the database after this many days. Playlists and favorites survive a temporarily missing file. |
 | `AUDIUM_IGNORED_ARTICLES` | `The El La Los Las Le Les Os As O A` | Leading words ignored when sorting artists ("The Beatles" sorts under B). |
 
+## Audio analysis and auto-playlists
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AUDIUM_ANALYSIS_ENABLED` | `true` | Analyse audio (tempo, key, energy, ...) with Essentia in the background. Tag-based auto-playlists (genre, decade) work without it. |
+| `AUDIUM_ANALYSIS_WORKERS` | `1` | Parallel analysis processes. They run at the lowest CPU priority (nice 19); 1 is gentle, 4 analyses about 100 tracks a minute on a typical desktop CPU. |
+
+Analysis needs Essentia, which exists for **x86_64 only**. On arm64 (Raspberry Pi, many NAS) audium runs without it and says so in the admin settings; genre and decade playlists, smart playlists over tags and the radio (by genre/year) still work.
+
+**Mood models (optional, experimental):** the `:ml` image variant (`docker build --build-arg AUDIUM_ML=1 .`) contains Essentia with TensorFlow. Download Essentia's MusiCNN mood classifiers yourself (`mood_happy-msd-musicnn-1.pb`, `mood_sad-...`, `mood_aggressive-...`, `mood_relaxed-...` plus their `.json` files) into `/data/models`. They are licensed for non-commercial use only, which is why audium does not ship them.
+
+New auto-playlists appear as **suggestions** that only the admin sees (Entdecken → Vorschläge) until they are published.
+
 ### Why one library folder per mount
 
 Mount each share as its own folder below `/music` (`/music/nas`, `/music/usb`). If a share is not mounted when a scan runs, its folder is empty: audium marks that library folder **offline** and keeps all its tracks, instead of treating the music as deleted.

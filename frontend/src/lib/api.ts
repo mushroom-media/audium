@@ -167,6 +167,7 @@ export interface Playlist {
   description: string | null;
   visibility: "private" | "users";
   kind: string;
+  rule: Rule | null;
   owner: UserRef;
   role: PlaylistRole;
   version: number;
@@ -192,3 +193,55 @@ export interface Share {
 
 export const put = <T>(path: string, body?: unknown) => request<T>("PUT", path, { body: body ?? {} });
 export const del = <T>(path: string) => request<T>("DELETE", path);
+
+export interface RuleCondition {
+  field: string;
+  op: string;
+  value: string | number | [number, number];
+}
+
+export interface Rule {
+  match: "all" | "any";
+  conditions: RuleCondition[];
+  limit: number;
+  order: string;
+}
+
+export interface RuleField {
+  name: string;
+  label: string;
+  kind: "number" | "text" | "enum" | "scale";
+  ops: string[];
+  options: string[];
+  needs_analysis: boolean;
+  unit: string;
+}
+
+export interface AutoPlaylist {
+  id: number;
+  key: string;
+  generator: "tag" | "rule" | "cluster" | "custom";
+  name: string;
+  description: string | null;
+  track_count: number;
+  duration_ms: number;
+  cover: string | null;
+  generated_at: number | null;
+  rule: Rule | null;
+  status?: "suggested" | "published" | "dismissed" | null;
+  access?: "all" | "restricted" | "admin_only" | null;
+  user_ids?: number[] | null;
+}
+
+export interface AutoItem {
+  reason: string | null;
+  track: Track;
+}
+
+export interface AnalysisStatus {
+  backend: string;
+  tracks: number;
+  analyzed: number;
+  failed: number;
+  pending: number;
+}

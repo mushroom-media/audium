@@ -26,6 +26,9 @@
     trash: "M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13",
     drag: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
     list: "M5 6h14M5 12h14M5 18h9",
+    spark: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
+    radio: "M4 9h16v11H4zM8 9l9-5M8 14.5a2 2 0 1 0 0 .01M14 13h3M14 16h3",
+    compass: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM15.5 8.5l-2 5-5 2 2-5z",
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>

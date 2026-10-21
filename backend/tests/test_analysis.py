@@ -476,3 +476,15 @@ def test_admin_analysis_endpoints(audio_library, users):
     assert admin_c.post("/api/v1/admin/analysis/start").status_code == 202
     assert bob_c.get("/api/v1/admin/analysis").status_code == 403
     assert admin_c.get("/api/v1/admin/analysis/failures").json() == []
+
+
+def test_cluster_mixes_do_not_overlap(analysed, db):
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+        rows = conn.execute(
+            select(autoplaylists.auto_playlist_items.c.track_id)
+            .join(auto_playlists, auto_playlists.c.id == autoplaylists.auto_playlist_items.c.auto_playlist_id)
+            .where(auto_playlists.c.generator == "cluster")
+        ).all()
+    ids = [r[0] for r in rows]
+    assert ids and len(ids) == len(set(ids))

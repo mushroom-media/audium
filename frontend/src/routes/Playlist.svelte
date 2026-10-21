@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ApiError, del, get, patch, post, type Page, type Playlist, type PlaylistItem } from "../lib/api";
+  import { ApiError, del, get, patch, post, type Page, type Playlist, type PlaylistItem, type Rule } from "../lib/api";
+  import RuleEditor from "../lib/components/RuleEditor.svelte";
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
@@ -70,7 +71,17 @@
     }
   });
 
-  const canEdit = $derived(meta?.role === "owner" || meta?.role === "editor");
+  const isSmart = $derived(meta?.kind === "smart");
+  // Smart playlists fill themselves from their rule: no manual add/remove/reorder.
+  const canEdit = $derived((meta?.role === "owner" || meta?.role === "editor") && !isSmart);
+  let editingRule = $state(false);
+
+  async function saveRule(_name: string, rule: Rule) {
+    await patch(`/playlists/${pid}`, { rule });
+    editingRule = false;
+    reload();
+    loadPlaylists();
+  }
   const isOwner = $derived(meta?.role === "owner");
 
   async function play(index = 0, shuffle = false) {
@@ -171,7 +182,7 @@
         <div class="art"><Cover hash={meta!.cover} size={256} /></div>
         <div class="info">
           <p class="kind">
-            Playlist{#if meta!.visibility === "users"} · für alle sichtbar{/if}{#if meta!.role !== "owner"} · von {meta!.owner.display_name}{/if}
+            {isSmart ? "Smart-Playlist" : "Playlist"}{#if meta!.visibility === "users"} · für alle sichtbar{/if}{#if meta!.role !== "owner"} · von {meta!.owner.display_name}{/if}
           </p>
           <h1>{meta!.name}</h1>
           {#if meta!.description}<p class="desc">{meta!.description}</p>{/if}
@@ -184,6 +195,7 @@
             <button class="btn" disabled={!meta!.item_count} onclick={() => play(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
             {#if isOwner}
               <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> Teilen</button>
+              {#if isSmart}<button class="btn ghost" onclick={() => (editingRule = true)}><Icon name="spark" size={18} /> Regel</button>{/if}
               <button class="icon-btn" title="Umbenennen" aria-label="Umbenennen" onclick={rename}><Icon name="edit" size={18} /></button>
               <button class="icon-btn" title="Beschreibung" aria-label="Beschreibung bearbeiten" onclick={describe}><Icon name="list" size={18} /></button>
               <button class="icon-btn" title="Löschen" aria-label="Playlist löschen" onclick={remove}><Icon name="trash" size={18} /></button>
@@ -229,6 +241,10 @@
   </VirtualList>
 {:else}
   <div class="page"></div>
+{/if}
+
+{#if editingRule && meta?.rule}
+  <RuleEditor title="Regel von „{meta.name}“" initial={meta.rule as Rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
 {/if}
 
 <style>

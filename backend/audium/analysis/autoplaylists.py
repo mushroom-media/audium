@@ -306,10 +306,16 @@ def _cluster_specs(conn: Connection, analyzed: int) -> list[dict]:
             centroids[:, names.index("bpm")] if "bpm" in names else np.zeros(k),
         )
     )
+    # Every track belongs to its nearest centroid; a mix holds only its own members (closest
+    # first), so mixes do not overlap.
+    all_dist = ((z[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+    labels = all_dist.argmin(axis=1)
     specs, used_names = [], set()
     for rank, j in enumerate(order, start=1):
-        dist = ((z - centroids[j]) ** 2).sum(axis=1)
-        nearest = np.argsort(dist)[:200]
+        members = np.flatnonzero(labels == j)
+        if len(members) < MIN_RULE_TRACKS:
+            continue
+        nearest = members[np.argsort(all_dist[members, j])][:200]
         name = _cluster_name(centroids[j], names)
         while name in used_names:
             name += " +"

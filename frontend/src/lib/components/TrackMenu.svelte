@@ -2,6 +2,8 @@
   // The "…" menu for tracks: queue actions, add to playlist, favorite. Rendered once in App.
   import { addToPlaylist, createPlaylist, editable, mine, toggleFavorite } from "../mine.svelte";
   import { player } from "../player.svelte";
+  import { startRadio } from "../radio";
+  import { navigate } from "../router.svelte";
   import { promptText, toast, ui } from "../ui.svelte";
   import Icon from "./Icon.svelte";
 
@@ -83,6 +85,12 @@
         <Icon name="plus" size={16} /> Zu Playlist hinzufügen <span class="chev">›</span>
       </button>
       {#if single}
+        <button role="menuitem" onclick={() => { startRadio(single); done(); }}>
+          <Icon name="radio" size={16} /> Radio starten
+        </button>
+        <button role="menuitem" onclick={() => { navigate(`/tracks/${single.id}/similar`); done(); }}>
+          <Icon name="spark" size={16} /> Ähnliche Titel
+        </button>
         <button role="menuitem" onclick={() => { toggleFavorite(single); done(); }}>
           <Icon name="heart" size={16} /> {mine.favoriteTracks.has(single.id) ? "Aus Lieblingssongs entfernen" : "Zu Lieblingssongs"}
         </button>

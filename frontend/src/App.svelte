@@ -11,7 +11,12 @@
   import { createPlaylist, disconnectEvents, loadMine, mine } from "./lib/mine.svelte";
   import { loadSession, session } from "./lib/session.svelte";
   import { promptText } from "./lib/ui.svelte";
+  import RuleEditor from "./lib/components/RuleEditor.svelte";
+  import { post, type Playlist as PlaylistT, type Rule } from "./lib/api";
   import Album from "./routes/Album.svelte";
+  import AutoPlaylist from "./routes/AutoPlaylist.svelte";
+  import Discover from "./routes/Discover.svelte";
+  import Similar from "./routes/Similar.svelte";
   import Albums from "./routes/Albums.svelte";
   import Artist from "./routes/Artist.svelte";
   import Artists from "./routes/Artists.svelte";
@@ -31,6 +36,9 @@
     artist: "/artists/:id",
     tracks: "/tracks",
     playlist: "/playlists/:id",
+    discover: "/discover",
+    auto: "/discover/:id",
+    similar: "/tracks/:id/similar",
     favorites: "/favorites",
     search: "/search",
     settings: "/settings",
@@ -41,6 +49,7 @@
 
   const NAV: { name: string; path: string; label: string; icon: IconName }[] = [
     { name: "home", path: "/", label: "Start", icon: "home" },
+    { name: "discover", path: "/discover", label: "Entdecken", icon: "compass" },
     { name: "albums", path: "/albums", label: "Alben", icon: "album" },
     { name: "artists", path: "/artists", label: "Künstler", icon: "artist" },
     { name: "tracks", path: "/tracks", label: "Titel", icon: "track" },
@@ -78,6 +87,14 @@
     if (session.user) loadMine().catch(() => {});
     else disconnectEvents();
   });
+
+  let smartEditor = $state(false);
+  async function createSmart(name: string, rule: Rule) {
+    const pl = await post<PlaylistT>("/playlists", { name, rule });
+    smartEditor = false;
+    await loadMine();
+    navigate(`/playlists/${pl.id}`);
+  }
 
   async function newPlaylist() {
     const name = await promptText("Neue Playlist", "", "Erstellen");
@@ -128,7 +145,10 @@
   }
 
   const active = (name: string) =>
-    router.route.name === name || (name === "albums" && router.route.name === "album") || (name === "artists" && router.route.name === "artist");
+    router.route.name === name ||
+    (name === "albums" && router.route.name === "album") ||
+    (name === "artists" && router.route.name === "artist") ||
+    (name === "discover" && router.route.name === "auto");
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -156,7 +176,10 @@
 
       <div class="side-head">
         <span>Playlists</span>
-        <button class="icon-btn" title="Neue Playlist" aria-label="Neue Playlist" onclick={newPlaylist}><Icon name="plus" size={18} /></button>
+        <span class="side-btns">
+          <button class="icon-btn" title="Neue Smart-Playlist (füllt sich nach Regeln)" aria-label="Neue Smart-Playlist" onclick={() => (smartEditor = true)}><Icon name="spark" size={17} /></button>
+          <button class="icon-btn" title="Neue Playlist" aria-label="Neue Playlist" onclick={newPlaylist}><Icon name="plus" size={18} /></button>
+        </span>
       </div>
       <div class="side-lists">
         <a href={href("/favorites")} class:active={active("favorites")} class="pl">
@@ -202,6 +225,9 @@
         {:else if router.route.name === "settings"}<Settings />
         {:else if router.route.name === "playlist"}<Playlist id={router.route.params.id} />
         {:else if router.route.name === "favorites"}<Favorites />
+        {:else if router.route.name === "discover"}<Discover />
+        {:else if router.route.name === "auto"}<AutoPlaylist id={router.route.params.id} />
+        {:else if router.route.name === "similar"}<Similar id={router.route.params.id} />
         {:else}<div class="page"><p class="empty">Diese Seite gibt es nicht. <a href={href("/")}>Zur Startseite</a></p></div>
         {/if}
       {/key}
@@ -212,9 +238,12 @@
     <div class="player"><PlayerBar /></div>
 
     <Overlays />
+    {#if smartEditor}
+      <RuleEditor title="Neue Smart-Playlist" onsave={createSmart} onclose={() => (smartEditor = false)} />
+    {/if}
 
     <nav class="tabs" aria-label="Navigation">
-      {#each NAV as n (n.name)}
+      {#each NAV.filter((n) => n.name !== "artists") as n (n.name)}
         <a href={href(n.path)} class:active={active(n.name)} aria-current={active(n.name) ? "page" : undefined}>
           <Icon name={n.icon} /><span>{n.label}</span>
         </a>
