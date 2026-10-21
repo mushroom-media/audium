@@ -469,3 +469,13 @@ def test_ingest_many_renders_each_distinct_image_once(tmp_path):
     assert results[1] is None and results[4] is None
     assert store.ingest_many([blue, red], mapper)[0] == results[3]
     assert calls == [3]  # answered from memory
+
+
+def test_scan_with_reader_processes(library, db):
+    """The production path: tags and covers in a forkserver process pool."""
+    library.settings.scan_workers = 3
+    for i in range(12):
+        library.add(f"P/{i:02d}.mp3", tags(f"T{i}", album="Pool"), picture=cover_bytes((i * 20, 255 - i * 20, 90)))
+    stats = library.scan()
+    assert stats.added == 12 and stats.covers_added == 12
+    assert {t.title for t in _tracks(db)} == {f"T{i}" for i in range(12)}

@@ -1,4 +1,5 @@
 from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
 from audium.db.migrate import alembic_config, current_revision, migrate
@@ -46,7 +47,7 @@ def test_upgrade_from_0001_keeps_data_and_takes_a_backup(tmp_path):
         conn.execute(text("INSERT INTO artists_fts(rowid, name) VALUES (1, 'Björk')"))
     engine.dispose()
     migrate(url, tmp_path / "backups")
-    assert current_revision(url) == "0002"
+    assert current_revision(url) == ScriptDirectory.from_config(alembic_config(url)).get_current_head()
     assert len(list((tmp_path / "backups").glob("audium-0001-*.db"))) == 1
     engine = create_engine(url)
     with engine.connect() as conn:

@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     scan_on_start: bool = True
     scan_interval_minutes: int = 360
     scan_workers: int = 4
+    analysis_enabled: bool = True
+    analysis_workers: int = 1
     missing_grace_days: int = 7
     ignored_articles: str = "The El La Los Las Le Les Os As O A"
 

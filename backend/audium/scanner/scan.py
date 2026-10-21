@@ -26,10 +26,21 @@ from pathlib import Path, PurePosixPath
 import xxhash
 from sqlalchemy import Connection, bindparam, select, text, update
 
+from audium.analysis import genres as genre_norm
 from audium.config import Settings
 from audium.db import search
 from audium.db.engine import Database
-from audium.db.schema import albums, artists, covers, library_excludes, library_roots, track_artists, tracks
+from audium.db.schema import (
+    albums,
+    artists,
+    covers,
+    genres,
+    library_excludes,
+    library_roots,
+    track_artists,
+    track_genres,
+    tracks,
+)
 from audium.db.state import bump_library_generation
 from audium.logging import get_logger
 from audium.scanner.covers import CoverStore
@@ -122,6 +133,31 @@ def read_file(root_path: str, rel_path: str, size: int) -> tuple[str | None, Tra
     return digest, meta
 
 
+def genre_id(conn: Connection, cache: dict[str, int], name: str) -> int:
+    """Id of a normalized genre, created on first use."""
+    slug = genre_norm.slug(name)
+    cached = cache.get(slug)
+    if cached is None:
+        cached = conn.execute(select(genres.c.id).where(genres.c.slug == slug)).scalar()
+        if cached is None:
+            cached = conn.execute(genres.insert().values(name=name, slug=slug)).inserted_primary_key[0]
+        cache[slug] = cached
+    return cached
+
+
+def refresh_genre_counts(conn: Connection) -> None:
+    """Visible tracks per genre; genres nobody uses any more are dropped."""
+    conn.execute(
+        text(
+            "UPDATE genres SET track_count = (SELECT count(*) FROM track_genres tg"
+            " JOIN tracks t ON t.id = tg.track_id WHERE tg.genre_id = genres.id AND t.missing_since IS NULL)"
+        )
+    )
+    conn.execute(
+        text("DELETE FROM genres WHERE NOT EXISTS (SELECT 1 FROM track_genres tg WHERE tg.genre_id = genres.id)")
+    )
+
+
 def _chunks(items: list, n: int = _CHUNK) -> Iterable[list]:
     for i in range(0, len(items), n):
         yield items[i : i + n]
@@ -145,6 +181,7 @@ class Scanner:
         self._artist_ids: dict[str, int] = {}
         self._album_ids: dict[str, int] = {}
         self._cover_ids: dict[str, int] = {}
+        self._genre_ids: dict[str, int] = {}
         self._root_paths: dict[int, str] = {}
         self._estimate = 0
         self._pool: ThreadPoolExecutor | None = None
@@ -550,6 +587,18 @@ class Scanner:
         if changed_ids:
             search.remove_tracks(conn, changed_ids)
         search.add_tracks(conn, [(w.existing_id, r["title"], r["artist_display"], r["album"]) for w, r, _a in done])
+        for chunk in _chunks(changed_ids):
+            conn.execute(track_genres.delete().where(track_genres.c.track_id.in_(chunk)))
+        genre_rows = [
+            {"track_id": w.existing_id, "genre_id": self.genre_id(conn, name)}
+            for w, _r, _a in done
+            for name in genre_norm.normalize(w.meta.genres)
+        ]
+        if genre_rows:
+            conn.execute(track_genres.insert(), genre_rows)
+
+    def genre_id(self, conn: Connection, name: str) -> int:
+        return genre_id(conn, self._genre_ids, name)
 
     def _resolve(self, root_id: int, d: Dir, w: Work) -> dict:
         """Tags first, then the path for whatever is missing."""
@@ -746,6 +795,8 @@ class Scanner:
                 conn.execute(albums.delete().where(albums.c.id.in_(chunk)))
             self._refresh_albums(conn, None)
             self._refresh_artists(conn, None)
+            refresh_genre_counts(conn)
+            self._genre_ids.clear()
             orphan_artists = [
                 r[0]
                 for r in conn.execute(

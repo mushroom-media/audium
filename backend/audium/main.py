@@ -7,7 +7,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from audium import __version__
-from audium.api import admin_library, admin_users, auth, events, library, personal, playlists, stream, system, web
+from audium.analysis.similarity import VectorIndex
+from audium.api import (
+    admin_library,
+    admin_users,
+    auth,
+    discover,
+    events,
+    library,
+    personal,
+    playlists,
+    stream,
+    system,
+    web,
+)
 from audium.api.eventbus import EventBus
 from audium.config import Settings
 from audium.db.counts import CountCache
@@ -55,6 +68,7 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     api.state.counts = CountCache()
     api.state.transcoder = Transcoder(settings.max_transcodes)
     api.state.bus = bus
+    api.state.vectors = VectorIndex()
 
     api.include_router(system.router, prefix="/api")
     routers = (
@@ -64,6 +78,8 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
         playlists.router,
         personal.router,
         events.router,
+        discover.router,
+        discover.admin,
         admin_users.router,
         admin_library.router,
     )

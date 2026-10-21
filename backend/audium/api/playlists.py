@@ -56,7 +56,9 @@ def create_playlist(
     body: PlaylistCreate, request: Request, user: User = Depends(current_user), db: Database = Depends(get_db)
 ):
     with db.write() as conn:
-        out, event = svc.create_playlist(conn, user, body.name, body.description, body.visibility, body.track_ids)
+        out, event = svc.create_playlist(
+            conn, user, body.name, body.description, body.visibility, body.track_ids, body.rule
+        )
     _publish(request, event)
     return out
 
@@ -84,6 +86,7 @@ def update_playlist(
             name=body.name,
             description=body.description,
             visibility=body.visibility,
+            rule=body.rule,
             if_version=_version(if_match),
         )
     _publish(request, event)

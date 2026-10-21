@@ -90,6 +90,14 @@ def cmd_worker(args) -> int:
         from audium.scanner.tasks import ScanScheduler, make_handlers
 
         worker = Worker(db, "scan", make_handlers(db, settings), on_idle=ScanScheduler(db, settings))
+    elif args.queue == "analysis":
+        from audium.analysis.tasks import AnalysisScheduler
+        from audium.analysis.tasks import make_handlers as analysis_handlers
+
+        # Background work must never compete with playback or the UI.
+        if hasattr(os, "nice"):
+            os.nice(19)
+        worker = Worker(db, "analysis", analysis_handlers(db, settings), on_idle=AnalysisScheduler(db, settings))
     else:
         print(f"unknown queue {args.queue!r}", file=sys.stderr)
         return 2
@@ -165,7 +173,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     sub.add_parser("api", help="run only the HTTP API").set_defaults(func=cmd_api)
     p = sub.add_parser("worker", help="run one background worker")
-    p.add_argument("--queue", default="scan", choices=["scan"])
+    p.add_argument("--queue", default="scan", choices=["scan", "analysis"])
     p.set_defaults(func=cmd_worker)
     sub.add_parser("migrate", help="apply database migrations").set_defaults(func=cmd_migrate)
     sub.add_parser("healthcheck", help="exit 0 if the local API is healthy").set_defaults(func=cmd_healthcheck)

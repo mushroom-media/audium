@@ -16,6 +16,20 @@ ADMIN_PW = "admin-password-1"
 USER_PW = "user-password-1"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def fast_password_hashing():
+    """Production argon2 parameters cost ~0.3 s per hash; tests create many users."""
+    from argon2 import PasswordHasher
+
+    from audium.auth import passwords
+
+    original = passwords._hasher
+    passwords._hasher = PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1)
+    passwords._DUMMY_HASH = passwords._hasher.hash("audium-dummy-password")
+    yield
+    passwords._hasher = original
+
+
 @pytest.fixture(scope="session")
 def templates(tmp_path_factory) -> dict[str, Path]:
     return make_templates(tmp_path_factory.mktemp("templates"))
@@ -29,7 +43,7 @@ def settings(tmp_path) -> Settings:
         data_dir=tmp_path / "data",
         music_dir=tmp_path / "music",
         log_format="console",
-        scan_workers=2,
+        scan_workers=1,  # in-process; test_scan_with_reader_processes covers the pool
         login_max_attempts=5,
     )
 

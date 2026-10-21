@@ -90,4 +90,5 @@ def default_children() -> list[tuple[str, list[str]]]:
     return [
         ("api", [*py, "api"]),
         ("worker-scan", [*py, "worker", "--queue", "scan"]),
+        ("worker-analysis", [*py, "worker", "--queue", "analysis"]),
     ]

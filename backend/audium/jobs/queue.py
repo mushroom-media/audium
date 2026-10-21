@@ -13,7 +13,7 @@ from sqlalchemy import Connection, func, select, update
 from audium.db.schema import jobs
 from audium.util import now_ms
 
-QUEUES = ("scan",)
+QUEUES = ("scan", "analysis")
 ACTIVE = ("queued", "running")
 FINISHED = ("done", "failed", "cancelled")
 

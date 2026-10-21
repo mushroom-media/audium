@@ -34,5 +34,6 @@ def health(db: Database = Depends(get_db)):
     except Exception as exc:  # noqa: BLE001 - health must answer, whatever broke
         body.update(status="error", db=f"error: {type(exc).__name__}")
         return JSONResponse(body, status_code=503)
-    body["analysis"] = "none"
+    with db.read() as conn:
+        body["analysis"] = get_state(conn, "analysis.backend") or "unknown"
     return body

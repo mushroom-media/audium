@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 from sqlalchemy import Connection, and_, case, delete, func, insert, or_, select, update
 
+from audium.analysis import autoplaylists as smart
+from audium.analysis import rules
 from audium.db.schema import covers, playlist_events, playlist_items, playlist_shares, playlists, tracks, users
 from audium.errors import BadRequest, Conflict, NotFound
 from audium.services.library import track_item, track_select
@@ -52,6 +54,11 @@ def _clean_name(name: str) -> str:
     if not n:
         raise BadRequest("name must not be empty")
     return n
+
+
+def _not_smart(row) -> None:
+    if row.kind == "smart":
+        raise BadRequest("smart playlists fill themselves from their rule; edit the rule instead")
 
 
 def _check_version(row, if_version: int | None) -> None:
@@ -130,6 +137,7 @@ def playlist_out(conn: Connection, row, role: str) -> dict:
         "description": row.description,
         "visibility": row.visibility,
         "kind": row.kind,
+        "rule": json.loads(row.rule_json) if row.rule_json else None,
         "owner": {"id": row.owner_id, "username": owner.username, "display_name": owner.display_name},
         "role": role,
         "version": row.version,
@@ -209,10 +217,18 @@ def list_items(conn: Connection, user: User, playlist_id: int, limit: int, offse
 
 
 def create_playlist(
-    conn: Connection, user: User, name: str, description: str | None, visibility: str, track_ids: list[int]
+    conn: Connection,
+    user: User,
+    name: str,
+    description: str | None,
+    visibility: str,
+    track_ids: list[int],
+    rule: dict | None = None,
 ):
+    """A manual playlist, or with `rule` a smart playlist that fills (and refreshes) itself."""
     if visibility not in VISIBILITIES:
         raise BadRequest("visibility must be private or users")
+    clean_rule = rules.validate(rule) if rule is not None else None
     ts = now_ms()
     playlist_id = conn.execute(
         insert(playlists).values(
@@ -220,13 +236,17 @@ def create_playlist(
             name=_clean_name(name),
             description=(description or "").strip()[:2000] or None,
             visibility=visibility,
-            kind="manual",
+            kind="smart" if clean_rule else "manual",
+            rule_json=json.dumps(clean_rule) if clean_rule else None,
             version=1,
             created_at=ts,
             updated_at=ts,
         )
     ).inserted_primary_key[0]
-    if track_ids:
+    if clean_rule:
+        smart.store_smart_items(conn, playlist_id, smart.evaluate_smart(conn, playlist_id, json.dumps(clean_rule)))
+        row = conn.execute(select(playlists).where(playlists.c.id == playlist_id)).one()
+    elif track_ids:
         _insert_items(conn, playlist_id, user, track_ids, after_item_id=None, at_end=True)
         row = _touch(conn, playlist_id, items_changed=True)
     else:
@@ -242,11 +262,16 @@ def update_playlist(
     name: str | None,
     description: str | None,
     visibility: str | None,
+    rule: dict | None = None,
     if_version: int | None = None,
 ):
     row, _ = require_playlist(conn, user, playlist_id, "manage")
     _check_version(row, if_version)
     values: dict = {}
+    if rule is not None:
+        if row.kind != "smart":
+            raise BadRequest("only smart playlists have a rule")
+        values["rule_json"] = json.dumps(rules.validate(rule))
     if name is not None:
         values["name"] = _clean_name(name)
     if description is not None:
@@ -260,6 +285,8 @@ def update_playlist(
     # Recipients before the change too: someone losing access must hear about it.
     before = _recipients(conn, row.id, row.owner_id, row.visibility)
     conn.execute(update(playlists).where(playlists.c.id == playlist_id).values(**values))
+    if "rule_json" in values:
+        smart.store_smart_items(conn, playlist_id, smart.evaluate_smart(conn, playlist_id, values["rule_json"]))
     new = _touch(conn, playlist_id, items_changed=False)
     after = _recipients(conn, new.id, new.owner_id, new.visibility)
     rec = "*" if "*" in (before, after) else sorted({*before, *after})
@@ -355,6 +382,7 @@ def add_items(
     if len(track_ids) > MAX_ADD:
         raise BadRequest(f"at most {MAX_ADD} tracks per request")
     row, _ = require_playlist(conn, user, playlist_id, "edit")
+    _not_smart(row)
     _check_version(row, if_version)
     item_ids = _insert_items(conn, playlist_id, user, track_ids, after_item_id, at_end)
     if not item_ids:
@@ -365,6 +393,7 @@ def add_items(
 
 def remove_items(conn: Connection, user: User, playlist_id: int, item_ids: list[int], if_version: int | None = None):
     row, _ = require_playlist(conn, user, playlist_id, "edit")
+    _not_smart(row)
     _check_version(row, if_version)
     # Removing an item someone else already removed is fine: the result is the same.
     conn.execute(
@@ -383,6 +412,7 @@ def move_item(
     if_version: int | None = None,
 ):
     row, _ = require_playlist(conn, user, playlist_id, "edit")
+    _not_smart(row)
     _check_version(row, if_version)
     exists = conn.execute(
         select(playlist_items.c.id).where(playlist_items.c.id == item_id, playlist_items.c.playlist_id == playlist_id)

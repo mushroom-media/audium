@@ -20,6 +20,9 @@ dependencies = [
     "pillow>=10.4",
     "structlog>=24.1",
     "xxhash>=3.4",
+    "numpy>=1.26",
+    # Audio analysis. Wheels exist for x86_64 only; elsewhere audium runs without analysis.
+    "essentia>=2.1b6.dev1389; platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]

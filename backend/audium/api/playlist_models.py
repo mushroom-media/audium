@@ -19,7 +19,8 @@ class PlaylistOut(BaseModel):
     name: str
     description: str | None
     visibility: Visibility = Field(description="users = visible to everybody on this server")
-    kind: str
+    kind: str = Field(description="manual | smart | frozen_auto")
+    rule: dict | None = Field(None, description="Rule of a smart playlist")
     owner: UserRef
     role: Literal["owner", "editor", "viewer"] = Field(description="Your role on this playlist")
     version: int = Field(description="Increases with every change; send as If-Match to detect conflicts")
@@ -35,12 +36,14 @@ class PlaylistCreate(BaseModel):
     description: str | None = Field(None, max_length=2000)
     visibility: Visibility = "private"
     track_ids: list[int] = Field(default_factory=list, max_length=5000)
+    rule: dict | None = Field(None, description="Makes a smart playlist; see GET /rules/fields")
 
 
 class PlaylistUpdate(BaseModel):
     name: str | None = Field(None, max_length=200)
     description: str | None = Field(None, max_length=2000)
     visibility: Visibility | None = None
+    rule: dict | None = None
 
 
 class PlaylistItemOut(BaseModel):

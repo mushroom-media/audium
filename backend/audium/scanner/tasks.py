@@ -40,6 +40,14 @@ def make_handlers(db: Database, settings: Settings):
     def scan(ctx: JobContext, payload: dict) -> dict:
         stats = Scanner(db, settings, cover_store, ctx).run(payload.get("root_ids"), bool(payload.get("force")))
         ctx.check()  # report a cancelled / interrupted scan as such
+        if stats.added or stats.updated or stats.moved or stats.missing or stats.purged or stats.restored:
+            # New or changed files: analyse them, then refresh the auto-playlists.
+            from audium.analysis.tasks import enqueue_analysis, enqueue_autoplaylists
+
+            with db.write() as conn:
+                if settings.analysis_enabled:
+                    enqueue_analysis(conn)
+                enqueue_autoplaylists(conn)
         return stats.as_dict()
 
     return {"scan": scan}

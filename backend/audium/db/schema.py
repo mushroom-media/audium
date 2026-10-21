@@ -377,3 +377,92 @@ play_history = Table(
     Index(None, "user_id", "played_at"),
     Index(None, "track_id"),
 )
+
+# --- Genres, audio features, auto-playlists (migration 0003) ---------------------------------
+
+genres = Table(
+    "genres",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("slug", Text, nullable=False, unique=True),
+    Column("track_count", Integer, nullable=False, default=0),
+)
+
+track_genres = Table(
+    "track_genres",
+    metadata,
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("genre_id", Integer, ForeignKey("genres.id", ondelete="CASCADE"), nullable=False),
+    PrimaryKeyConstraint("track_id", "genre_id"),
+    Index(None, "genre_id"),
+)
+
+# One row per analysed track. All descriptors are on fixed 0..1 scales (see analysis/features.py)
+# so rules like "energy >= 0.7" mean the same thing in every library.
+track_features = Table(
+    "track_features",
+    metadata,
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True),
+    Column("analyzer", Text, nullable=False),  # essentia | essentia+ml
+    Column("analyzer_version", Integer, nullable=False),
+    Column("status", Text, nullable=False),  # ok | failed
+    Column("error", Text),
+    Column("fingerprint", Text, nullable=False),  # size:mtime:quick_hash of the analysed file
+    Column("bpm", Float),
+    Column("key", Text),  # C, C#, ... B
+    Column("mode", Text),  # major | minor
+    Column("loudness", Float),  # dB (Essentia DynamicComplexity estimate)
+    Column("energy", Float),
+    Column("dynamics", Float),
+    Column("danceability", Float),
+    Column("brightness", Float),
+    Column("mood_happy", Float),
+    Column("mood_sad", Float),
+    Column("mood_aggressive", Float),
+    Column("mood_relaxed", Float),
+    Column("analyzed_at", BigInteger, nullable=False),
+    Index(None, "status"),
+    Index(None, "bpm"),
+    Index(None, "energy"),
+)
+
+auto_playlists = Table(
+    "auto_playlists",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("key", Text, nullable=False, unique=True),  # e.g. genre:rock, decade:1990, rule:workout
+    Column("generator", Text, nullable=False),  # tag | rule | cluster | custom
+    Column("name", Text, nullable=False),
+    Column("name_locked", Boolean, nullable=False, default=False),  # renamed by the admin: keep it
+    Column("description", Text),
+    Column("rule_json", Text),
+    Column("status", Text, nullable=False),  # suggested | published | dismissed
+    Column("access", Text, nullable=False, default="all"),  # all | restricted | admin_only
+    Column("track_count", Integer, nullable=False, default=0),
+    Column("duration_ms", BigInteger, nullable=False, default=0),
+    Column("cover_hash", Text),
+    Column("generated_at", BigInteger),
+    Column("created_at", BigInteger, nullable=False),
+    Column("updated_at", BigInteger, nullable=False),
+    Index(None, "status"),
+)
+
+auto_playlist_items = Table(
+    "auto_playlist_items",
+    metadata,
+    Column("auto_playlist_id", Integer, ForeignKey("auto_playlists.id", ondelete="CASCADE"), nullable=False),
+    Column("rank", Integer, nullable=False),
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("reason", Text),  # why the track is here, e.g. "128 BPM · hohe Energie"
+    PrimaryKeyConstraint("auto_playlist_id", "rank"),
+    Index(None, "track_id"),
+)
+
+auto_playlist_access = Table(
+    "auto_playlist_access",
+    metadata,
+    Column("auto_playlist_id", Integer, ForeignKey("auto_playlists.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    PrimaryKeyConstraint("auto_playlist_id", "user_id"),
+)
