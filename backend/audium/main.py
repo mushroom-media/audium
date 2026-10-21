@@ -6,12 +6,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from audium import __version__
-from audium.api import admin_library, admin_users, auth, library, system
+from audium.api import admin_library, admin_users, auth, library, stream, system, web
 from audium.config import Settings
 from audium.db.counts import CountCache
 from audium.db.engine import Database
 from audium.errors import AudiumError, Forbidden
 from audium.logging import get_logger
+from audium.media.transcode import Transcoder
 from audium.services import auth as auth_service
 
 log = get_logger(__name__)
@@ -47,16 +48,13 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     api.state.settings = settings
     api.state.db = db
     api.state.counts = CountCache()
+    api.state.transcoder = Transcoder(settings.max_transcodes)
 
     api.include_router(system.router, prefix="/api")
-    for r in (auth.router, library.router, admin_users.router, admin_library.router):
+    for r in (auth.router, library.router, stream.router, admin_users.router, admin_library.router):
         api.include_router(r, prefix="/api/v1")
-
-    @api.middleware("http")
-    async def csrf_guard(request: Request, call_next):
-        if _csrf_suspect(request, settings.base_path):
-            return _error_response(Forbidden(f"send JSON or a {CSRF_HEADER} header"))
-        return await call_next(request)
+    api.include_router(web.make_router(settings.web_dir, settings.base_path))  # last: catch-all
+    api.add_middleware(CsrfGuard, base_path=settings.base_path)
 
     @api.exception_handler(AudiumError)
     async def _domain_error(_request: Request, exc: AudiumError):
@@ -76,6 +74,22 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
 
     outer.mount(settings.base_path, api)
     return outer
+
+
+class CsrfGuard:
+    """Pure ASGI middleware (no BaseHTTPMiddleware: it adds per-request overhead and gets in the
+    way of streaming responses that the client abandons, e.g. when seeking)."""
+
+    def __init__(self, app, base_path: str) -> None:
+        self.app = app
+        self.base_path = base_path
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and _csrf_suspect(Request(scope), self.base_path):
+            response = _error_response(Forbidden(f"send JSON or a {CSRF_HEADER} header"))
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 def _csrf_suspect(request: Request, base_path: str) -> bool:

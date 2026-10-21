@@ -1,0 +1,271 @@
+/* Design tokens. Dark is the default; light via [data-theme="light"] or the system setting. */
+:root {
+  --bg: #111214;
+  --surface-0: #15161a;
+  --surface-1: #1e2026;
+  --surface-2: #2a2d35;
+  --line: #24262d;
+  --text: #ecebe8;
+  --text-muted: #9c9ea6;
+  --text-faint: #62656e;
+  --accent: #e9b872;
+  --accent-contrast: #1a1408;
+  --danger: #d9534f;
+  --ok: #5fb878;
+
+  --radius-sm: 8px;
+  --side-w: 232px;
+  --top-h: 64px;
+  --player-h: 80px;
+  --tabs-h: 58px;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #fbfaf7;
+    --surface-0: #ffffff;
+    --surface-1: #f1efea;
+    --surface-2: #e5e2db;
+    --line: #e8e5df;
+    --text: #1b1b1d;
+    --text-muted: #67676d;
+    --text-faint: #a3a3a8;
+    --accent: #b06d10;
+    --accent-contrast: #ffffff;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #fbfaf7;
+  --surface-0: #ffffff;
+  --surface-1: #f1efea;
+  --surface-2: #e5e2db;
+  --line: #e8e5df;
+  --text: #1b1b1d;
+  --text-muted: #67676d;
+  --text-faint: #a3a3a8;
+  --accent: #b06d10;
+  --accent-contrast: #ffffff;
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --- shared page structure ------------------------------------------------------------- */
+
+.page {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.page.narrow {
+  max-width: 760px;
+}
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 18px;
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  letter-spacing: -0.02em;
+}
+.count {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+.empty {
+  color: var(--text-muted);
+  padding: 8px 24px;
+}
+
+/* --- controls -------------------------------------------------------------------------- */
+
+button {
+  font: inherit;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 20px;
+  border: 1px solid var(--surface-2);
+  background: var(--surface-1);
+  color: var(--text);
+  font-weight: 550;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: var(--text-faint);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+.icon-btn.on {
+  color: var(--accent);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+input:not([type="range"]):not([type="search"]),
+select {
+  height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-2);
+  background: var(--surface-0);
+  color: var(--text);
+  font: inherit;
+}
+select {
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 20px;
+  background: var(--surface-1);
+}
+.segmented button {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.segmented button.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Range inputs (seek bar, volume): thin track, filled up to --p */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--text) var(--p, 0%), var(--surface-2) var(--p, 0%));
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--text) var(--p, 0%), var(--surface-2) var(--p, 0%));
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0;
+}
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+input[type="range"]:hover::-moz-range-thumb,
+input[type="range"]:focus-visible::-moz-range-thumb {
+  opacity: 1;
+}
+input[type="range"]:disabled {
+  cursor: default;
+}
+
+@media (max-width: 560px) {
+  .toolbar {
+    padding: 16px 16px 14px;
+  }
+  .toolbar h1 {
+    font-size: 1.4rem;
+  }
+}

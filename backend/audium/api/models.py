@@ -133,3 +133,13 @@ class InviteCreated(InviteOut):
 class InviteCheck(BaseModel):
     valid: bool
     role: Role
+
+
+class UserSettings(BaseModel):
+    theme: Literal["system", "dark", "light"]
+    stream_quality: Literal["auto", "high", "medium", "low"]
+
+
+class UserSettingsUpdate(BaseModel):
+    theme: Literal["system", "dark", "light"] | None = None
+    stream_quality: Literal["auto", "high", "medium", "low"] | None = None

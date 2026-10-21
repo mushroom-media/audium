@@ -56,3 +56,18 @@ docker exec audium audium loadtest --user admin --password ... --requests 3000 -
 ```
 
 The load test fails (exit code 1) if search p95 exceeds 200 ms or more than 1 % of requests fail.
+
+## Frontend
+
+Svelte 5 + Vite + TypeScript in `frontend/`. The production build is served by the backend from `AUDIUM_WEB_DIR` (in the image: `/opt/audium/web`).
+
+```bash
+cd frontend
+npm ci
+npm run dev      # http://localhost:5173, proxies /api to http://127.0.0.1:8080 (AUDIUM_DEV_BACKEND)
+npm run check    # svelte-check (types)
+npm test         # vitest: queue and format-selection logic
+npm run build    # -> frontend/dist
+```
+
+Layout: `src/lib/` holds the API client, router, player and pure logic (`queue.ts`, `playback.ts`, unit-tested); `src/lib/components/` the building blocks (`VirtualList`, `VirtualGrid`, `PlayerBar`, ...); `src/routes/` the pages.

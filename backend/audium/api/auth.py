@@ -24,11 +24,14 @@ from audium.api.models import (
     TokenCreated,
     TokenOut,
     UserOut,
+    UserSettings,
+    UserSettingsUpdate,
 )
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.errors import Forbidden, Unauthorized
 from audium.services import auth as auth_service
+from audium.services import settings as settings_service
 from audium.services import users as user_service
 from audium.services.users import User
 
@@ -191,3 +194,15 @@ def register(
         )
     set_session_cookie(response, request, settings, session.token)
     return _user_out(user)
+
+
+@router.get("/auth/me/settings", response_model=UserSettings)
+def my_settings(user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        return settings_service.get_settings(conn, user.id)
+
+
+@router.patch("/auth/me/settings", response_model=UserSettings)
+def update_my_settings(body: UserSettingsUpdate, user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        return settings_service.update_settings(conn, user.id, body.model_dump(exclude_none=True))

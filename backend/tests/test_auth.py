@@ -262,3 +262,17 @@ def test_revoked_and_invalid_invites(admin_client, make_client):
     guest = make_client()
     assert guest.get(f"/api/v1/invites/{created['token']}").status_code == 404
     assert guest.get("/api/v1/invites/made-up").status_code == 404
+
+
+def test_user_settings_are_per_user(make_client, admin, db):
+    create_user(db, "bob", USER_PW)
+    a, b = make_client(), make_client()
+    login(a, "admin", ADMIN_PW)
+    login(b, "bob", USER_PW)
+    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "system", "stream_quality": "auto"}
+    r = a.patch("/api/v1/auth/me/settings", json={"theme": "light"})
+    assert r.json() == {"theme": "light", "stream_quality": "auto"}
+    a.patch("/api/v1/auth/me/settings", json={"stream_quality": "low"})
+    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "light", "stream_quality": "low"}
+    assert b.get("/api/v1/auth/me/settings").json()["theme"] == "system"
+    assert a.patch("/api/v1/auth/me/settings", json={"theme": "pink"}).status_code == 422

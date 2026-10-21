@@ -2,18 +2,18 @@
 
 Self-hosted music streaming for your own library: one Docker container, built for large collections (100,000+ tracks) on a home server or NAS. No cloud, no telemetry, works offline in your LAN.
 
-> **Status: early development (phase 1 of 5).** Library scanning, accounts and the REST API work. Playback UI, playlists and auto-playlists follow. See [docs/plan.md](docs/plan.md).
+> **Status: early development (phase 2 of 5).** Library scanning, accounts, the REST API, streaming and the web player work. Playlists, sharing and auto-playlists follow. See [docs/plan.md](docs/plan.md).
 
 ## Quickstart
 
 ```bash
 git clone <repository-url> audium && cd audium
-# edit the music path in docker-compose.yml, then:
+cp .env.example .env    # set AUDIUM_MUSIC_PATH (port: AUDIUM_HOST_PORT, default 8091)
 docker compose up -d --build
 docker compose logs audium | grep setup_token
 ```
 
-Create your admin account with the setup token from the log. Until the web UI lands (phase 2), use the interactive API docs at `http://<server>:8080/api/docs` (`POST /api/v1/setup`). audium scans your music in the background; the API is usable while it runs.
+Open `http://<server>:8091`, enter the setup token from the log and create your admin account. audium scans your music in the background; you can browse and listen while it runs.
 
 Prefer to skip the token? Set `AUDIUM_ADMIN_USER` and `AUDIUM_ADMIN_PASSWORD` for the first start.
 
@@ -37,6 +37,8 @@ Each folder directly below `/music` becomes a library folder. If a network share
 - **Covers:** extracted once (embedded or `cover.jpg`/`folder.jpg`), cached as WebP in 64/256/600 px.
 - **Fast API at scale:** paginated lists, full-text prefix search, OpenAPI docs at `/api/docs`.
 - **Accounts:** first user is admin, invites, argon2id passwords, login rate limiting, API tokens.
+- **Streaming:** original files with HTTP Range (instant seeking, little RAM); formats the browser cannot play (WMA, APE, ...) are transcoded on the fly with ffmpeg to Opus/AAC/MP3. Lower streaming quality per user for slow connections.
+- **Web player:** virtual scrolling through 100k+ tracks, search as you type, persistent player with queue, shuffle, repeat, keyboard shortcuts and Media Session (lock screen, Bluetooth and media keys).
 
 ## Configuration
 

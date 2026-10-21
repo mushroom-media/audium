@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     cookie_secure: Literal["auto", "true", "false"] = "auto"
     access_log: bool = False
     api_db_readers: int = 1
+    web_dir: Path = Path("/opt/audium/web")
+    max_transcodes: int = 4
 
     # Logging
     log_level: str = "info"
