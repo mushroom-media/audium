@@ -1,5 +1,10 @@
-// The persistent player. One <audio> element lives outside the page tree, so playback
+// The persistent player. Its <audio> elements live outside the page tree, so playback
 // continues while navigating. Queue logic is in queue.ts, format choice in playback.ts.
+//
+// Near-gapless: a second element preloads the next track shortly before the current one ends;
+// on "ended" the elements swap and the already-buffered next track starts at once. That removes
+// the loading gap (typically 100-500 ms over a network). Sample-exact gapless playback (live
+// albums) would need Web Audio/MSE with encoder-delay trimming; see docs/decisions.md D26.
 
 import { coverUrl, post, streamUrl, type StreamQuality, type Track } from "./api";
 import { browserCanPlay, chooseSource, type Format } from "./playback";
@@ -10,6 +15,7 @@ const MAX_STORED_TRACKS = 1000;
 const RESTART_THRESHOLD_S = 3;
 // A play counts (history) after 30 s, or half of a shorter track.
 const SCROBBLE_AFTER_S = 30;
+const PRELOAD_BEFORE_END_S = 20;
 
 class Player {
   queue = $state<Q.Queue>(Q.empty);
@@ -25,7 +31,10 @@ class Player {
 
   current = $derived(Q.current(this.queue));
 
-  #audio: HTMLAudioElement | null = null;
+  #audio: HTMLAudioElement | null = null; // the element that is playing
+  #spare: HTMLAudioElement | null = null; // preloads the next track
+  #spareId: number | null = null;
+  #spareFormat: Format = "raw";
   #canPlay = browserCanPlay();
   #format: Format = "raw";
   #offset = 0; // start offset of a transcoded stream, in seconds
@@ -36,32 +45,49 @@ class Player {
 
   init() {
     if (this.#audio) return;
-    const a = new Audio();
+    this.#audio = this.#wire(new Audio());
+    this.#spare = this.#wire(new Audio());
+    this.#restore();
+    this.#applyVolume();
+    this.#setupMediaSession();
+  }
+
+  /** Listeners for one element; events of the element that is not playing are ignored. */
+  #wire(a: HTMLAudioElement): HTMLAudioElement {
     a.preload = "auto";
-    this.#audio = a;
-    a.addEventListener("timeupdate", () => {
+    const on = (type: string, fn: () => void) =>
+      a.addEventListener(type, () => {
+        if (a === this.#audio) fn();
+      });
+    on("timeupdate", () => {
       this.position = this.#offset + a.currentTime;
       this.#maybeReport();
+      this.#maybePreload();
       this.#updatePositionState();
       this.#scheduleSave();
     });
-    a.addEventListener("durationchange", () => this.#updateDuration());
-    a.addEventListener("play", () => (this.playing = true));
-    a.addEventListener("pause", () => (this.playing = false));
-    a.addEventListener("waiting", () => (this.buffering = true));
-    a.addEventListener("playing", () => {
+    on("durationchange", () => this.#updateDuration());
+    on("play", () => (this.playing = true));
+    on("pause", () => (this.playing = false));
+    on("waiting", () => (this.buffering = true));
+    on("playing", () => {
       this.buffering = false;
       this.error = null;
     });
-    a.addEventListener("ended", () => {
+    on("ended", () => {
       this.#maybeReport(true); // a track that played to the end always counts
       this.#advance(true);
     });
-    a.addEventListener("error", () => this.#onError());
-    this.#restore();
-    a.volume = this.volume;
-    a.muted = this.muted;
-    this.#setupMediaSession();
+    on("error", () => this.#onError());
+    return a;
+  }
+
+  #applyVolume() {
+    for (const el of [this.#audio, this.#spare]) {
+      if (!el) continue;
+      el.volume = this.volume;
+      el.muted = this.muted;
+    }
   }
 
   // --- starting playback -------------------------------------------------------------------
@@ -133,14 +159,14 @@ class Player {
 
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(1, v));
-    if (this.#audio) this.#audio.volume = this.volume;
+    this.#applyVolume();
     if (this.volume > 0 && this.muted) this.setMuted(false);
     this.#scheduleSave();
   }
 
   setMuted(m: boolean) {
     this.muted = m;
-    if (this.#audio) this.#audio.muted = m;
+    this.#applyVolume();
     this.#scheduleSave();
   }
 
@@ -170,9 +196,11 @@ class Player {
   }
 
   #load(autoplay: boolean, startAt = 0, forceTranscode = false) {
-    const a = this.#audio;
     const track = this.current;
-    if (!a || !track) return;
+    if (!this.#audio || !track) return;
+    if (startAt === 0 && !forceTranscode && this.#swapIn(track, autoplay)) return;
+    this.#clearSpare();
+    const a = this.#audio;
     if (this.#loadedId !== track.id) {
       this.#fallbackTried = false;
       this.#reported = false;
@@ -199,6 +227,55 @@ class Player {
     this.#updateMetadata(track);
     if (autoplay) a.play().catch((e) => this.#playFailed(e));
     this.#scheduleSave();
+  }
+
+  /** Start loading the next track into the spare element, shortly before this one ends. */
+  #maybePreload() {
+    if (this.#spareId !== null || !this.#spare || !this.duration || !this.playing) return;
+    if (this.duration - this.position > PRELOAD_BEFORE_END_S) return;
+    const nextQ = Q.next(this.queue, true);
+    const next = nextQ ? Q.current(nextQ) : null;
+    if (!next || next.id === this.current?.id) return; // repeat-one restarts the same element
+    const choice = chooseSource(next, this.quality, this.#canPlay);
+    this.#spare.src = choice.format === "raw" ? streamUrl(next.id, "raw") : streamUrl(next.id, choice.format, choice.kbps);
+    this.#spare.load();
+    this.#spareId = next.id;
+    this.#spareFormat = choice.format;
+  }
+
+  #clearSpare() {
+    if (this.#spare && this.#spareId !== null) {
+      this.#spare.removeAttribute("src");
+      this.#spare.load();
+    }
+    this.#spareId = null;
+  }
+
+  /** If `track` is already buffered in the spare element, make that the playing one. */
+  #swapIn(track: Track, autoplay: boolean): boolean {
+    const next = this.#spare;
+    const old = this.#audio;
+    if (!next || !old || this.#spareId !== track.id) return false;
+    this.#audio = next;
+    this.#spare = old;
+    this.#spareId = null;
+    this.#format = this.#spareFormat;
+    this.#offset = 0;
+    this.#loadedId = track.id;
+    this.#fallbackTried = false;
+    this.#reported = false;
+    this.error = null;
+    old.pause();
+    old.removeAttribute("src");
+    old.load();
+    this.#applyVolume();
+    this.position = 0;
+    this.duration = track.duration_ms / 1000;
+    this.#updateMetadata(track);
+    if (autoplay) next.play().catch((e) => this.#playFailed(e));
+    else this.playing = false;
+    this.#scheduleSave();
+    return true;
   }
 
   #maybeReport(finished = false) {

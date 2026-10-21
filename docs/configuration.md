@@ -72,5 +72,7 @@ Mount each share as its own folder below `/music` (`/music/nas`, `/music/usb`). 
 
 ## Reverse proxy notes
 
+Complete examples for Caddy, nginx and Traefik, and why HTTPS matters for installing the app: [reverse-proxy.md](reverse-proxy.md).
+
 - Live updates use Server-Sent Events on `/api/v1/events` (a long-lived HTTP response). audium sends `X-Accel-Buffering: no`, which nginx honours; with other proxies, disable response buffering for that path and allow idle connections of at least 30 s (audium sends a keep-alive every 15 s).
 - Streaming uses HTTP Range requests; the proxy must pass the `Range` header through (nginx and Caddy do by default).

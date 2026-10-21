@@ -1,12 +1,16 @@
 """Serves the built single-page app (frontend/dist) from the same container as the API."""
 
 import json
+import mimetypes
 import os
 from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("text/javascript", ".js")
 
 _IMMUTABLE = "public, max-age=31536000, immutable"
 _NO_CACHE = "no-cache"

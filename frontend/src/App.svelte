@@ -26,6 +26,7 @@
   import Playlist from "./routes/Playlist.svelte";
   import Search from "./routes/Search.svelte";
   import Settings from "./routes/Settings.svelte";
+  import Admin from "./routes/Admin.svelte";
   import Tracks from "./routes/Tracks.svelte";
 
   defineRoutes({
@@ -42,6 +43,7 @@
     favorites: "/favorites",
     search: "/search",
     settings: "/settings",
+    admin: "/admin",
     login: "/login",
     setup: "/setup",
     invite: "/invite/:token",
@@ -190,6 +192,7 @@
           </a>
         {/each}
       </div>
+      {#if session.user?.role === "admin"}<a href={href("/admin")} class:active={active("admin")}><Icon name="list" /> <span>Verwaltung</span></a>{/if}
       <a href={href("/settings")} class:active={active("settings")}><Icon name="settings" /> <span>Einstellungen</span></a>
     </nav>
 
@@ -220,6 +223,7 @@
         {:else if router.route.name === "tracks"}<Tracks />
         {:else if router.route.name === "search"}<Search />
         {:else if router.route.name === "settings"}<Settings />
+        {:else if router.route.name === "admin" && session.user?.role === "admin"}<Admin />
         {:else if router.route.name === "playlist"}<Playlist id={router.route.params.id} />
         {:else if router.route.name === "favorites"}<Favorites />
         {:else if router.route.name === "discover"}<Discover />

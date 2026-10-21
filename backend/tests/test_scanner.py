@@ -479,3 +479,46 @@ def test_scan_with_reader_processes(library, db):
     stats = library.scan()
     assert stats.added == 12 and stats.covers_added == 12
     assert {t.title for t in _tracks(db)} == {f"T{i}" for i in range(12)}
+
+
+@pytest.mark.parametrize("with_ffprobe", [True, False])
+def test_unknown_container_falls_back_to_ffmpeg(tmp_path, monkeypatch, with_ffprobe):
+    """MKA is not supported by mutagen; ffprobe or (in the image) plain `ffmpeg -i` fill in."""
+    import shutil as sh
+    import subprocess
+
+    from audium.scanner import tags as tags_module
+
+    path = tmp_path / "song.mka"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-ac",
+            "2",
+            "-c:a",
+            "libopus",
+            "-metadata",
+            "title=Matroska Song",
+            "-metadata",
+            "artist=Mkv Artist",
+            "-metadata",
+            "album=Containers",
+            str(path),
+        ],
+        check=True,
+    )
+    if not with_ffprobe:
+        real = sh.which
+        monkeypatch.setattr(tags_module.shutil, "which", lambda name: None if name == "ffprobe" else real(name))
+    meta = read_track(str(path))
+    assert meta.codec == "opus"
+    assert 1900 <= meta.duration_ms <= 2200
+    assert meta.channels == 2
+    assert (meta.title, meta.artists, meta.album) == ("Matroska Song", ["Mkv Artist"], "Containers")

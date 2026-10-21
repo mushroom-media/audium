@@ -132,6 +132,7 @@
   {#if isAdmin}
     <section>
       <h2>Bibliothek</h2>
+      <p><a href={href("/admin")}>Ordner, Nutzer und Jobs verwalten →</a></p>
       {#if stats}
         <p class="stats">
           {plural(stats.tracks, "Titel", "Titel")} · {plural(stats.albums, "Album", "Alben")} · {plural(stats.artists, "Künstler", "Künstler")}
@@ -150,7 +151,7 @@
       </ul>
       <p class="note">
         audium sieht nur Ordner, die in den Container unter <code>/music</code> eingebunden sind. Weitere Ordner fügst du in
-        <code>docker-compose.yml</code> hinzu. Die Ordnerverwaltung kommt in einer späteren Version.
+        <code>docker-compose.yml</code> hinzu. Ordner, Nutzer und Jobs verwaltest du unter <a href={href("/admin")}>Verwaltung</a>.
       </p>
       <div class="scan">
         {#if running && job}

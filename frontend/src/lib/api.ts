@@ -1,5 +1,7 @@
 // Typed client for the audium REST API (see /api/docs for the full schema).
 
+import { germanMessage } from "./errors";
+
 declare global {
   interface Window {
     __AUDIUM__?: { basePath: string };
@@ -84,6 +86,8 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public retryAfter?: number,
+    /** The server's original (English) message. */
+    public serverMessage = message,
   ) {
     super(message);
   }
@@ -127,11 +131,12 @@ export async function request<T>(
       const data = await res.json();
       code = data?.error?.code ?? code;
       message = data?.error?.message ?? (typeof data?.detail === "string" ? data.detail : message);
+      if (res.status === 422 && Array.isArray(data?.detail)) message = "Ungültige Eingabe.";
     } catch {
       /* non-JSON error body */
     }
     if (res.status === 401 && onUnauthorized) onUnauthorized();
-    throw new ApiError(res.status, code, message, Number(res.headers.get("Retry-After")) || undefined);
+    throw new ApiError(res.status, code, germanMessage(message), Number(res.headers.get("Retry-After")) || undefined, message);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }

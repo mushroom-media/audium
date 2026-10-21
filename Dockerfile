@@ -2,6 +2,7 @@
 #
 # Stages:
 #   frontend builds the Svelte app (static files only, no Node.js in the final image)
+#   ffmpeg   static ffmpeg (~80 MB instead of ~460 MB from Debian)
 #   base     Python + ffmpeg + tini (shared by everything below)
 #   builder  installs audium and its dependencies into /opt/venv
 #   dev      builder venv + test tools; source is mounted at /src (see docker-compose.dev.yml)
@@ -9,8 +10,12 @@
 
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=24
+ARG FFMPEG_IMAGE=mwader/static-ffmpeg:7.1
 
-FROM node:${NODE_VERSION}-bookworm-slim AS frontend
+FROM ${FFMPEG_IMAGE} AS ffmpeg
+
+# Static files are the same on every platform: build them natively, not under QEMU emulation.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm-slim AS frontend
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -24,8 +29,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 # Timeouts + retries: a stalled mirror connection fails and retries instead of hanging the build.
 RUN apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update \
- && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg tini \
+ && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends tini \
  && rm -rf /var/lib/apt/lists/*
+# Only ffmpeg: the tag fallback parses `ffmpeg -i`, a static ffprobe would add another 130 MB.
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/
 
 FROM base AS builder
 WORKDIR /build

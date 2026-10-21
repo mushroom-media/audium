@@ -409,11 +409,68 @@ def _stream_info(audio, meta: TrackMeta) -> None:
     meta.codec, meta.container = codec_for(audio)
 
 
-def _probe(path: str, meta: TrackMeta) -> None:
-    """Last resort for files mutagen cannot parse (and containers it does not know, e.g. MKA)."""
+_INPUT_RE = re.compile(r"^Input #0, ([^,\s]+)", re.M)
+_DURATION_RE = re.compile(r"Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)")
+_BITRATE_RE = re.compile(r"Duration: [^\n]*bitrate: (\d+) kb/s")
+_AUDIO_RE = re.compile(r"Stream #0:\d+[^:]*: Audio: (\w+)[^,\n]*(?:, (\d+) Hz)?(?:, ([^,\n]+))?")
+_TAG_RE = re.compile(r"^    (\S[^:\n]*?)\s*: (.*)$", re.M)
+_LAYOUT_CHANNELS = {"mono": 1, "stereo": 2, "2.1": 3, "quad": 4, "5.0": 5, "5.1": 6, "7.1": 8}
+
+
+def _ffmpeg_info(path: str) -> dict | None:
+    """The subset of `ffprobe -show_format -show_streams` we need, parsed from `ffmpeg -i`.
+
+    The image ships only the ffmpeg binary (a static ffprobe would add another 130 MB). ffmpeg
+    prints the same container/stream/tag summary to stderr before complaining that no output
+    file was given."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    try:
+        out = subprocess.run(
+            [ffmpeg, "-hide_banner", "-nostdin", "-i", path],
+            capture_output=True,
+            timeout=_FFPROBE_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = out.stderr.decode("utf-8", errors="replace")
+    audio = _AUDIO_RE.search(text)
+    if not audio:
+        return None
+    duration = 0.0
+    if m := _DURATION_RE.search(text):
+        h, mnt, s = m.groups()
+        duration = int(h) * 3600 + int(mnt) * 60 + float(s)
+    head = text[: text.find("Duration:")] if "Duration:" in text else ""
+    tags = {k: v.strip() for k, v in _TAG_RE.findall(head)}
+    layout = (audio.group(3) or "").split("(")[0].strip()
+    bitrate = _BITRATE_RE.search(text)
+    fmt = _INPUT_RE.search(text)
+    return {
+        "format": {
+            "format_name": fmt.group(1) if fmt else None,
+            "duration": duration,
+            "bit_rate": int(bitrate.group(1)) * 1000 if bitrate else None,
+            "tags": tags,
+        },
+        "streams": [
+            {
+                "codec_type": "audio",
+                "codec_name": audio.group(1),
+                "sample_rate": audio.group(2),
+                "channels": _LAYOUT_CHANNELS.get(layout),
+                "tags": {},
+            }
+        ],
+    }
+
+
+def _ffprobe_info(path: str) -> dict | None:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
-        return
+        return None
     try:
         out = subprocess.run(
             [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
@@ -421,8 +478,15 @@ def _probe(path: str, meta: TrackMeta) -> None:
             timeout=_FFPROBE_TIMEOUT_S,
             check=False,
         )
-        data = json.loads(out.stdout or b"{}")
+        return json.loads(out.stdout or b"{}")
     except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _probe(path: str, meta: TrackMeta) -> None:
+    """Last resort for files mutagen cannot parse (and containers it does not know, e.g. MKA)."""
+    data = _ffprobe_info(path) or _ffmpeg_info(path)
+    if not data:
         return
     stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), None)
     if stream is None:
