@@ -1,6 +1,7 @@
 // The current user's own data: playlists they can see, favorites, and live updates (SSE).
 
 import { basePath, del, get, post, put, type Playlist, type Track } from "./api";
+import { promptText } from "./ui.svelte";
 
 export const mine = $state({
   playlists: [] as Playlist[],
@@ -90,4 +91,10 @@ export function disconnectEvents() {
 export async function loadMine() {
   await Promise.all([loadPlaylists(), loadFavorites()]);
   connectEvents();
+}
+
+/** "New playlist" from anywhere (sidebar on desktop, start page on phones). */
+export async function newPlaylistFlow(): Promise<Playlist | null> {
+  const name = await promptText("Neue Playlist", "", "Erstellen");
+  return name ? createPlaylist(name) : null;
 }

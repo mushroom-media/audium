@@ -85,7 +85,7 @@
 {/if}
 
 {#if ui.share && playlist}
-  <Modal title="„{playlist.name}“ teilen" onclose={() => (ui.share = null)}>
+  <Modal title="„{playlist.name}“ teilen" width={520} onclose={() => (ui.share = null)}>
     <label class="switch">
       <input type="checkbox" checked={playlist.visibility === "users"} onchange={(e) => setVisibility(e.currentTarget.checked ? "users" : "private")} />
       <span>

@@ -4,8 +4,9 @@
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import { plural } from "../lib/format";
-  import { mine } from "../lib/mine.svelte";
-  import { href } from "../lib/router.svelte";
+  import { mine, newPlaylistFlow } from "../lib/mine.svelte";
+  import { href, navigate } from "../lib/router.svelte";
+  import { ui } from "../lib/ui.svelte";
   import { session } from "../lib/session.svelte";
 
   let recent = $state<Album[] | null>(null);
@@ -21,6 +22,11 @@
       .catch(() => {});
     return () => ctrl.abort();
   });
+
+  async function newPlaylist() {
+    const pl = await newPlaylistFlow();
+    if (pl) navigate(`/playlists/${pl.id}`);
+  }
 
   const greeting = $derived.by(() => {
     const h = new Date().getHours();
@@ -40,6 +46,10 @@
 
   <div class="section-head">
     <h2>Playlists</h2>
+    <span class="head-actions">
+      <button class="btn ghost small" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={16} /> Smart</button>
+      <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> Neu</button>
+    </span>
   </div>
   <div class="lists">
     <a class="list" href={href("/favorites")}>
@@ -89,6 +99,15 @@
     color: var(--text-muted);
     font-size: 0.88rem;
     text-decoration: none;
+  }
+  .head-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .small {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.85rem;
   }
   .section-head a:hover {
     color: var(--text);

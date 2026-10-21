@@ -108,7 +108,7 @@
   const display = (v: unknown) => (typeof v === "number" ? v : Number(v));
 </script>
 
-<Modal {title} {onclose}>
+<Modal {title} {onclose} width={680}>
   <div class="editor">
     {#if askName}
       <label class="name">Name<input bind:value={name} maxlength="200" placeholder="z. B. Schnelle 90er" /></label>
@@ -194,7 +194,16 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    width: min(620px, calc(100vw - 80px));
+    min-width: 0;
+  }
+  .editor :global(input:not([type="range"]):not([type="checkbox"]):not([type="radio"])),
+  .editor :global(select) {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .name input {
+    width: 100%;
   }
   .name {
     display: flex;
@@ -275,12 +284,20 @@
     justify-content: flex-end;
     gap: 10px;
   }
-  @media (max-width: 600px) {
+  /* Narrow screens: field + operator side by side, the value on its own row below. */
+  @media (max-width: 640px) {
     .cond {
-      grid-template-columns: 1fr 1fr 36px;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
     }
     .value {
       grid-column: 1 / 3;
+      grid-row: 2;
+    }
+    .row {
+      flex-direction: column;
+      gap: 8px;
     }
   }
 </style>

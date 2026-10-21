@@ -8,9 +8,9 @@
   import QueuePanel from "./lib/components/QueuePanel.svelte";
   import { player } from "./lib/player.svelte";
   import { defineRoutes, href, navigate, router, startRouter } from "./lib/router.svelte";
-  import { createPlaylist, disconnectEvents, loadMine, mine } from "./lib/mine.svelte";
+  import { disconnectEvents, loadMine, mine, newPlaylistFlow } from "./lib/mine.svelte";
   import { loadSession, session } from "./lib/session.svelte";
-  import { promptText } from "./lib/ui.svelte";
+  import { ui } from "./lib/ui.svelte";
   import RuleEditor from "./lib/components/RuleEditor.svelte";
   import { post, type Playlist as PlaylistT, type Rule } from "./lib/api";
   import Album from "./routes/Album.svelte";
@@ -88,19 +88,16 @@
     else disconnectEvents();
   });
 
-  let smartEditor = $state(false);
   async function createSmart(name: string, rule: Rule) {
     const pl = await post<PlaylistT>("/playlists", { name, rule });
-    smartEditor = false;
+    ui.smartEditor = false;
     await loadMine();
     navigate(`/playlists/${pl.id}`);
   }
 
   async function newPlaylist() {
-    const name = await promptText("Neue Playlist", "", "Erstellen");
-    if (!name) return;
-    const pl = await createPlaylist(name);
-    navigate(`/playlists/${pl.id}`);
+    const pl = await newPlaylistFlow();
+    if (pl) navigate(`/playlists/${pl.id}`);
   }
 
   $effect(() => {
@@ -177,7 +174,7 @@
       <div class="side-head">
         <span>Playlists</span>
         <span class="side-btns">
-          <button class="icon-btn" title="Neue Smart-Playlist (füllt sich nach Regeln)" aria-label="Neue Smart-Playlist" onclick={() => (smartEditor = true)}><Icon name="spark" size={17} /></button>
+          <button class="icon-btn" title="Neue Smart-Playlist (füllt sich nach Regeln)" aria-label="Neue Smart-Playlist" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={17} /></button>
           <button class="icon-btn" title="Neue Playlist" aria-label="Neue Playlist" onclick={newPlaylist}><Icon name="plus" size={18} /></button>
         </span>
       </div>
@@ -238,8 +235,8 @@
     <div class="player"><PlayerBar /></div>
 
     <Overlays />
-    {#if smartEditor}
-      <RuleEditor title="Neue Smart-Playlist" onsave={createSmart} onclose={() => (smartEditor = false)} />
+    {#if ui.smartEditor}
+      <RuleEditor title="Neue Smart-Playlist" onsave={createSmart} onclose={() => (ui.smartEditor = false)} />
     {/if}
 
     <nav class="tabs" aria-label="Navigation">
