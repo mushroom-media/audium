@@ -20,6 +20,12 @@
     plus: "M12 5v14M5 12h14",
     more: "M6 12h.01M12 12h.01M18 12h.01",
     back: "M15 5l-7 7 7 7",
+    heart: "M12 20s-7.5-4.6-9.2-9.3C1.6 7.4 3.7 4.5 6.9 4.5c2 0 3.5 1.1 4.3 2.5h1.6c.8-1.4 2.3-2.5 4.3-2.5 3.2 0 5.3 2.9 4.1 6.2C19.5 15.4 12 20 12 20Z",
+    share: "M8 12h8M14 8l4 4-4 4M6 5H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h1",
+    edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
+    trash: "M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13",
+    drag: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
+    list: "M5 6h14M5 12h14M5 18h9",
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>

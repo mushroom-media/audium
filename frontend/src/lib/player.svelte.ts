@@ -1,13 +1,15 @@
 // The persistent player. One <audio> element lives outside the page tree, so playback
 // continues while navigating. Queue logic is in queue.ts, format choice in playback.ts.
 
-import { coverUrl, streamUrl, type StreamQuality, type Track } from "./api";
+import { coverUrl, post, streamUrl, type StreamQuality, type Track } from "./api";
 import { browserCanPlay, chooseSource, type Format } from "./playback";
 import * as Q from "./queue";
 
 const STORAGE_KEY = "audium.player";
 const MAX_STORED_TRACKS = 1000;
 const RESTART_THRESHOLD_S = 3;
+// A play counts (history) after 30 s, or half of a shorter track.
+const SCROBBLE_AFTER_S = 30;
 
 class Player {
   queue = $state<Q.Queue>(Q.empty);
@@ -30,6 +32,7 @@ class Player {
   #loadedId: number | null = null;
   #fallbackTried = false;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
+  #reported = false;
 
   init() {
     if (this.#audio) return;
@@ -38,6 +41,7 @@ class Player {
     this.#audio = a;
     a.addEventListener("timeupdate", () => {
       this.position = this.#offset + a.currentTime;
+      this.#maybeReport();
       this.#updatePositionState();
       this.#scheduleSave();
     });
@@ -49,7 +53,10 @@ class Player {
       this.buffering = false;
       this.error = null;
     });
-    a.addEventListener("ended", () => this.#advance(true));
+    a.addEventListener("ended", () => {
+      this.#maybeReport(true); // a track that played to the end always counts
+      this.#advance(true);
+    });
     a.addEventListener("error", () => this.#onError());
     this.#restore();
     a.volume = this.volume;
@@ -166,7 +173,12 @@ class Player {
     const a = this.#audio;
     const track = this.current;
     if (!a || !track) return;
-    if (this.#loadedId !== track.id) this.#fallbackTried = false;
+    if (this.#loadedId !== track.id) {
+      this.#fallbackTried = false;
+      this.#reported = false;
+    } else if (startAt === 0) {
+      this.#reported = false; // replaying the same track (repeat one) counts again
+    }
     const choice = forceTranscode
       ? chooseSource({ codec: null, bitrate: null }, "auto", this.#canPlay)
       : chooseSource(track, this.quality, this.#canPlay);
@@ -187,6 +199,19 @@ class Player {
     this.#updateMetadata(track);
     if (autoplay) a.play().catch((e) => this.#playFailed(e));
     this.#scheduleSave();
+  }
+
+  #maybeReport(finished = false) {
+    const t = this.current;
+    if (this.#reported || !t) return;
+    if (!finished) {
+      const half = t.duration_ms > 0 ? (t.duration_ms / 1000) * 0.5 : SCROBBLE_AFTER_S;
+      if (!this.playing || this.position < Math.min(SCROBBLE_AFTER_S, half)) return;
+    }
+    this.#reported = true;
+    post("/history", { track_id: t.id, played_ms: Math.round(this.position * 1000) }).catch(() => {
+      /* offline or logged out: history is best effort */
+    });
   }
 
   #updateDuration() {

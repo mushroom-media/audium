@@ -292,3 +292,88 @@ jobs = Table(
     Index(None, "queue", "status", "priority", "run_after"),
     Index(None, "dedupe_key"),
 )
+
+# --- Playlists, favorites, history (migration 0002) -----------------------------------------
+
+playlists = Table(
+    "playlists",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("owner_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("description", Text),
+    Column("visibility", Text, nullable=False, default="private"),  # private | users
+    Column("kind", Text, nullable=False, default="manual"),  # manual | smart | frozen_auto (phase 4)
+    Column("rule_json", Text),  # smart playlists (phase 4)
+    Column("version", Integer, nullable=False, default=1),  # +1 on every change
+    Column("item_count", Integer, nullable=False, default=0),
+    Column("duration_ms", BigInteger, nullable=False, default=0),
+    Column("cover_hash", Text),  # cover of the first track, denormalized for lists
+    Column("created_at", BigInteger, nullable=False),
+    Column("updated_at", BigInteger, nullable=False),
+    Index(None, "owner_id"),
+    Index(None, "visibility"),
+)
+
+playlist_items = Table(
+    "playlist_items",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("playlist_id", Integer, ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False),
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    # Server-assigned, with gaps (see services/playlists.py). Ties are broken by id.
+    Column("position", BigInteger, nullable=False),
+    Column("added_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("added_at", BigInteger, nullable=False),
+    Index(None, "playlist_id", "position", "id"),
+    Index(None, "track_id"),
+)
+
+playlist_shares = Table(
+    "playlist_shares",
+    metadata,
+    Column("playlist_id", Integer, ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("role", Text, nullable=False),  # viewer | editor
+    Column("created_at", BigInteger, nullable=False),
+    PrimaryKeyConstraint("playlist_id", "user_id"),
+    Index(None, "user_id"),
+)
+
+# Change log for live updates and catch-up after a reconnect (SSE Last-Event-ID). No foreign
+# key: the "deleted" event must outlive its playlist. Old rows are pruned.
+playlist_events = Table(
+    "playlist_events",
+    metadata,
+    Column("seq", Integer, primary_key=True),
+    Column("playlist_id", Integer, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("actor_id", Integer),
+    Column("version", Integer, nullable=False),
+    Column("recipients_json", Text, nullable=False),  # user ids, or "*" for everyone
+    Column("at", BigInteger, nullable=False),
+    Index(None, "at"),
+)
+
+favorites = Table(
+    "favorites",
+    metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("item_type", Text, nullable=False),  # track | album | artist
+    Column("item_id", Integer, nullable=False),
+    Column("created_at", BigInteger, nullable=False),
+    PrimaryKeyConstraint("user_id", "item_type", "item_id"),
+    Index(None, "user_id", "item_type", "created_at"),
+)
+
+play_history = Table(
+    "play_history",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("played_at", BigInteger, nullable=False),
+    Column("played_ms", Integer, nullable=False, default=0),
+    Index(None, "user_id", "played_at"),
+    Index(None, "track_id"),
+)

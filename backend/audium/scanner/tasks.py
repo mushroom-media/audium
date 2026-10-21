@@ -12,6 +12,7 @@ from audium.logging import get_logger
 from audium.scanner.covers import CoverStore
 from audium.scanner.scan import Scanner
 from audium.services import auth as auth_service
+from audium.services import playlists as playlist_service
 from audium.services import roots as root_service
 from audium.util import now_ms
 
@@ -86,4 +87,5 @@ class ScanScheduler:
                 auth_service.prune_sessions(conn)
                 ratelimit.prune(conn, now, self.settings.login_window_minutes * 60_000)
                 jobq.prune_finished(conn, _JOB_RETENTION_MS)
+                playlist_service.prune_events(conn)
                 set_state(conn, _LAST_MAINTENANCE, str(now))

@@ -152,3 +152,43 @@ export function streamUrl(trackId: number, format: "raw" | "opus" | "aac" | "mp3
     t: start > 0 ? start.toFixed(2) : undefined,
   })}`;
 }
+
+export interface UserRef {
+  id: number;
+  username: string;
+  display_name: string;
+}
+
+export type PlaylistRole = "owner" | "editor" | "viewer";
+
+export interface Playlist {
+  id: number;
+  name: string;
+  description: string | null;
+  visibility: "private" | "users";
+  kind: string;
+  owner: UserRef;
+  role: PlaylistRole;
+  version: number;
+  item_count: number;
+  duration_ms: number;
+  cover: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PlaylistItem {
+  item_id: number;
+  added_by: number | null;
+  added_at: number;
+  available: boolean;
+  track: Track;
+}
+
+export interface Share {
+  user: UserRef;
+  role: "viewer" | "editor";
+}
+
+export const put = <T>(path: string, body?: unknown) => request<T>("PUT", path, { body: body ?? {} });
+export const del = <T>(path: string) => request<T>("DELETE", path);

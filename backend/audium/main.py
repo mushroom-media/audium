@@ -1,12 +1,14 @@
 """FastAPI application factory."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from audium import __version__
-from audium.api import admin_library, admin_users, auth, library, stream, system, web
+from audium.api import admin_library, admin_users, auth, events, library, personal, playlists, stream, system, web
+from audium.api.eventbus import EventBus
 from audium.config import Settings
 from audium.db.counts import CountCache
 from audium.db.engine import Database
@@ -23,8 +25,11 @@ CSRF_HEADER = "x-requested-with"
 def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     db = db or Database(settings.db_url, read_concurrency=settings.api_db_readers)
 
+    bus = EventBus()
+
     @asynccontextmanager
     async def lifespan(_app):
+        bus.bind(asyncio.get_running_loop())
         with db.write() as conn:
             token = auth_service.bootstrap(conn, settings)
         if token:
@@ -49,9 +54,20 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     api.state.db = db
     api.state.counts = CountCache()
     api.state.transcoder = Transcoder(settings.max_transcodes)
+    api.state.bus = bus
 
     api.include_router(system.router, prefix="/api")
-    for r in (auth.router, library.router, stream.router, admin_users.router, admin_library.router):
+    routers = (
+        auth.router,
+        library.router,
+        stream.router,
+        playlists.router,
+        personal.router,
+        events.router,
+        admin_users.router,
+        admin_library.router,
+    )
+    for r in routers:
         api.include_router(r, prefix="/api/v1")
     api.include_router(web.make_router(settings.web_dir, settings.base_path))  # last: catch-all
     api.add_middleware(CsrfGuard, base_path=settings.base_path)

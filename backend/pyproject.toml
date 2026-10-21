@@ -49,3 +49,4 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "audium/db/migrations/*" = ["E501"]
+"tests/*" = ["E501"]  # long URLs in assertions read better unwrapped

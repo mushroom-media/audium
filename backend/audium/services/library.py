@@ -42,7 +42,7 @@ def _year(v: int) -> int | None:
 # --- tracks --------------------------------------------------------------------------------
 
 
-def _track_select():
+def track_select():
     return (
         select(
             tracks.c.id,
@@ -102,7 +102,7 @@ def list_tracks(
     base = select(tracks.c.id).where(*conditions)
     ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
     total = counts.count(conn, f"tracks:{artist_id}", base)
-    return _ordered(conn, _track_select(), tracks.c.id, ids, track_item), next_cursor, total
+    return _ordered(conn, track_select(), tracks.c.id, ids, track_item), next_cursor, total
 
 
 def get_track(conn: Connection, track_id: int) -> dict:
@@ -155,7 +155,7 @@ def get_track(conn: Connection, track_id: int) -> dict:
 # --- albums --------------------------------------------------------------------------------
 
 
-def _album_select():
+def album_select():
     return (
         select(
             albums.c.id,
@@ -213,16 +213,16 @@ def list_albums(
     base = select(albums.c.id).where(*conditions)
     ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
     total = counts.count(conn, f"albums:{artist_id}:{year_from}:{year_to}", base)
-    return _ordered(conn, _album_select(), albums.c.id, ids, album_item), next_cursor, total
+    return _ordered(conn, album_select(), albums.c.id, ids, album_item), next_cursor, total
 
 
 def get_album(conn: Connection, album_id: int) -> dict:
-    row = conn.execute(_album_select().where(albums.c.id == album_id, albums.c.track_count > 0)).first()
+    row = conn.execute(album_select().where(albums.c.id == album_id, albums.c.track_count > 0)).first()
     if row is None:
         raise NotFound("album not found")
     item = album_item(row)
     track_rows = conn.execute(
-        _track_select()
+        track_select()
         .where(tracks.c.album_id == album_id, tracks.c.missing_since.is_(None))
         .order_by(tracks.c.disc_no.nulls_first(), tracks.c.track_no.nulls_last(), tracks.c.title_sort, tracks.c.id)
         .limit(_ALBUM_TRACK_CAP)
@@ -234,7 +234,7 @@ def get_album(conn: Connection, album_id: int) -> dict:
 # --- artists -------------------------------------------------------------------------------
 
 
-def _artist_select():
+def artist_select():
     return select(
         artists.c.id,
         artists.c.name,
@@ -275,12 +275,12 @@ def list_artists(
     base = select(artists.c.id).where(cond)
     ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
     total = counts.count(conn, f"artists:{role}", base)
-    return _ordered(conn, _artist_select(), artists.c.id, ids, artist_item), next_cursor, total
+    return _ordered(conn, artist_select(), artists.c.id, ids, artist_item), next_cursor, total
 
 
 def get_artist(conn: Connection, artist_id: int) -> dict:
     row = conn.execute(
-        _artist_select().where(artists.c.id == artist_id, (artists.c.track_count > 0) | (artists.c.album_count > 0))
+        artist_select().where(artists.c.id == artist_id, (artists.c.track_count > 0) | (artists.c.album_count > 0))
     ).first()
     if row is None:
         raise NotFound("artist not found")
@@ -299,13 +299,13 @@ def search_all(conn: Connection, q: str, types: list[str], limit: int, offset: i
         return result
     if "artist" in types:
         ids = search.search_ids(conn, "artist", match, limit, offset)
-        result["artists"] = _ordered(conn, _artist_select(), artists.c.id, ids, artist_item)
+        result["artists"] = _ordered(conn, artist_select(), artists.c.id, ids, artist_item)
     if "album" in types:
         ids = search.search_ids(conn, "album", match, limit, offset)
-        result["albums"] = _ordered(conn, _album_select(), albums.c.id, ids, album_item)
+        result["albums"] = _ordered(conn, album_select(), albums.c.id, ids, album_item)
     if "track" in types:
         ids = search.search_ids(conn, "track", match, limit, offset)
-        result["tracks"] = _ordered(conn, _track_select(), tracks.c.id, ids, track_item)
+        result["tracks"] = _ordered(conn, track_select(), tracks.c.id, ids, track_item)
     return result
 
 

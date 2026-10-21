@@ -56,3 +56,8 @@ All settings are environment variables with the prefix `AUDIUM_`. Defaults fit t
 ### Why one library folder per mount
 
 Mount each share as its own folder below `/music` (`/music/nas`, `/music/usb`). If a share is not mounted when a scan runs, its folder is empty: audium marks that library folder **offline** and keeps all its tracks, instead of treating the music as deleted.
+
+## Reverse proxy notes
+
+- Live updates use Server-Sent Events on `/api/v1/events` (a long-lived HTTP response). audium sends `X-Accel-Buffering: no`, which nginx honours; with other proxies, disable response buffering for that path and allow idle connections of at least 30 s (audium sends a keep-alive every 15 s).
+- Streaming uses HTTP Range requests; the proxy must pass the `Range` header through (nginx and Caddy do by default).

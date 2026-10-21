@@ -3,6 +3,7 @@
   import { player } from "../player.svelte";
   import { href } from "../router.svelte";
   import Cover from "./Cover.svelte";
+  import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
 
   const track = $derived(player.current);
@@ -37,6 +38,7 @@
         <div class="title" title={track.title}>{track.title}</div>
         <a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
       </div>
+      <Heart {track} />
     {:else}
       <div class="meta idle">Nichts in der Warteschlange</div>
     {/if}

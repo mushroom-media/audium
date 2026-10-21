@@ -683,6 +683,14 @@ class Scanner:
                       ORDER BY a.year DESC, a.id DESC LIMIT 1)
     """
 
+    _PLAYLIST_AGG = """
+        UPDATE playlists SET
+          item_count = (SELECT count(*) FROM playlist_items i WHERE i.playlist_id = playlists.id),
+          duration_ms = (SELECT coalesce(sum(t.duration_ms), 0) FROM playlist_items i
+                         JOIN tracks t ON t.id = i.track_id WHERE i.playlist_id = playlists.id),
+          version = version + 1
+    """
+
     def _refresh_albums(self, conn: Connection, ids: set[int] | None) -> None:
         if ids is None:
             conn.execute(text(self._ALBUM_AGG))
@@ -723,6 +731,9 @@ class Scanner:
                 search.remove_tracks(conn, chunk)
                 conn.execute(tracks.delete().where(tracks.c.id.in_(chunk)))
             self.stats.purged = len(purge)
+            if purge:
+                # Their playlist entries went with them (ON DELETE CASCADE); refresh cached stats.
+                conn.execute(text(self._PLAYLIST_AGG))
 
             empty_albums = [
                 r[0]

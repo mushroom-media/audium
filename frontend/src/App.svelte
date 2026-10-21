@@ -2,17 +2,23 @@
   import { onMount } from "svelte";
   import { setUnauthorizedHandler } from "./lib/api";
   import Icon, { type IconName } from "./lib/components/Icon.svelte";
+  import Cover from "./lib/components/Cover.svelte";
+  import Overlays from "./lib/components/Overlays.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import QueuePanel from "./lib/components/QueuePanel.svelte";
   import { player } from "./lib/player.svelte";
   import { defineRoutes, href, navigate, router, startRouter } from "./lib/router.svelte";
+  import { createPlaylist, disconnectEvents, loadMine, mine } from "./lib/mine.svelte";
   import { loadSession, session } from "./lib/session.svelte";
+  import { promptText } from "./lib/ui.svelte";
   import Album from "./routes/Album.svelte";
   import Albums from "./routes/Albums.svelte";
   import Artist from "./routes/Artist.svelte";
   import Artists from "./routes/Artists.svelte";
   import Auth from "./routes/Auth.svelte";
+  import Favorites from "./routes/Favorites.svelte";
   import Home from "./routes/Home.svelte";
+  import Playlist from "./routes/Playlist.svelte";
   import Search from "./routes/Search.svelte";
   import Settings from "./routes/Settings.svelte";
   import Tracks from "./routes/Tracks.svelte";
@@ -24,6 +30,8 @@
     artists: "/artists",
     artist: "/artists/:id",
     tracks: "/tracks",
+    playlist: "/playlists/:id",
+    favorites: "/favorites",
     search: "/search",
     settings: "/settings",
     login: "/login",
@@ -64,6 +72,19 @@
   $effect(() => {
     player.quality = session.settings.stream_quality;
   });
+
+  // Playlists, favorites and the live-update connection belong to the logged-in user.
+  $effect(() => {
+    if (session.user) loadMine().catch(() => {});
+    else disconnectEvents();
+  });
+
+  async function newPlaylist() {
+    const name = await promptText("Neue Playlist", "", "Erstellen");
+    if (!name) return;
+    const pl = await createPlaylist(name);
+    navigate(`/playlists/${pl.id}`);
+  }
 
   $effect(() => {
     if (router.route.name === "search") searchValue = router.route.query.get("q") ?? "";
@@ -132,7 +153,23 @@
           <Icon name={n.icon} /> <span>{n.label}</span>
         </a>
       {/each}
-      <div class="spacer"></div>
+
+      <div class="side-head">
+        <span>Playlists</span>
+        <button class="icon-btn" title="Neue Playlist" aria-label="Neue Playlist" onclick={newPlaylist}><Icon name="plus" size={18} /></button>
+      </div>
+      <div class="side-lists">
+        <a href={href("/favorites")} class:active={active("favorites")} class="pl">
+          <span class="pl-art fav" aria-hidden="true"><Icon name="heart" size={14} filled /></span><span class="pl-name">Lieblingssongs</span>
+        </a>
+        {#each mine.playlists as p (p.id)}
+          <a href={href(`/playlists/${p.id}`)} class="pl" class:active={router.route.name === "playlist" && router.route.params.id === String(p.id)} title={p.role === "owner" ? p.name : `${p.name} – von ${p.owner.display_name}`}>
+            <span class="pl-art"><Cover hash={p.cover} size={64} /></span>
+            <span class="pl-name">{p.name}</span>
+            {#if p.role !== "owner"}<span class="pl-shared" aria-label="geteilt"><Icon name="share" size={13} /></span>{/if}
+          </a>
+        {/each}
+      </div>
       <a href={href("/settings")} class:active={active("settings")}><Icon name="settings" /> <span>Einstellungen</span></a>
     </nav>
 
@@ -163,6 +200,8 @@
         {:else if router.route.name === "tracks"}<Tracks />
         {:else if router.route.name === "search"}<Search />
         {:else if router.route.name === "settings"}<Settings />
+        {:else if router.route.name === "playlist"}<Playlist id={router.route.params.id} />
+        {:else if router.route.name === "favorites"}<Favorites />
         {:else}<div class="page"><p class="empty">Diese Seite gibt es nicht. <a href={href("/")}>Zur Startseite</a></p></div>
         {/if}
       {/key}
@@ -171,6 +210,8 @@
     {#if player.queueOpen}<div class="queue"><QueuePanel /></div>{/if}
 
     <div class="player"><PlayerBar /></div>
+
+    <Overlays />
 
     <nav class="tabs" aria-label="Navigation">
       {#each NAV as n (n.name)}
@@ -228,8 +269,50 @@
     letter-spacing: -0.01em;
     margin-bottom: 18px;
   }
-  .spacer {
+  .side-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 22px 4px 6px 12px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .side-lists {
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin: 0 -4px 8px;
+    padding: 0 4px;
+  }
+  .side a.pl {
+    padding: 6px 8px;
+    gap: 10px;
+    font-weight: 450;
+  }
+  .pl-art {
+    width: 32px;
+    flex: none;
+  }
+  .pl-art.fav {
+    height: 32px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    color: var(--accent-contrast);
+    background: var(--accent);
+  }
+  .pl-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-shared {
+    color: var(--text-faint);
+    display: grid;
   }
   .top {
     grid-area: top;

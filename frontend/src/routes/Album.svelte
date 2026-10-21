@@ -3,6 +3,7 @@
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
+  import { openTrackMenu } from "../lib/ui.svelte";
   import { longDuration, plural } from "../lib/format";
   import { player } from "../lib/player.svelte";
   import { href } from "../lib/router.svelte";
@@ -47,7 +48,7 @@
         <div class="actions">
           <button class="btn primary" onclick={() => play(0, false)}><Icon name="play" size={18} /> Abspielen</button>
           <button class="btn" onclick={() => play(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
-          <button class="btn ghost" onclick={() => album && player.append(album.tracks)}><Icon name="plus" size={18} /> Warteschlange</button>
+          <button class="icon-btn" title="Mehr" aria-label="Mehr zu {album.title}" onclick={(e) => album && openTrackMenu(e, album.tracks, album.title)}><Icon name="more" size={20} /></button>
         </div>
       </div>
     </header>

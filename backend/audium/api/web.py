@@ -17,12 +17,19 @@ _NOT_BUILT = """<!doctype html><meta charset="utf-8"><title>audium</title>
 <a style="color:#8cf" href="api/docs">api/docs</a>.</p></body>"""
 
 
-@lru_cache(maxsize=4)
 def _index_html(web_dir: str, base_path: str) -> str | None:
     index = Path(web_dir) / "index.html"
-    if not index.is_file():
+    try:
+        st = index.stat()
+    except OSError:
         return None
-    html = index.read_text(encoding="utf-8")
+    # Keyed by mtime/size: a rebuilt frontend is picked up without a restart.
+    return _render_index(str(index), st.st_mtime_ns, st.st_size, base_path)
+
+
+@lru_cache(maxsize=4)
+def _render_index(index: str, _mtime_ns: int, _size: int, base_path: str) -> str:
+    html = Path(index).read_text(encoding="utf-8")
     # Assets are referenced relatively; <base> makes them resolve from the app root even on
     # deep links like /albums/12, under any sub-path. The config is read by the app at startup.
     config = json.dumps({"basePath": base_path}).replace("<", "\\u003c")

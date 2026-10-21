@@ -2,7 +2,7 @@
 
 Self-hosted music streaming for your own library: one Docker container, built for large collections (100,000+ tracks) on a home server or NAS. No cloud, no telemetry, works offline in your LAN.
 
-> **Status: early development (phase 2 of 5).** Library scanning, accounts, the REST API, streaming and the web player work. Playlists, sharing and auto-playlists follow. See [docs/plan.md](docs/plan.md).
+> **Status: early development (phase 3 of 5).** Library scanning, accounts, streaming, the web player, playlists and sharing work. Auto-playlists (audio analysis) and the admin UI follow. See [docs/plan.md](docs/plan.md).
 
 ## Quickstart
 
@@ -39,6 +39,7 @@ Each folder directly below `/music` becomes a library folder. If a network share
 - **Accounts:** first user is admin, invites, argon2id passwords, login rate limiting, API tokens.
 - **Streaming:** original files with HTTP Range (instant seeking, little RAM); formats the browser cannot play (WMA, APE, ...) are transcoded on the fly with ffmpeg to Opus/AAC/MP3. Lower streaming quality per user for slow connections.
 - **Web player:** virtual scrolling through 100k+ tracks, search as you type, persistent player with queue, shuffle, repeat, keyboard shortcuts and Media Session (lock screen, Bluetooth and media keys).
+- **Playlists & sharing:** your own playlists, favorites and listening history; share a playlist with individual users as viewer or editor, or make it visible to everyone. Changes by others appear live (Server-Sent Events). Permissions are enforced on the server and covered by tests.
 
 ## Configuration
 
