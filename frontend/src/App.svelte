@@ -7,6 +7,9 @@
   import NowPlaying from "./lib/components/NowPlaying.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import QueuePanel from "./lib/components/QueuePanel.svelte";
+  import DevicePicker from "./lib/components/DevicePicker.svelte";
+  import { devices } from "./lib/devices.svelte";
+  import { startTabs } from "./lib/tabs.svelte";
   import { player } from "./lib/player.svelte";
   import { defineRoutes, goBack, href, navigate, router, startRouter } from "./lib/router.svelte";
   import { disconnectEvents, loadMine, mine, newPlaylistFlow } from "./lib/mine.svelte";
@@ -78,6 +81,7 @@
     });
     startRouter();
     player.init();
+    startTabs(); // several tabs of this browser are one player
     loadSession();
   });
 
@@ -205,6 +209,7 @@
     settingsPage: "/settings",
   };
   const backTo = $derived(BACK[router.route.name]);
+  const initial = $derived((session.user?.display_name ?? "?").trim().charAt(0).toUpperCase());
 
   const active = (name: string) =>
     router.route.name === name ||
@@ -231,7 +236,8 @@
         <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
         <span>audium</span>
       </a>
-      {#each NAV.filter((n) => n.name !== "search") as n (n.name)}
+      <!-- Search and profile live in the top bar on wide screens. -->
+      {#each NAV.filter((n) => n.name !== "search" && n.name !== "profile") as n (n.name)}
         <a href={href(n.path)} class:active={active(n.name)} aria-current={active(n.name) ? "page" : undefined}>
           <Icon name={n.icon} /> <span>{n.label}</span>
         </a>
@@ -258,7 +264,6 @@
           </a>
         {/each}
       </div>
-      <a href={href("/settings")} class:active={active("settings")}><Icon name="settings" /> <span>Einstellungen</span></a>
     </nav>
 
     <header class="top" class:searching={router.route.name === "search"}>
@@ -287,7 +292,10 @@
           enterkeyhint="search"
         />
       </label>
-      {#if router.route.name === "profile"}<a class="icon-btn settings-link" href={href("/settings")} aria-label="Einstellungen"><Icon name="settings" /></a>{/if}
+      <div class="top-end">
+        {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label="Einstellungen" title="Einstellungen"><Icon name="settings" /></a>{/if}
+        <a class="me" class:active={active("profile")} href={href("/profile")} aria-label="Profil" title={session.user.display_name}>{initial}</a>
+      </div>
     </header>
 
     <main class="content">
@@ -318,6 +326,7 @@
     {#if player.nowPlayingOpen}<NowPlaying />{/if}
 
     <Overlays />
+    {#if devices.picker}<DevicePicker />{/if}
     {#if ui.smartEditor}
       <RuleEditor title="Neue Smart-Playlist" onsave={createSmart} onclose={() => (ui.smartEditor = false)} />
     {/if}
@@ -459,9 +468,28 @@
     flex: none;
     margin-left: -8px;
   }
-  .settings-link {
-    display: none;
+  .top-end {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin-left: auto;
+  }
+  .me {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 650;
+    color: var(--accent-contrast);
+    text-decoration: none;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 40%, #6b3fa0));
+  }
+  .me:hover,
+  .me.active {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
   }
   .top-logo {
     display: none;
@@ -502,8 +530,9 @@
     .top {
       padding: 0 16px;
     }
-    .settings-link {
-      display: grid;
+    /* Phones reach the profile through the tab bar. */
+    .me {
+      display: none;
     }
     /* Phones: no search field except on the search page (the tab bar leads there). */
     .top:not(.searching) .search {

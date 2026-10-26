@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { devices, others } from "../devices.svelte";
   import { duration } from "../format";
   import { player } from "../player.svelte";
   import { href } from "../router.svelte";
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
+  import RemoteStrip from "./RemoteStrip.svelte";
 
   const track = $derived(player.current);
   let dragging = $state<number | null>(null);
@@ -23,6 +25,7 @@
 </script>
 
 <footer class="bar" aria-label="Player">
+  <RemoteStrip />
   <input
     class="seek"
     type="range"
@@ -90,6 +93,11 @@
       aria-label="Lautstärke"
       oninput={(e) => player.setVolume(Number(e.currentTarget.value))}
     />
+    {#if others().length || devices.target}
+      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} title="Gerät steuern" aria-label="Gerät steuern">
+        <Icon name="devices" size={18} />
+      </button>
+    {/if}
     <button class="icon-btn" class:on={player.queueOpen} onclick={() => (player.queueOpen = !player.queueOpen)} title="Warteschlange (Q)" aria-label="Warteschlange" aria-pressed={player.queueOpen}>
       <Icon name="queue" size={18} />
     </button>
@@ -97,7 +105,7 @@
       <Icon name="expand" size={18} />
     </button>
   </div>
-  {#if player.error}<div class="error" role="status">{player.error}</div>{/if}
+  {#if player.error}<div class="error" class:raised={devices.target} role="status">{player.error}</div>{/if}
 </footer>
 
 <style>
@@ -237,6 +245,9 @@
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     font-size: 0.85rem;
+  }
+  .error.raised {
+    bottom: calc(100% + 40px);
   }
   @media (max-width: 720px) {
     .bar {

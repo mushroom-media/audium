@@ -111,7 +111,7 @@
   {:else if stats}
     <div class="section-head sub"><h3>Meistgehörte Titel</h3></div>
     <div class="tracks">
-      <div class="tracks-head"><span>Häufigkeit</span></div>
+      <div class="tracks-head"><span>Wiedergaben</span></div>
       {#each stats.tracks as e, i (e.track.id)}
         <div class="row-h"><TrackRow track={e.track} number={i + 1} count={e.plays} onplay={() => playTop(i)} /></div>
       {/each}

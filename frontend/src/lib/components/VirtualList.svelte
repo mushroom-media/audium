@@ -89,7 +89,7 @@
     </div>
   </div>
   {#if letters && letters.length > 1 && count >= MIN_INDEXED_ROWS}
-    <LetterIndex {letters} onjump={scrollToIndex} />
+    <LetterIndex {letters} current={Math.floor(listTop / rowHeight)} onjump={scrollToIndex} />
   {/if}
 </div>
 

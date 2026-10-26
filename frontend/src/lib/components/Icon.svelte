@@ -45,6 +45,8 @@
     logout: "M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10",
     chevron: "M9 5l7 7-7 7",
     phone: "M7.5 3h9a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM11 18h2",
+    desktop: "M3.5 5h17v11h-17zM9 20h6M12 16v4",
+    devices: "M2.5 5h12v8.5h-12zM5.5 17.5h6M8.5 13.5v4M16.5 8.5h4.5v11h-4.5zM18.75 17h.01",
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>

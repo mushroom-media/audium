@@ -32,6 +32,18 @@ const POOL_HISTORY = 500; // played tracks a pool queue keeps for "back"
  * mixes the whole list, not just what was loaded. */
 export type TrackPool = Record<string, string | number | undefined>;
 
+/** Everything another tab needs to carry on playing exactly here (see tabs.svelte.ts). */
+export interface Snapshot {
+  queue: Q.Queue;
+  radio: boolean;
+  source: QueueSource | null;
+  pool: { query: TrackPool; ids: number[] | null; rest: number[] | null } | null;
+  position: number;
+  volume: number;
+  muted: boolean;
+  playing: boolean;
+}
+
 /** Where the queue was started from, shown in the "now playing" view. */
 export interface QueueSource {
   /** What kind of thing it is, e.g. "Album" or "Playlist". */
@@ -52,6 +64,10 @@ class Player {
   volume = $state(0.8);
   muted = $state(false);
   error = $state<string | null>(null);
+  /** The browser refused to start playback without a tap on this device (autoplay policy). */
+  blocked = $state(false);
+  /** Bumped on every seek, so the remote control can report the new position. */
+  seeks = $state(0);
   #queuePanel = $state(false);
   #phone = $state(phoneLayout?.matches ?? false);
   /** The queue is shown: a side panel on wide screens, on phones a page of its own over the
@@ -129,6 +145,7 @@ class Player {
     on("playing", () => {
       this.buffering = false;
       this.error = null;
+      this.blocked = false;
     });
     on("ended", () => {
       this.#maybeReport(true); // a track that played to the end always counts
@@ -223,6 +240,14 @@ class Player {
     else a.pause();
   }
 
+  play() {
+    if (!this.playing) this.toggle();
+  }
+
+  pause() {
+    this.#audio?.pause();
+  }
+
   next() {
     this.#advance(false);
   }
@@ -248,6 +273,7 @@ class Player {
       a.currentTime = s;
     }
     this.position = s;
+    this.seeks++;
   }
 
   setVolume(v: number) {
@@ -277,6 +303,65 @@ class Player {
   cycleRepeat() {
     this.queue = Q.cycleRepeat(this.queue);
     this.#scheduleSave();
+  }
+
+  // --- handing over between tabs (tabs.svelte.ts) -------------------------------------------
+
+  snapshot(): Snapshot {
+    return $state.snapshot({
+      queue: this.queue,
+      radio: this.radio,
+      source: this.source,
+      pool: this.#pool,
+      position: this.position,
+      volume: this.volume,
+      muted: this.muted,
+      playing: this.playing,
+    });
+  }
+
+  /** Take over another tab's player, paused at its position. */
+  adopt(s: Snapshot) {
+    this.release();
+    this.#station++; // a refill of the old queue still under way must not land here
+    this.queue = s.queue;
+    this.radio = s.radio;
+    this.source = s.source;
+    this.#pool = s.pool;
+    this.position = s.position;
+    this.duration = (this.current?.duration_ms ?? 0) / 1000;
+    this.volume = s.volume;
+    this.muted = s.muted;
+    this.#applyVolume();
+    this.#scheduleSave();
+  }
+
+  /** Like after a reload: what the playing tab saved last. */
+  reloadSaved() {
+    this.release();
+    this.#station++;
+    this.#restore();
+    this.#applyVolume();
+  }
+
+  /** Stop and let go of the stream, so the browser's media controls no longer point at this tab. */
+  release() {
+    const a = this.#audio;
+    if (a) {
+      a.pause();
+      a.removeAttribute("src");
+      a.load();
+    }
+    this.#clearSpare();
+    this.#loadedId = null;
+    this.playing = false;
+    this.buffering = false;
+  }
+
+  saveNow() {
+    if (this.#saveTimer) clearTimeout(this.#saveTimer);
+    this.#saveTimer = null;
+    this.#save();
   }
 
   // --- internals ---------------------------------------------------------------------------
@@ -518,6 +603,7 @@ class Player {
   #playFailed(e: unknown) {
     this.buffering = false;
     // Autoplay without a user gesture is blocked by browsers; just wait for a click.
+    if ((e as DOMException)?.name === "NotAllowedError") this.blocked = true;
     if ((e as DOMException)?.name !== "NotAllowedError" && (e as DOMException)?.name !== "AbortError") {
       this.error = "Wiedergabe fehlgeschlagen.";
     }
@@ -637,4 +723,30 @@ class Player {
   }
 }
 
-export const player = new Player();
+/** The player of this device. */
+export const localPlayer = new Player();
+
+/** What the remote control can steer on another device (see devices.svelte.ts). */
+const REMOTE_KEYS = [
+  "queue", "playing", "buffering", "position", "duration", "volume", "muted", "error", "radio", "source", "current",
+  "playTracks", "playPool", "playRadio", "playNext", "append", "jump", "remove",
+  "toggle", "next", "prev", "seek", "setVolume", "setMuted", "toggleShuffle", "cycleRepeat",
+] as const;
+export type Controls = Pick<Player, (typeof REMOTE_KEYS)[number]>;
+const remoteKeys = new Set<PropertyKey>(REMOTE_KEYS);
+
+/** While this device steers another one, `remote` stands in for it. */
+export const control = $state({ remote: null as Controls | null });
+
+/** What the app shows and operates: this device's player, or while controlling another device
+ * that one. Lock screen, media keys and the queue panel's visibility always stay local. */
+export const player: Player = new Proxy(localPlayer, {
+  get(target, key) {
+    const src = control.remote && remoteKeys.has(key) ? control.remote : target;
+    const value = Reflect.get(src, key, src);
+    return typeof value === "function" ? value.bind(src) : value;
+  },
+  set(target, key, value) {
+    return Reflect.set(target, key, value, target);
+  },
+});

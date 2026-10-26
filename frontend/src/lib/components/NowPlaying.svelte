@@ -2,6 +2,7 @@
   // Full-screen view of the current track: large cover, all transport controls. On phones it
   // replaces the hidden parts of the player bar (shuffle, repeat, volume); swipe down to close.
   import { coverUrl } from "../api";
+  import { devices, others, target } from "../devices.svelte";
   import { duration } from "../format";
   import { player } from "../player.svelte";
   import * as Q from "../queue";
@@ -51,6 +52,16 @@
 
   const close = () => (player.nowPlayingOpen = false);
 
+  /** Closing (button, swipe down, the system's back) mirrors the rise: down and fading out,
+   * starting from wherever a swipe left the view. */
+  function sink(_: Element) {
+    const from = swipe;
+    return {
+      duration: reducedMotion?.matches ? 0 : 220,
+      css: (t: number, u: number) => `transform: translateY(${from + u * 40}px); opacity: ${t}`,
+    };
+  }
+
   function onTouchStart(e: TouchEvent) {
     const target = e.target as HTMLElement;
     // Sliders and buttons keep their own gestures.
@@ -75,10 +86,12 @@
     else if (gesture.onArt) dragArt(gesture, dx, e.timeStamp);
   }
   function onTouchEnd(e: TouchEvent) {
-    if (gesture?.axis === "y" && swipe > CLOSE_SWIPE_PX) close();
-    if (gesture?.axis === "x" && gesture.onArt) releaseArt(gesture, e.type === "touchcancel");
+    const g = gesture;
     gesture = null;
-    swipe = 0;
+    if (g?.axis === "x" && g.onArt) releaseArt(g, e.type === "touchcancel");
+    // Closing leaves the view where the finger let go; the out transition takes it from there.
+    if (g?.axis === "y" && swipe > CLOSE_SWIPE_PX) close();
+    else swipe = 0;
   }
 
   // --- cover swipe: left plays the next track, right the previous one (no restart) ----------
@@ -179,6 +192,7 @@
   ontouchmove={onTouchMove}
   ontouchend={onTouchEnd}
   ontouchcancel={onTouchEnd}
+  out:sink
 >
   {#if backdrop}
     {#key backdrop}
@@ -199,7 +213,11 @@
       {:else}
         <span class="label">Jetzt läuft{#if player.radio} · Radio{/if}</span>
       {/if}
+      {#if devices.target}<span class="remote">Auf {target()?.name ?? "anderem Gerät"}</span>{/if}
     </div>
+    {#if others().length || devices.target}
+      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} aria-label="Gerät steuern" title="Gerät steuern"><Icon name="devices" size={20} /></button>
+    {/if}
     <button class="icon-btn" onclick={showQueue} aria-label="Warteschlange" title="Warteschlange"><Icon name="queue" size={20} /></button>
   </header>
 
@@ -378,6 +396,15 @@
   }
   a.name:hover {
     text-decoration: underline;
+  }
+  .remote {
+    max-width: 100%;
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .body {
     flex: 1;

@@ -1,6 +1,8 @@
 // The current user's own data: playlists they can see, favorites, and live updates (SSE).
 
 import { currentConnection, del, eventsUrl, get, post, put, refreshMediaToken, type Playlist, type Track } from "./api";
+import { deviceParams, unwireDevices, wireDevices } from "./devices.svelte";
+import { onRole, ready } from "./tabs.svelte";
 import { promptText } from "./ui.svelte";
 
 export const mine = $state({
@@ -76,10 +78,29 @@ function scheduleReload() {
   reloadTimer = setTimeout(() => loadPlaylists().catch(() => {}), 300);
 }
 
+let wanted = false;
+
 export function connectEvents() {
+  wanted = true;
   if (source) return;
+  // First settle whether this tab leads: only the leading tab is the device (tabs.svelte.ts).
+  ready.then(() => wanted && !source && open());
+}
+
+// The player moved into this tab or out of it: connect again, as the device or not.
+onRole((role, was) => {
+  if (!source || role === "pending" || was === "pending") return;
+  source.close();
+  source = null;
+  open();
+  scheduleReload(); // nothing is missed in between
+});
+
+function open() {
   // EventSource reconnects by itself and sends Last-Event-ID; the server replays what we missed.
-  source = new EventSource(eventsUrl());
+  // In the leading tab it also makes this browser a device of the remote control (devices.svelte.ts).
+  source = new EventSource(eventsUrl(deviceParams()));
+  wireDevices(source);
   source.addEventListener("open", () => (mine.connected = true));
   source.addEventListener("error", () => {
     mine.connected = false;
@@ -101,6 +122,8 @@ export function connectEvents() {
 }
 
 export function disconnectEvents() {
+  wanted = false;
+  unwireDevices();
   source?.close();
   source = null;
   mine.connected = false;

@@ -13,6 +13,7 @@ from audium.api import (
     admin_library,
     admin_users,
     auth,
+    devices,
     discover,
     events,
     library,
@@ -23,6 +24,7 @@ from audium.api import (
     system,
     web,
 )
+from audium.api.devices import DeviceRegistry
 from audium.api.eventbus import EventBus
 from audium.auth.media import media_key
 from audium.auth.secretbox import SecretBox, load_key
@@ -74,6 +76,7 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     api.state.counts = CountCache()
     api.state.transcoder = Transcoder(settings.max_transcodes)
     api.state.bus = bus
+    api.state.devices = DeviceRegistry(bus)
     api.state.vectors = VectorIndex(db)
     secret = load_key(settings)
     api.state.secrets = SecretBox(secret)
@@ -88,6 +91,7 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
         playlists.router,
         personal.router,
         events.router,
+        devices.router,
         discover.router,
         discover.admin,
         admin_users.router,

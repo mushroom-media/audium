@@ -3,10 +3,16 @@
 
   // A-Z strip at the right edge of long alphabetical lists (touch devices): drag along it to jump
   // straight to a letter, like the contacts app. Letters without entries jump to the one before.
-  let { letters, onjump }: { letters: Letter[]; onjump: (offset: number) => void } = $props();
+  let {
+    letters,
+    current,
+    onjump,
+  }: { letters: Letter[]; /** The row at the top of the view. */ current: number; onjump: (offset: number) => void } = $props();
 
   const ALL = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
   const present = $derived(new Map(letters.map((l) => [l.letter, l.offset])));
+  // The letter the view is in: the last one starting at or above the top row.
+  const here = $derived(letters.reduce<string | null>((at, l) => (l.offset <= current ? l.letter : at), letters[0]?.letter ?? null));
 
   let strip: HTMLDivElement;
   let active = $state<{ letter: string; y: number } | null>(null);
@@ -46,7 +52,7 @@
   aria-label="Zu Buchstabe springen"
 >
   {#each ALL as l, i (l)}
-    <button class="l" class:off={!present.has(l)} tabindex="-1" aria-label="Zu {l}" onclick={() => onjump(offsetFor(i))}>{l}</button>
+    <button class="l" class:off={!present.has(l)} class:here={l === here} tabindex="-1" aria-label="Zu {l}" onclick={() => onjump(offsetFor(i))}>{l}</button>
   {/each}
   {#if active}<div class="bubble" style:top="{active.y}px" aria-hidden="true">{active.letter}</div>{/if}
 </div>
@@ -87,6 +93,11 @@
   .l.off {
     color: var(--text-faint);
     font-weight: 400;
+  }
+  /* A dot behind the letter, so every letter keeps the same height (pick() relies on that). */
+  .l.here {
+    color: var(--accent-contrast);
+    background: radial-gradient(circle closest-side, var(--accent) 94%, transparent 100%);
   }
   .bubble {
     position: absolute;

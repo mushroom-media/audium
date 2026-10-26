@@ -113,8 +113,9 @@ function mediaUrl(path: string, params?: Params): string {
   return `${apiBase()}${path}${query({ ...params, mt: usesToken() ? mediaToken : undefined })}`;
 }
 
-export function eventsUrl(): string {
-  return mediaUrl("/events");
+/** `device`: this player takes part in the remote control (see devices.svelte.ts). */
+export function eventsUrl(device?: Params): string {
+  return mediaUrl("/events", device);
 }
 
 export interface Page<T> {
