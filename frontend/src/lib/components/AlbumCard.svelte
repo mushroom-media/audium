@@ -5,14 +5,15 @@
   import Cover from "./Cover.svelte";
   import Icon from "./Icon.svelte";
 
-  let { album, subtitle }: { album: Album | undefined; subtitle?: "artist" | "year" } = $props();
+  /** `showYear`: the year sits right-aligned next to the artist (lists sorted by year). */
+  let { album, showYear = false }: { album: Album | undefined; showYear?: boolean } = $props();
 
   async function play(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (!album) return;
     const detail = await get<AlbumDetail>(`/albums/${album.id}`);
-    player.playTracks(detail.tracks, 0);
+    player.playTracks(detail.tracks, 0, false, { kind: "Album", name: detail.title, path: `/albums/${album.id}`, ref: `album:${album.id}` });
   }
 </script>
 
@@ -24,7 +25,8 @@
     </div>
     <div class="title">{album.title}</div>
     <div class="sub">
-      {#if subtitle === "year"}{album.year ?? ""}{:else}{album.artist}{/if}
+      <span class="artist">{album.artist}</span>
+      {#if showYear && album.year}<span class="year">{album.year}</span>{/if}
     </div>
   </a>
 {:else}
@@ -59,12 +61,22 @@
     text-overflow: ellipsis;
   }
   .sub {
+    display: flex;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 0.85rem;
+    min-height: 1.2em;
+  }
+  .artist {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-height: 1.2em;
+  }
+  .year {
+    flex: none;
+    font-variant-numeric: tabular-nums;
   }
   .bar {
     height: 0.8em;

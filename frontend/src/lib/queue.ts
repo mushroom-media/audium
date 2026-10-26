@@ -20,7 +20,7 @@ export type Rng = () => number;
 
 export const empty: Queue = { tracks: [], order: [], pos: -1, shuffle: false, repeat: "off" };
 
-function shuffled(items: number[], rng: Rng): number[] {
+export function shuffled<T>(items: T[], rng: Rng = Math.random): T[] {
   const a = items.slice();
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -33,10 +33,12 @@ function identity(n: number): number[] {
   return Array.from({ length: n }, (_, i) => i);
 }
 
-export function create(tracks: Track[], start: number, prev: Queue = empty, rng: Rng = Math.random): Queue {
+/** `start`: the track to play first; null = none chosen (with shuffle, the first one is random too). */
+export function create(tracks: Track[], start: number | null, prev: Queue = empty, rng: Rng = Math.random): Queue {
   if (!tracks.length) return { ...empty, shuffle: prev.shuffle, repeat: prev.repeat };
-  const s = Math.min(Math.max(start, 0), tracks.length - 1);
+  const s = Math.min(Math.max(start ?? 0, 0), tracks.length - 1);
   if (!prev.shuffle) return { tracks, order: identity(tracks.length), pos: s, shuffle: false, repeat: prev.repeat };
+  if (start === null) return { tracks, order: shuffled(identity(tracks.length), rng), pos: 0, shuffle: true, repeat: prev.repeat };
   // The chosen track plays first, the rest in random order.
   const rest = shuffled(identity(tracks.length).filter((i) => i !== s), rng);
   return { tracks, order: [s, ...rest], pos: 0, shuffle: true, repeat: prev.repeat };
@@ -103,6 +105,22 @@ export function remove(q: Queue, orderPos: number): Queue {
   if (orderPos === q.pos || orderPos < 0 || orderPos >= q.order.length) return q;
   const order = q.order.filter((_, i) => i !== orderPos);
   return { ...q, order, pos: orderPos < q.pos ? q.pos - 1 : q.pos };
+}
+
+/** Keep what has played and the current track, replace everything after it with `add`. */
+export function replaceUpcoming(q: Queue, add: Track[]): Queue {
+  if (!q.order.length) return create(add, 0, q);
+  const kept = q.order.slice(0, q.pos + 1).map((i) => q.tracks[i]);
+  const tracks = [...kept, ...add];
+  return { ...q, tracks, order: identity(tracks.length), pos: q.pos };
+}
+
+/** Forget all but the last `keep` played tracks, so a queue that keeps growing stays bounded. */
+export function trimHistory(q: Queue, keep: number): Queue {
+  const from = q.pos - keep;
+  if (from <= 0) return q;
+  const order = q.order.slice(from);
+  return { ...q, tracks: order.map((i) => q.tracks[i]), order: identity(order.length), pos: q.pos - from };
 }
 
 export function upcoming(q: Queue): { track: Track; orderPos: number }[] {

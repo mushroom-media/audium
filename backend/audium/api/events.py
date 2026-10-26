@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from audium.api.deps import current_user, get_db
+from audium.api.deps import get_db, media_user
 from audium.db.engine import Database
 from audium.services import playlists as svc
 from audium.services.users import User
@@ -34,7 +34,7 @@ def _format(event: svc.Event) -> str:
 @router.get("/events", response_class=StreamingResponse, summary="Live updates (text/event-stream)")
 async def events(
     request: Request,
-    user: User = Depends(current_user),
+    user: User = Depends(media_user),
     db: Database = Depends(get_db),
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
 ):

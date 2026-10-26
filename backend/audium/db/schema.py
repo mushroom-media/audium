@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     PrimaryKeyConstraint,
     Table,
@@ -68,7 +69,7 @@ covers = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("hash", Text, nullable=False, unique=True),
-    Column("source", Text, nullable=False),  # embedded | folder
+    Column("source", Text, nullable=False),  # embedded | folder | artist | upload (playlist covers)
     Column("width", Integer),
     Column("height", Integer),
     Column("created_at", BigInteger, nullable=False),
@@ -82,7 +83,12 @@ artists = Table(
     Column("name_sort", Text, nullable=False),
     Column("name_norm", Text, nullable=False, unique=True),
     Column("mb_artist_id", Text),
+    # The image shown for the artist: `image_id` if set, else the cover of the newest album.
     Column("cover_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    # artist.jpg/.png from the artist folder (migration 0008); `image_key` = where it was found
+    # and its size/mtime, so unchanged files are not read again.
+    Column("image_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    Column("image_key", Text),
     Column("album_count", Integer, nullable=False, default=0),
     Column("track_count", Integer, nullable=False, default=0),
     Column("created_at", BigInteger, nullable=False),
@@ -185,7 +191,7 @@ track_artists = Table(
     metadata,
     Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
     Column("artist_id", Integer, ForeignKey("artists.id", ondelete="CASCADE"), nullable=False),
-    Column("role", Text, nullable=False),  # main | album
+    Column("role", Text, nullable=False),  # main | feat
     Column("position", Integer, nullable=False, default=0),
     PrimaryKeyConstraint("track_id", "artist_id", "role"),
     Index(None, "artist_id"),
@@ -309,6 +315,9 @@ playlists = Table(
     Column("item_count", Integer, nullable=False, default=0),
     Column("duration_ms", BigInteger, nullable=False, default=0),
     Column("cover_hash", Text),  # cover of the first track, denormalized for lists
+    # Chosen by the owner (migration 0004): an uploaded image or one of the built-in designs.
+    Column("cover_id", Integer, ForeignKey("covers.id", ondelete="SET NULL")),
+    Column("cover_preset", Integer),
     Column("created_at", BigInteger, nullable=False),
     Column("updated_at", BigInteger, nullable=False),
     Index(None, "owner_id"),
@@ -374,6 +383,10 @@ play_history = Table(
     Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
     Column("played_at", BigInteger, nullable=False),
     Column("played_ms", Integer, nullable=False, default=0),
+    # What the track was played from, e.g. "album:3", "playlist:7", "radio:artist:2" (migration 0006).
+    Column("context", Text),
+    # The app that played it, for plays reported through the Subsonic API (migration 0007).
+    Column("client", Text),
     Index(None, "user_id", "played_at"),
     Index(None, "track_id"),
 )
@@ -394,6 +407,8 @@ track_genres = Table(
     metadata,
     Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
     Column("genre_id", Integer, ForeignKey("genres.id", ondelete="CASCADE"), nullable=False),
+    Column("source", Text, nullable=False, default="tag", server_default="tag"),  # tag | detected
+    Column("weight", Float, nullable=False, default=1.0, server_default="1"),  # share of a detected genre
     PrimaryKeyConstraint("track_id", "genre_id"),
     Index(None, "genre_id"),
 )
@@ -404,7 +419,7 @@ track_features = Table(
     "track_features",
     metadata,
     Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True),
-    Column("analyzer", Text, nullable=False),  # essentia | essentia+ml
+    Column("analyzer", Text, nullable=False),  # essentia[+effnet][+moods]
     Column("analyzer_version", Integer, nullable=False),
     Column("status", Text, nullable=False),  # ok | failed
     Column("error", Text),
@@ -425,6 +440,39 @@ track_features = Table(
     Index(None, "status"),
     Index(None, "bpm"),
     Index(None, "energy"),
+)
+
+# Audio fingerprint of a track (Discogs-EffNet embedding, mean over the analysed window): 1280
+# float16 values. NULL vector = the model failed on this file (not retried until it changes).
+track_embeddings = Table(
+    "track_embeddings",
+    metadata,
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True),
+    Column("model", Text, nullable=False),
+    Column("vector", LargeBinary),
+)
+
+# Detected Discogs styles (analysis/styles.py), created on first use.
+styles = Table(
+    "styles",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("label", Text, nullable=False, unique=True),  # model label, e.g. "Electronic---Deep House"
+    Column("name", Text, nullable=False),  # shown: "Deep House"
+    Column("parent", Text, nullable=False),  # Discogs top genre: "Electronic"
+    Column("genre", Text),  # audium genre it counts for: "House"; NULL = none
+    Column("slug", Text, nullable=False, unique=True),
+    Column("track_count", Integer, nullable=False, default=0),
+)
+
+track_styles = Table(
+    "track_styles",
+    metadata,
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("style_id", Integer, ForeignKey("styles.id", ondelete="CASCADE"), nullable=False),
+    Column("prob", Float, nullable=False),
+    PrimaryKeyConstraint("track_id", "style_id"),
+    Index(None, "style_id", "prob"),
 )
 
 auto_playlists = Table(
@@ -465,4 +513,34 @@ auto_playlist_access = Table(
     Column("auto_playlist_id", Integer, ForeignKey("auto_playlists.id", ondelete="CASCADE"), nullable=False),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     PrimaryKeyConstraint("auto_playlist_id", "user_id"),
+)
+
+# --- Subsonic API (migration 0007) ---------------------------------------------------------
+
+# Passwords for Subsonic apps, separate from the login password. The token method needs the
+# plain secret on the server, so it is stored encrypted (AES-GCM, key outside the database).
+app_passwords = Table(
+    "app_passwords",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("secret_enc", LargeBinary, nullable=False),
+    Column("prefix", Text, nullable=False),  # first characters, so the user can tell them apart
+    Column("created_at", BigInteger, nullable=False),
+    Column("last_used_at", BigInteger),
+    Column("last_client", Text),  # Subsonic parameter c, e.g. "Symfonium"
+    Index(None, "user_id"),
+)
+
+# What a user was listening to, for continuing on another device (Subsonic savePlayQueue).
+play_queue = Table(
+    "play_queue",
+    metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("track_ids_json", Text, nullable=False),
+    Column("current_track_id", Integer),
+    Column("position_ms", BigInteger, nullable=False, default=0),
+    Column("changed_by", Text),
+    Column("updated_at", BigInteger, nullable=False),
 )

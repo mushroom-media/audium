@@ -30,6 +30,7 @@ MAX_ITEMS = 20_000
 MAX_ADD = 5_000
 VISIBILITIES = ("private", "users")
 SHARE_ROLES = ("viewer", "editor")
+COVER_PRESETS = 20  # built-in cover designs, drawn by the web UI
 _EVENT_RETENTION_MS = 7 * 86_400_000
 
 
@@ -131,6 +132,12 @@ def _existing_track_ids(conn: Connection, track_ids: list[int]) -> list[int]:
 
 def playlist_out(conn: Connection, row, role: str) -> dict:
     owner = conn.execute(select(users.c.username, users.c.display_name).where(users.c.id == row.owner_id)).first()
+    if row.cover_preset:
+        cover, source = None, "preset"
+    elif row.cover_id is not None:
+        cover, source = conn.execute(select(covers.c.hash).where(covers.c.id == row.cover_id)).scalar(), "upload"
+    else:
+        cover, source = row.cover_hash, "auto"
     return {
         "id": row.id,
         "name": row.name,
@@ -143,7 +150,9 @@ def playlist_out(conn: Connection, row, role: str) -> dict:
         "version": row.version,
         "item_count": row.item_count,
         "duration_ms": row.duration_ms,
-        "cover": row.cover_hash,
+        "cover": cover,
+        "cover_preset": row.cover_preset,
+        "cover_source": source,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -211,6 +220,25 @@ def list_items(conn: Connection, user: User, playlist_id: int, limit: int, offse
         for r in rows
     ]
     return items, total
+
+
+def available_items(conn: Connection, user: User, playlist_id: int) -> list[tuple[int, int]]:
+    """(item id, track id) of the playable items in order (missing files left out), for
+    clients that address items by their position in this list (Subsonic)."""
+    require_playlist(conn, user, playlist_id, "view")
+    return [
+        (r.id, r.track_id)
+        for r in conn.execute(
+            select(playlist_items.c.id, playlist_items.c.track_id)
+            .join(tracks, tracks.c.id == playlist_items.c.track_id)
+            .where(playlist_items.c.playlist_id == playlist_id, tracks.c.missing_since.is_(None))
+            .order_by(playlist_items.c.position, playlist_items.c.id)
+        )
+    ]
+
+
+def all_item_ids(conn: Connection, playlist_id: int) -> list[int]:
+    return [r[0] for r in conn.execute(select(playlist_items.c.id).where(playlist_items.c.playlist_id == playlist_id))]
 
 
 # --- writing -------------------------------------------------------------------------------
@@ -291,6 +319,34 @@ def update_playlist(
     after = _recipients(conn, new.id, new.owner_id, new.visibility)
     rec = "*" if "*" in (before, after) else sorted({*before, *after})
     return playlist_out(conn, new, "owner"), _event(conn, new, "updated", user, rec)
+
+
+def set_cover(
+    conn: Connection,
+    user: User,
+    playlist_id: int,
+    *,
+    preset: int | None = None,
+    upload: tuple[str, int, int] | None = None,
+):
+    """The owner's choice of cover: a built-in design (1..COVER_PRESETS), an uploaded image
+    (already rendered by the cover store: hash, width, height), or neither = the cover of the
+    first track again."""
+    row, _ = require_playlist(conn, user, playlist_id, "manage")
+    if preset is not None and not 1 <= preset <= COVER_PRESETS:
+        raise BadRequest(f"preset must be between 1 and {COVER_PRESETS}")
+    cover_id = None
+    if upload is not None:
+        digest, width, height = upload
+        cover_id = conn.execute(select(covers.c.id).where(covers.c.hash == digest)).scalar()
+        if cover_id is None:
+            cover_id = conn.execute(
+                insert(covers).values(hash=digest, source="upload", width=width, height=height, created_at=now_ms())
+            ).inserted_primary_key[0]
+    # The previous upload is left to the scanner's orphan cleanup.
+    conn.execute(update(playlists).where(playlists.c.id == row.id).values(cover_id=cover_id, cover_preset=preset))
+    new = _touch(conn, playlist_id, items_changed=False)
+    return playlist_out(conn, new, "owner"), _event(conn, new, "updated", user)
 
 
 def delete_playlist(conn: Connection, user: User, playlist_id: int) -> Event:

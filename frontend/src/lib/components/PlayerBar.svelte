@@ -11,6 +11,15 @@
   const shown = $derived(dragging ?? player.position);
   const max = $derived(Math.max(1, player.duration));
   const progress = $derived(Math.min(100, (shown / max) * 100));
+  const openNowPlaying = () => (player.nowPlayingOpen = true);
+  // Phones: the whole left part of the bar opens "Jetzt läuft", not just cover and title (the
+  // heart keeps working). On wider screens the cover links to the album and the artist to the artist.
+  const phone = typeof matchMedia === "function" ? matchMedia("(max-width: 720px)") : null;
+  function tapNow(e: MouseEvent) {
+    if (!track || !phone?.matches || (e.target as Element).closest(".heart")) return;
+    e.preventDefault();
+    openNowPlaying();
+  }
 </script>
 
 <footer class="bar" aria-label="Player">
@@ -31,11 +40,12 @@
       dragging = null;
     }}
   />
-  <div class="now">
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (cover and title are the keyboard targets) -->
+  <div class="now" onclickcapture={tapNow}>
     {#if track}
-      <a class="art" href={href(`/albums/${track.album_id}`)} aria-label="Album öffnen"><Cover hash={track.cover} size={64} /></a>
+      <a class="art" href={href(`/albums/${track.album_id}`)} title={track.album} aria-label="Album {track.album} öffnen"><Cover hash={track.cover} size={64} /></a>
       <div class="meta">
-        <div class="title" title={track.title}>{track.title}</div>
+        <button class="title" title={track.title} onclick={openNowPlaying}>{track.title}</button>
         <a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
       </div>
       <Heart {track} />
@@ -45,7 +55,7 @@
   </div>
 
   <div class="controls">
-    <button class="icon-btn side" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} title="Zufallswiedergabe (S)" aria-pressed={player.queue.shuffle} aria-label="Zufallswiedergabe">
+    <button class="icon-btn side" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} disabled={player.radio} title={player.radio ? "Radio hat schon eine eigene Reihenfolge" : "Zufallswiedergabe (S)"} aria-pressed={player.queue.shuffle} aria-label="Zufallswiedergabe">
       <Icon name="shuffle" size={18} />
     </button>
     <button class="icon-btn" onclick={() => player.prev()} title="Zurück (Shift+←)" aria-label="Zurück" disabled={!track}>
@@ -83,6 +93,9 @@
     <button class="icon-btn" class:on={player.queueOpen} onclick={() => (player.queueOpen = !player.queueOpen)} title="Warteschlange (Q)" aria-label="Warteschlange" aria-pressed={player.queueOpen}>
       <Icon name="queue" size={18} />
     </button>
+    <button class="icon-btn" onclick={openNowPlaying} disabled={!track} title="Jetzt läuft (N)" aria-label="Jetzt läuft öffnen">
+      <Icon name="expand" size={18} />
+    </button>
   </div>
   {#if player.error}<div class="error" role="status">{player.error}</div>{/if}
 </footer>
@@ -114,6 +127,7 @@
     min-width: 0;
   }
   .art {
+    display: block;
     width: 52px;
     flex: none;
   }
@@ -125,6 +139,14 @@
     font-size: 0.9rem;
   }
   .title {
+    display: block;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
     font-weight: 550;
     white-space: nowrap;
     overflow: hidden;
@@ -138,6 +160,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
+    width: fit-content;
+    max-width: 100%;
   }
   .artist:hover {
     color: var(--text);
@@ -228,6 +252,12 @@
     }
     .art {
       width: 44px;
+    }
+    .now {
+      cursor: pointer;
+    }
+    .meta {
+      flex: 1;
     }
   }
 </style>

@@ -39,11 +39,13 @@ WORKDIR /build
 RUN python -m venv /opt/venv
 COPY backend/requirements.lock ./requirements.lock
 RUN /opt/venv/bin/pip install -r requirements.lock
-# Optional ":ml" variant (x86_64 only, ~300 MB more): Essentia with TensorFlow, for the mood
-# models. The models themselves are not shipped (non-commercial licence); put them into
-# /data/models. Build with: docker build --build-arg AUDIUM_ML=1 -t audium:ml .
-ARG AUDIUM_ML=0
-RUN if [ "$AUDIUM_ML" = "1" ]; then \
+# On x86_64 Essentia comes with TensorFlow (~300 MB more) for the pre-trained models: style
+# detection and audio fingerprints (Discogs-EffNet), optionally moods. The models are not shipped
+# (non-commercial licence); audium downloads them into /data/models on first use. arm64 has no
+# such wheel and keeps the fallback. Build without TensorFlow: --build-arg AUDIUM_ML=0
+ARG TARGETARCH
+ARG AUDIUM_ML=1
+RUN if [ "$AUDIUM_ML" = "1" ] && [ "${TARGETARCH:-amd64}" = "amd64" ]; then \
       /opt/venv/bin/pip uninstall -y essentia \
    && /opt/venv/bin/pip install essentia-tensorflow==2.1b6.dev1389; \
     fi

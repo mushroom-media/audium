@@ -62,6 +62,17 @@ describe("queue", () => {
     expect(q.order.length).toBe(5);
   });
 
+  it("shuffling a whole list picks the first track at random too", () => {
+    const firsts = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      const q = Q.create(tracks, null, { ...Q.empty, shuffle: true }, rng);
+      expect([...ids(q)].sort()).toEqual([1, 2, 3, 4, 5]);
+      firsts.add(Q.current(q)!.id);
+    }
+    expect(firsts.size).toBeGreaterThan(1);
+    expect(Q.current(Q.create(tracks, null))!.id).toBe(1); // without shuffle: from the top
+  });
+
   it("play next, append, jump and remove", () => {
     let q = Q.create(tracks.slice(0, 3), 0);
     q = Q.playNext(q, [t(9)]);
@@ -81,6 +92,19 @@ describe("queue", () => {
     const q = Q.create(tracks, 0);
     expect(Q.prev(q).pos).toBe(0);
     expect(Q.prev({ ...q, repeat: "all" }).pos).toBe(4);
+  });
+  it("replaceUpcoming keeps the played tracks and the current one", () => {
+    let q = Q.jump(Q.create(tracks, 0), 2);
+    q = Q.replaceUpcoming(q, [t(9), t(8)]);
+    expect(ids(q)).toEqual([1, 2, 3, 9, 8]);
+    expect(Q.current(q)!.id).toBe(3);
+  });
+
+  it("trimHistory drops old played tracks only", () => {
+    const q = Q.trimHistory(Q.jump(Q.create(tracks, 0), 3), 1);
+    expect(ids(q)).toEqual([3, 4, 5]);
+    expect(Q.current(q)!.id).toBe(4);
+    expect(Q.trimHistory(q, 5)).toBe(q);
   });
 });
 

@@ -22,6 +22,8 @@
     });
     return () => ctrl.abort();
   });
+
+  const similarSource = (t: Track) => ({ kind: "Ähnlich wie", name: t.title, path: `/tracks/${t.id}/similar` });
 </script>
 
 <div class="page">
@@ -34,7 +36,7 @@
         <p class="by">{seed.artist}</p>
         <div class="actions">
           <button class="btn primary" onclick={() => seed && startRadio(seed)}><Icon name="radio" size={18} /> Radio starten</button>
-          <button class="btn" disabled={!tracks?.length} onclick={() => seed && tracks && player.playTracks([seed, ...tracks], 0)}>
+          <button class="btn" disabled={!tracks?.length} onclick={() => seed && tracks && player.playTracks([seed, ...tracks], 0, undefined, similarSource(seed))}>
             <Icon name="play" size={18} /> Alle abspielen
           </button>
         </div>
@@ -46,7 +48,7 @@
   {:else if tracks}
     <div class="list">
       {#each tracks as t, i (t.id)}
-        <div class="row-h"><TrackRow track={t} number={i + 1} onplay={() => tracks && player.playTracks(tracks, i)} /></div>
+        <div class="row-h"><TrackRow track={t} number={i + 1} onplay={() => tracks && player.playTracks(tracks, i, undefined, seed && similarSource(seed))} /></div>
       {/each}
     </div>
   {/if}

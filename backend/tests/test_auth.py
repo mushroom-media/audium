@@ -85,7 +85,7 @@ def test_csrf_blocks_requests_a_foreign_page_could_send(app, admin):
         assert bare.get("/api/v1/auth/me").status_code == 200  # reads need nothing
 
 
-def test_no_cors_headers_are_ever_sent(client, admin):
+def test_no_cors_headers_for_foreign_origins(client, admin):
     r = client.options(
         "/api/v1/auth/login",
         headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
@@ -200,7 +200,7 @@ def test_admin_creates_and_disables_user(admin_client, make_client):
     assert r.json()["username"] == "carol"
     assert admin_client.post("/api/v1/admin/users", json={"username": "carol", "password": USER_PW}).status_code == 409
     assert admin_client.post("/api/v1/admin/users", json={"username": "c", "password": USER_PW}).status_code == 400
-    assert admin_client.post("/api/v1/admin/users", json={"username": "dave", "password": "short"}).status_code == 400
+    assert admin_client.post("/api/v1/admin/users", json={"username": "dave", "password": "ab"}).status_code == 400
 
     carol = make_client()
     login(carol, "carol", USER_PW)
@@ -269,10 +269,11 @@ def test_user_settings_are_per_user(make_client, admin, db):
     a, b = make_client(), make_client()
     login(a, "admin", ADMIN_PW)
     login(b, "bob", USER_PW)
-    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "system", "stream_quality": "auto"}
+    defaults = {"theme": "system", "stream_quality": "auto", "shortcuts": "on"}
+    assert a.get("/api/v1/auth/me/settings").json() == defaults
     r = a.patch("/api/v1/auth/me/settings", json={"theme": "light"})
-    assert r.json() == {"theme": "light", "stream_quality": "auto"}
-    a.patch("/api/v1/auth/me/settings", json={"stream_quality": "low"})
-    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "light", "stream_quality": "low"}
+    assert r.json() == {**defaults, "theme": "light"}
+    a.patch("/api/v1/auth/me/settings", json={"stream_quality": "low", "shortcuts": "off"})
+    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "light", "stream_quality": "low", "shortcuts": "off"}
     assert b.get("/api/v1/auth/me/settings").json()["theme"] == "system"
     assert a.patch("/api/v1/auth/me/settings", json={"theme": "pink"}).status_code == 422

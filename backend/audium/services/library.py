@@ -1,6 +1,6 @@
 """Read access to the shared library: tracks, albums, artists, search."""
 
-from sqlalchemy import Connection, exists, select
+from sqlalchemy import Connection, exists, func, select
 
 from audium.db import search
 from audium.db.counts import CountCache
@@ -37,6 +37,15 @@ def _pick_sort(sorts: dict[str, Sort], name: str, order: str | None) -> tuple[So
 
 def _year(v: int) -> int | None:
     return v or None
+
+
+def _text_filter(kind: str, id_col, q: str | None) -> tuple[list, str]:
+    """Conditions narrowing a list to the full-text matches of `q` (in the list's own order), and
+    a part for its count-cache key. Input too short to search for leaves the list unfiltered."""
+    match = search.build_match_query(q) if q else None
+    if match is None:
+        return [], ""
+    return [search.match_filter(kind, id_col, match)], match
 
 
 # --- tracks --------------------------------------------------------------------------------
@@ -92,17 +101,43 @@ def list_tracks(
     offset: int = 0,
     limit: int = 100,
     artist_id: int | None = None,
+    q: str | None = None,
 ):
     s, desc = _pick_sort(TRACK_SORTS, sort, order)
-    conditions = [tracks.c.missing_since.is_(None)]
+    base, text_key = _track_ids_base(artist_id, q)
+    ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
+    total = counts.count(conn, f"tracks:{artist_id}:{text_key}", base)
+    return _ordered(conn, track_select(), tracks.c.id, ids, track_item), next_cursor, total
+
+
+def _track_ids_base(artist_id: int | None, q: str | None):
+    text_conditions, text_key = _text_filter("track", tracks.c.id, q)
+    conditions = [tracks.c.missing_since.is_(None), *text_conditions]
     if artist_id is not None:
         conditions.append(
             exists().where(track_artists.c.track_id == tracks.c.id, track_artists.c.artist_id == artist_id)
         )
-    base = select(tracks.c.id).where(*conditions)
-    ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
-    total = counts.count(conn, f"tracks:{artist_id}", base)
-    return _ordered(conn, track_select(), tracks.c.id, ids, track_item), next_cursor, total
+    return select(tracks.c.id).where(*conditions), text_key
+
+
+def track_ids(
+    conn: Connection,
+    *,
+    sort: str = "title",
+    order: str | None = None,
+    artist_id: int | None = None,
+    q: str | None = None,
+) -> list[int]:
+    """Every id of a track list, in list order: lets the player queue (and shuffle) all of it."""
+    s, desc = _pick_sort(TRACK_SORTS, sort, order)
+    base, _ = _track_ids_base(artist_id, q)
+    return list(conn.execute(base.order_by(*[c.desc() if desc else c.asc() for c in s.columns])).scalars())
+
+
+def tracks_by_ids(conn: Connection, ids: list[int]) -> list[dict]:
+    """Tracks in the order of `ids`; missing ones are left out."""
+    stmt = track_select().where(tracks.c.missing_since.is_(None))
+    return _ordered(conn, stmt, tracks.c.id, ids, track_item)
 
 
 def get_track(conn: Connection, track_id: int) -> dict:
@@ -199,20 +234,34 @@ def list_albums(
     offset: int = 0,
     limit: int = 100,
     artist_id: int | None = None,
+    appears_on: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    q: str | None = None,
 ):
     s, desc = _pick_sort(ALBUM_SORTS, sort, order)
-    conditions = [albums.c.track_count > 0]
+    text_conditions, text_key = _text_filter("album", albums.c.id, q)
+    conditions = [albums.c.track_count > 0, *text_conditions]
     if artist_id is not None:
         conditions.append(albums.c.album_artist_id == artist_id)
+    if appears_on is not None:
+        # Albums of other artists (compilations, features) with at least one track by this artist
+        conditions.append(albums.c.album_artist_id != appears_on)
+        conditions.append(
+            exists().where(
+                tracks.c.album_id == albums.c.id,
+                tracks.c.missing_since.is_(None),
+                track_artists.c.track_id == tracks.c.id,
+                track_artists.c.artist_id == appears_on,
+            )
+        )
     if year_from is not None:
         conditions.append(albums.c.year >= year_from)
     if year_to is not None:
         conditions.append(albums.c.year <= year_to)
     base = select(albums.c.id).where(*conditions)
     ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
-    total = counts.count(conn, f"albums:{artist_id}:{year_from}:{year_to}", base)
+    total = counts.count(conn, f"albums:{artist_id}:{appears_on}:{year_from}:{year_to}:{text_key}", base)
     return _ordered(conn, album_select(), albums.c.id, ids, album_item), next_cursor, total
 
 
@@ -264,18 +313,22 @@ def list_artists(
     offset: int = 0,
     limit: int = 100,
     role: str = "album",
+    q: str | None = None,
 ):
     s, desc = _pick_sort(ARTIST_SORTS, sort, order)
-    if role == "album":
-        cond = artists.c.album_count > 0
-    elif role == "all":
-        cond = (artists.c.track_count > 0) | (artists.c.album_count > 0)
-    else:
-        raise BadRequest("role must be 'album' or 'all'")
-    base = select(artists.c.id).where(cond)
+    text_conditions, text_key = _text_filter("artist", artists.c.id, q)
+    base = select(artists.c.id).where(_artist_role(role), *text_conditions)
     ids, next_cursor = page_ids(conn, base, s, desc, cursor, offset, limit)
-    total = counts.count(conn, f"artists:{role}", base)
+    total = counts.count(conn, f"artists:{role}:{text_key}", base)
     return _ordered(conn, artist_select(), artists.c.id, ids, artist_item), next_cursor, total
+
+
+def _artist_role(role: str):
+    if role == "album":
+        return artists.c.album_count > 0
+    if role == "all":
+        return (artists.c.track_count > 0) | (artists.c.album_count > 0)
+    raise BadRequest("role must be 'album' or 'all'")
 
 
 def get_artist(conn: Connection, artist_id: int) -> dict:
@@ -285,6 +338,45 @@ def get_artist(conn: Connection, artist_id: int) -> dict:
     if row is None:
         raise NotFound("artist not found")
     return artist_item(row)
+
+
+# --- A-Z index -----------------------------------------------------------------------------
+
+
+def letter_index(conn: Connection, key, *conditions) -> list[dict]:
+    """Where each initial starts in a list sorted ascending by `key` (a *_sort column), for
+    jumping to a letter: [{letter, offset}]. A-Z as letters; digits, symbols and other scripts
+    are "#", at the first position one of them appears."""
+    initial = func.substr(key, 1, 1)
+    rows = conn.execute(select(initial, func.count()).where(*conditions).group_by(initial).order_by(initial))
+    out: list[dict] = []
+    seen: set[str] = set()
+    offset = 0
+    for ch, n in rows:
+        letter = ch.upper() if ch and "a" <= ch <= "z" else "#"
+        if letter not in seen:
+            seen.add(letter)
+            out.append({"letter": letter, "offset": offset})
+        offset += n
+    return out
+
+
+def track_letters(conn: Connection, q: str | None = None) -> list[dict]:
+    text_conditions, _ = _text_filter("track", tracks.c.id, q)
+    return letter_index(conn, tracks.c.title_sort, tracks.c.missing_since.is_(None), *text_conditions)
+
+
+def album_letters(conn: Connection, sort: str, q: str | None = None) -> list[dict]:
+    keys = {"title": albums.c.title_sort, "artist": albums.c.artist_sort}
+    if sort not in keys:
+        raise BadRequest("letters exist for sort=title and sort=artist")
+    text_conditions, _ = _text_filter("album", albums.c.id, q)
+    return letter_index(conn, keys[sort], albums.c.track_count > 0, *text_conditions)
+
+
+def artist_letters(conn: Connection, role: str, q: str | None = None) -> list[dict]:
+    text_conditions, _ = _text_filter("artist", artists.c.id, q)
+    return letter_index(conn, artists.c.name_sort, _artist_role(role), *text_conditions)
 
 
 # --- search --------------------------------------------------------------------------------

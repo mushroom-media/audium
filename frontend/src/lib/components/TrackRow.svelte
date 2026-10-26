@@ -13,20 +13,26 @@
     number,
     showCover = true,
     showAlbum = true,
+    linkArtist = true,
     onplay,
     onremove,
     unavailable = false,
     note,
+    count,
   }: {
     track: Track | undefined;
     number?: number | null;
     showCover?: boolean;
     showAlbum?: boolean;
+    /** false: on touch screens the artist is plain text, so a tap anywhere plays (album pages). */
+    linkArtist?: boolean;
     onplay: () => void;
     onremove?: () => void;
     unavailable?: boolean;
     /** Shown instead of the album, e.g. why the track is in an auto-playlist. */
     note?: string | null;
+    /** A number in its own last column, e.g. how often the track was played. */
+    count?: number | null;
   } = $props();
 
   const active = $derived(track && player.current?.id === track.id);
@@ -47,25 +53,33 @@
     title={unavailable ? "Datei fehlt gerade in der Bibliothek" : undefined}
     oncontextmenu={(e) => openTrackMenu(e, [track])}
     class:no-album={!showAlbum}
+    class:has-count={count != null}
     role="button"
     tabindex="0"
     ondblclick={onplay}
     onclick={onRowClick}
     onkeydown={(e) => e.key === "Enter" && onplay()}
   >
-    <button class="num" aria-label="{track.title} abspielen" onclick={onplay}>
+    <button
+      class="num"
+      aria-label="{track.title} {active && player.playing ? 'pausieren' : 'abspielen'}"
+      onclick={() => (active ? player.toggle() : onplay())}
+    >
       <span class="n">{#if active && player.playing}<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>{:else}{number ?? ""}{/if}</span>
-      <span class="p"><Icon name="play" size={16} /></span>
+      <span class="p"><Icon name={active && player.playing ? "pause" : "play"} size={16} /></span>
     </button>
     {#if showCover}<div class="thumb"><Cover hash={track.cover} size={64} /></div>{/if}
     <div class="main">
       <div class="title">{track.title}</div>
-      <a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
+      {#if linkArtist || !touch}<a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
+      {:else}<span class="artist">{track.artist}</span>{/if}
     </div>
     {#if showAlbum}
       {#if note}<span class="album note" title={note}>{note}</span>
       {:else}<a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>{/if}
     {/if}
+    {#if count != null}<div class="count">{count.toLocaleString("de-DE")}</div>{/if}
+    <div class="dur">{duration(track.duration_ms)}</div>
     <div class="actions">
       <Heart {track} size={17} />
       {#if onremove}
@@ -77,7 +91,6 @@
         <Icon name="more" size={18} />
       </button>
     </div>
-    <div class="dur">{duration(track.duration_ms)}</div>
   </div>
 {:else}
   <div class="row skeleton" aria-hidden="true"><div class="num"></div><div class="main"><div class="bar"></div></div></div>
@@ -86,7 +99,7 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 40px 44px minmax(0, 1fr) minmax(0, 0.8fr) auto 56px;
+    grid-template-columns: 40px 44px minmax(0, 1fr) minmax(0, 0.8fr) 56px auto;
     align-items: center;
     gap: 12px;
     height: 100%;
@@ -95,7 +108,10 @@
     outline: none;
   }
   .row.no-album {
-    grid-template-columns: 40px minmax(0, 1fr) auto 56px;
+    grid-template-columns: 40px minmax(0, 1fr) 56px auto;
+  }
+  .row.has-count {
+    grid-template-columns: 40px 44px minmax(0, 1fr) minmax(0, 0.8fr) 56px 56px auto;
   }
   .row:not(.skeleton):hover,
   .row:focus-visible {
@@ -149,11 +165,18 @@
     font-size: 0.88rem;
     text-decoration: none;
     display: block;
+    /* Only as wide as the text, so the empty space beside it isn't a link. */
+    width: fit-content;
+    max-width: 100%;
   }
   .artist:hover,
   .album:hover {
     color: var(--text);
     text-decoration: underline;
+  }
+  .count {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
   }
   .dur {
     color: var(--text-muted);
@@ -161,9 +184,11 @@
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
+  /* Always the last column, so the menu sits at the row's end in every list. */
   .actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
   }
   /* Actions appear on hover; a filled heart stays visible so favorites stand out. */
   .actions > :global(*) {
@@ -220,6 +245,11 @@
     }
     .row.no-album {
       grid-template-columns: 32px minmax(0, 1fr) auto;
+    }
+    /* Heart + menu at a fixed width: the heart only shows when filled, and the count
+       in front of it has to line up from row to row. */
+    .row.has-count {
+      grid-template-columns: 44px minmax(0, 1fr) 40px 72px;
     }
     .album,
     .dur {

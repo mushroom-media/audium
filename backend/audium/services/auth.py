@@ -39,6 +39,27 @@ class Session:
 
 
 def login(conn: Connection, settings: Settings, username: str, password: str, ip: str, ua: str | None):
+    """A new browser session, or None for wrong credentials."""
+    row = check_credentials(conn, settings, username, password, ip)
+    if row is None:
+        return None
+    session = create_session(conn, settings, row.id, ip, ua)
+    return user_from_row(row), session
+
+
+def app_login(conn: Connection, settings: Settings, username: str, password: str, ip: str, device: str | None):
+    """A new API token for an audium app (same checks and rate limit as the web login), or None."""
+    row = check_credentials(conn, settings, username, password, ip)
+    if row is None:
+        return None
+    name = f"App: {(device or '').strip()[:50] or 'audium'}"
+    token_id, token = create_api_token(conn, row.id, name)
+    return user_from_row(row), token_id, token
+
+
+def check_credentials(conn: Connection, settings: Settings, username: str, password: str, ip: str):
+    """The user's row if the password is right and the account active, else None (counted against
+    the rate limit; raises RateLimited while it is exceeded)."""
     now = now_ms()
     window = settings.login_window_minutes * 60_000
     limit = settings.login_max_attempts
@@ -66,9 +87,8 @@ def login(conn: Connection, settings: Settings, username: str, password: str, ip
     if passwords.needs_rehash(row.password_hash):
         values["password_hash"] = passwords.hash_password(password)
     conn.execute(users.update().where(users.c.id == row.id).values(**values))
-    session = create_session(conn, settings, row.id, ip, ua)
     log.info("auth.login", user_id=row.id, ip=ip)
-    return user_from_row(row), session
+    return row
 
 
 def change_own_password(conn: Connection, user: User, current: str, new: str, keep_session_id: int | None):
@@ -190,6 +210,22 @@ def resolve_api_token(conn: Connection, token: str):
     if row is None or row.status != "active":
         return None
     return user_from_row(row), row
+
+
+def resolve_api_token_id(conn: Connection, token_id: int, created_at: int, user_id: int):
+    """The active user of an API token that still exists (for media tokens), else None."""
+    row = conn.execute(
+        select(users)
+        .join(api_tokens, api_tokens.c.user_id == users.c.id)
+        .where(api_tokens.c.id == token_id, api_tokens.c.created_at == created_at, users.c.id == user_id)
+    ).first()
+    if row is None or row.status != "active":
+        return None
+    return user_from_row(row)
+
+
+def api_token_created_at(conn: Connection, token_id: int) -> int:
+    return conn.execute(select(api_tokens.c.created_at).where(api_tokens.c.id == token_id)).scalar_one()
 
 
 def touch_api_token(conn: Connection, token_id: int) -> None:

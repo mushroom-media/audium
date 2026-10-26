@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Request, Response
+from fastapi import Depends, Query, Request, Response
 
+from audium.auth.media import read_media_token
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.errors import Forbidden, Unauthorized
@@ -33,6 +34,7 @@ class Principal:
     user: User
     session_id: int | None  # None when authenticated with an API token
     via: str  # session | token
+    token_id: int | None = None  # the API token; None for sessions
 
 
 def current_principal(request: Request) -> Principal:
@@ -48,7 +50,7 @@ def current_principal(request: Request) -> Principal:
         if row.last_used_at is None or row.last_used_at + _TOKEN_TOUCH_MS < now_ms():
             with db.write() as conn:
                 auth_service.touch_api_token(conn, row.token_id)
-        return Principal(user, None, "token")
+        return Principal(user, None, "token", row.token_id)
 
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
@@ -66,6 +68,24 @@ def current_principal(request: Request) -> Principal:
 
 def current_user(principal: Principal = Depends(current_principal)) -> User:
     return principal.user
+
+
+def media_user(
+    request: Request,
+    mt: str | None = Query(None, max_length=256, description="Media token of an app (see /auth/media-token)"),
+) -> User:
+    """For streams, covers and live updates: also accepts a signed media token in the URL, because
+    `<audio>`, `<img>` and `EventSource` of the apps cannot send an Authorization header."""
+    if not mt:
+        return current_principal(request).user
+    found = read_media_token(request.app.state.media_key, mt, now_ms())
+    if found is None:
+        raise Unauthorized("media token expired")
+    with get_db(request).read() as conn:
+        user = auth_service.resolve_api_token_id(conn, *found)
+    if user is None:
+        raise Unauthorized("media token revoked")
+    return user
 
 
 def require_admin(user: User = Depends(current_user)) -> User:

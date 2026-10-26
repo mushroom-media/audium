@@ -34,6 +34,7 @@
   let fields = $state<RuleField[]>([]);
   let orders = $state<string[]>(["random"]);
   let genres = $state<string[]>([]);
+  let styles = $state<string[]>([]);
   // The editor starts from the props once and then owns its state.
   const start = untrack(() => ({ name: initialName, rule: initial }));
   let name = $state(start.name);
@@ -53,6 +54,7 @@
       orders = r.orders;
     });
     get<{ name: string }[]>("/genres").then((g) => (genres = g.map((x) => x.name)));
+    get<{ name: string }[]>("/styles").then((s) => (styles = s.map((x) => x.name)));
   });
 
   const fieldOf = (name: string) => fields.find((f) => f.name === name);
@@ -137,7 +139,7 @@
               {#each f.options as o (o)}<option value={o}>{OPTION_LABELS[o] ?? o}</option>{/each}
             </select>
           {:else if f?.kind === "text"}
-            <input bind:value={c.value} list={c.field === "genre" ? "genre-list" : undefined} aria-label="Wert" />
+            <input bind:value={c.value} list={c.field === "genre" ? "genre-list" : c.field === "style" ? "style-list" : undefined} aria-label="Wert" />
           {:else if Array.isArray(c.value)}
             <input type="number" step={isScale(c) ? 0.05 : 1} min={isScale(c) ? 0 : undefined} max={isScale(c) ? 1 : undefined}
               value={display(c.value[0])} oninput={(e) => ((c.value as [number, number])[0] = Number(e.currentTarget.value))} aria-label="Von" />
@@ -156,6 +158,7 @@
       </div>
     {/each}
     <datalist id="genre-list">{#each genres as g (g)}<option value={g}></option>{/each}</datalist>
+    <datalist id="style-list">{#each styles as s (s)}<option value={s}></option>{/each}</datalist>
     <button class="btn ghost small" onclick={() => conditions.push({ field: "year", op: ">=", value: 2000 })}>
       <Icon name="plus" size={16} /> Bedingung
     </button>

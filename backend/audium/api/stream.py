@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from audium.api.deps import current_user, get_db
+from audium.api.deps import get_db, media_user
 from audium.db.engine import Database
 from audium.errors import AudiumError
 from audium.media.transcode import MAX_KBPS, MIN_KBPS, TARGETS
@@ -39,7 +39,7 @@ async def stream(
     format: Literal["raw", "opus", "aac", "mp3"] = "raw",
     bitrate: int | None = Query(None, ge=MIN_KBPS, le=MAX_KBPS, description="kbit/s for transcoding"),
     t: float = Query(0, ge=0, le=86_400, description="Start offset in seconds (transcoding only)"),
-    _user: User = Depends(current_user),
+    _user: User = Depends(media_user),
     db: Database = Depends(get_db),
 ):
     def lookup():

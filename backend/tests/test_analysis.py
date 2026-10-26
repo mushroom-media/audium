@@ -1,14 +1,28 @@
 import os
 import random
 import subprocess
+import time
 
+import numpy as np
 import pytest
 from sqlalchemy import func, select, update
 
-from audium.analysis import autoplaylists, explain, features, rules
+from audium.analysis import autoplaylists, explain, features, models, rules, similarity, styles
+from audium.analysis import tasks as analysis_tasks
 from audium.analysis.genres import normalize
 from audium.analysis.tasks import analysis_stats, make_handlers
-from audium.db.schema import auto_playlists, genres, track_features, track_genres, tracks
+from audium.db.schema import (
+    auto_playlists,
+    genres,
+    track_artists,
+    track_embeddings,
+    track_features,
+    track_genres,
+    track_styles,
+    tracks,
+)
+from audium.db.schema import styles as styles_table
+from audium.db.state import set_state
 from audium.devtools.gen_testlib import generate_db
 from audium.errors import BadRequest
 from audium.jobs import queue as jobq
@@ -461,6 +475,78 @@ def test_similar_falls_back_without_analysis(library, db, users):
     assert [t["title"] for t in near] == ["J2"]
 
 
+def test_album_and_artist_radio(analysed, db, users):
+    bob_c = users["bob"][1]
+    with db.read() as conn:
+        album_id, artist_id = conn.execute(
+            select(tracks.c.album_id, tracks.c.artist_id).where(tracks.c.id == analysed[10])
+        ).one()
+        album_tracks = set(conn.execute(select(tracks.c.id).where(tracks.c.album_id == album_id)).scalars())
+        artist_tracks = set(
+            conn.execute(select(track_artists.c.track_id).where(track_artists.c.artist_id == artist_id)).scalars()
+        )
+    for path, own_tracks in ((f"albums/{album_id}", album_tracks), (f"artists/{artist_id}", artist_tracks)):
+        station = [t["id"] for t in bob_c.get(f"/api/v1/{path}/radio", params={"limit": 40}).json()]
+        assert len(station) == len(set(station)) == 40
+        own = [t for t in station if t in own_tracks]
+        assert station[0] in own_tracks
+        assert len(own) == min(10, len(own_tracks))  # about a quarter, spread over the station
+        assert len(own) == 1 or station.index(own[-1]) > 20
+    assert bob_c.get("/api/v1/albums/99999999/radio").status_code == 404
+    assert bob_c.get("/api/v1/artists/99999999/radio").status_code == 404
+
+
+def test_radio_continues_without_repeats(analysed, db, users):
+    """A playing station fetches its next tracks with the ones it already had excluded."""
+    bob_c = users["bob"][1]
+    seed = analysed[10]
+    with db.read() as conn:
+        album_id = conn.execute(select(tracks.c.album_id).where(tracks.c.id == seed)).scalar()
+        album_tracks = set(conn.execute(select(tracks.c.id).where(tracks.c.album_id == album_id)).scalars())
+    for path in (f"tracks/{seed}", f"albums/{album_id}"):
+        first = [t["id"] for t in bob_c.get(f"/api/v1/{path}/radio", params={"limit": 20}).json()]
+        more = [t["id"] for t in bob_c.get(f"/api/v1/{path}/radio", params={"limit": 20, "exclude": first}).json()]
+        assert len(more) == 20 and not set(first) & set(more)
+        if path.startswith("albums"):
+            assert set(more) & album_tracks or album_tracks <= set(first)  # own tracks keep coming
+    station = bob_c.get(f"/api/v1/tracks/{seed}/radio", params={"limit": 5, "exclude": [seed]}).json()
+    assert seed not in [t["id"] for t in station]  # a continued station does not restart at its seed
+
+
+def test_vector_index_refreshes_in_background(analysed, db):
+    """Only the first load happens in the request; later reloads swap in when they are done."""
+    index = similarity.VectorIndex(db)
+    seed = analysed[10]
+    with db.read() as conn:
+        assert index.nearest(conn, seed, 5)
+        before = index._features
+    with db.write() as conn:
+        set_state(conn, similarity.ANALYSIS_GENERATION, "changed")
+    with db.read() as conn:
+        assert index.nearest(conn, seed, 5)  # answered at once, from the old matrices
+    for _ in range(200):
+        if index._features is not before:
+            break
+        time.sleep(0.01)
+    assert index._features is not before and index._generation == "changed"
+
+
+def test_album_radio_falls_back_without_analysis(library, db, users):
+    library.add("J/1.mp3", tags("J1", artist="A", album="Blue", genre="Jazz", date="1960"))
+    library.add("J/2.mp3", tags("J2", artist="A", album="Blue", genre="Jazz", date="1960"))
+    library.add("K/1.mp3", tags("K1", artist="B", album="Kind", genre="Jazz", date="1959"))
+    library.add("S/1.mp3", tags("S1", artist="C", album="Surf", genre="Surf", date="1963"))
+    library.add("R/1.mp3", tags("R1", artist="D", album="Loud", genre="Rock", date="1994"))
+    library.scan()
+    bob_c = users["bob"][1]
+    with db.read() as conn:
+        album_id = conn.execute(select(tracks.c.album_id).where(tracks.c.title == "J1")).scalar()
+    station = [t["title"] for t in bob_c.get(f"/api/v1/albums/{album_id}/radio", params={"limit": 8}).json()]
+    assert station[0] in {"J1", "J2"}
+    # Same genre and the same decade qualify; the Rock album from the 90s matches neither.
+    assert sorted(t for t in station if t not in {"J1", "J2"}) == ["K1", "S1"]
+
+
 def test_health_reports_analysis_backend(client, db):
     from audium.db.state import set_state
 
@@ -473,6 +559,7 @@ def test_admin_analysis_endpoints(audio_library, users):
     admin_c, bob_c = users["admin"][1], users["bob"][1]
     status = admin_c.get("/api/v1/admin/analysis").json()
     assert status["tracks"] == 3 and status["pending"] == 3
+    assert status["fingerprints"] == 0 and status["styles"] == 0
     assert admin_c.post("/api/v1/admin/analysis/start").status_code == 202
     assert bob_c.get("/api/v1/admin/analysis").status_code == 403
     assert admin_c.get("/api/v1/admin/analysis/failures").json() == []
@@ -488,3 +575,226 @@ def test_cluster_mixes_do_not_overlap(analysed, db):
         ).all()
     ids = [r[0] for r in rows]
     assert ids and len(ids) == len(set(ids))
+
+
+# --- styles, detected genres, fingerprints -------------------------------------------------
+
+
+def test_style_to_genre_table():
+    assert styles.genre_of("Electronic---Deep House") == "House"
+    assert styles.genre_of("Electronic---Ambient") == "Ambient"
+    assert styles.genre_of("Electronic---IDM") == "Electronic"  # not listed: the top genre's default
+    assert styles.genre_of("Rock---Shoegaze") == "Indie"
+    assert styles.genre_of("Rock---Thrash") == "Metal"
+    assert styles.genre_of("Hip Hop---Boom Bap") == "Hip-Hop"
+    assert styles.genre_of("Hip Hop---RnB/Swing") == "R&B"
+    assert styles.genre_of("Funk / Soul---Neo Soul") == "Soul"
+    assert styles.genre_of("Non-Music---Spoken Word") == "Audiobook"
+    assert styles.genre_of("Non-Music---Comedy") is None
+    assert styles.genre_of("Unknown---Thing") is None
+    # Every genre a style can map to is one of the canonical genre names.
+    targets = {g for default, exc in styles._TABLE.values() for g in [default, *exc.values()] if g}
+    assert targets <= set(normalize_aliases_values())
+
+
+def normalize_aliases_values() -> set[str]:
+    from audium.analysis.genres import ALIASES
+
+    return set(ALIASES.values())
+
+
+def _add_styles(conn, assignments: dict[int, list[tuple[str, float]]]) -> None:
+    cache: dict[str, int] = {}
+    ids = styles.style_ids(conn, {label for found in assignments.values() for label, _p in found}, cache)
+    conn.execute(
+        track_styles.insert(),
+        [{"track_id": t, "style_id": ids[label], "prob": p} for t, found in assignments.items() for label, p in found],
+    )
+
+
+def test_detected_genres_fill_untagged_tracks_smoothed_by_album(library, db):
+    for i in range(1, 5):
+        library.add(f"H/{i}.mp3", tags(f"H{i}", artist="DJ", album="Club", track=i))
+    library.add("T/1.mp3", tags("Tagged", artist="Band", album="Live", genre="Rock"))
+    library.scan()
+    with db.write() as conn:
+        tid = dict(conn.execute(select(tracks.c.title, tracks.c.id)).all())
+        house = [("Electronic---Deep House", 0.8), ("Electronic---Tech House", 0.4)]
+        _add_styles(
+            conn,
+            {
+                tid["H1"]: house,
+                tid["H2"]: house,
+                tid["H3"]: house,
+                tid["H4"]: [("Electronic---Techno", 0.7)],  # the odd one out on a house album
+                tid["Tagged"]: [("Electronic---Trance", 0.9)],  # the tag wins
+            },
+        )
+        analysis_tasks.refresh_detected_genres(conn)
+        rows = conn.execute(
+            select(tracks.c.title, genres.c.name, track_genres.c.source, track_genres.c.weight)
+            .join(track_genres, track_genres.c.track_id == tracks.c.id)
+            .join(genres, genres.c.id == track_genres.c.genre_id)
+        ).all()
+        by_track: dict[str, list] = {}
+        for r in rows:
+            by_track.setdefault(r.title, []).append((r.name, r.source, r.weight))
+        counts = dict(conn.execute(select(genres.c.name, genres.c.track_count)).all())
+        style_counts = dict(conn.execute(select(styles_table.c.name, styles_table.c.track_count)).all())
+    assert by_track["Tagged"] == [("Rock", "tag", 1.0)]
+    assert by_track["H1"] == [("House", "detected", 1.0)]
+    # Half its own Techno, half the album average (mostly House): both, Techno weighs more.
+    h4 = dict((g, w) for g, _s, w in by_track["H4"])
+    assert set(h4) == {"House", "Techno"} and h4["Techno"] > h4["House"] and abs(sum(h4.values()) - 1) < 0.01
+    assert counts["House"] == 4 and counts["Techno"] == 1 and counts["Rock"] == 1
+    assert style_counts["Deep House"] == 3 and style_counts["Tech House"] == 3  # prob >= 0.3
+    # A new genre tag replaces the detected genres on the next run.
+    library.add("H/4.mp3", tags("H4", artist="DJ", album="Club", track=4, genre="Techno"))
+    library.scan()
+    with db.write() as conn:
+        analysis_tasks.refresh_detected_genres(conn)
+        h4_rows = conn.execute(
+            select(genres.c.name, track_genres.c.source)
+            .join(track_genres, track_genres.c.genre_id == genres.c.id)
+            .where(track_genres.c.track_id == tid["H4"])
+        ).all()
+    assert [tuple(r) for r in h4_rows] == [("Techno", "tag")]
+
+
+def test_style_playlists_and_rules(analysed, db, users):
+    with db.write() as conn:
+        _add_styles(conn, {t: [("Rock---Shoegaze", 0.9)] for t in analysed[:40]})
+        _add_styles(conn, {t: [("Jazz---Cool Jazz", 0.9)] for t in analysed[40:50]})  # too few
+        analysis_tasks.refresh_detected_genres(conn)
+        autoplaylists.generate(conn)
+        keys = set(conn.execute(select(auto_playlists.c.key)).scalars())
+    assert "style:rockshoegaze" in keys and "style:jazzcooljazz" not in keys
+    admin_c = users["admin"][1]
+    preview = admin_c.post(
+        "/api/v1/rules/preview",
+        json={"rule": {"conditions": [{"field": "style", "op": "is", "value": "shoegaze"}], "limit": 100}},
+    ).json()
+    assert preview["count"] == 40 and preview["needs_analysis"]
+    listed = admin_c.get("/api/v1/styles").json()
+    assert listed[0] == {"name": "Shoegaze", "genre": "Indie", "track_count": 40}
+    origins = {a["key"]: (a["origin"], a["detected_tracks"]) for a in admin_c.get("/api/v1/autoplaylists").json()}
+    assert origins["style:rockshoegaze"] == ("styles", None)
+    assert origins["rule:workout"] == ("features", None)
+    genre_origins = [v for k, v in origins.items() if k.startswith("genre:")]
+    assert genre_origins and all(o == "tags" and isinstance(n, int) for o, n in genre_origins)
+
+
+def _embed(conn, vectors: dict[int, np.ndarray]) -> None:
+    conn.execute(
+        track_embeddings.insert(),
+        [
+            {"track_id": t, "model": features.EMBEDDING_MODEL, "vector": v.astype(np.float16).tobytes()}
+            for t, v in vectors.items()
+        ],
+    )
+
+
+def test_similarity_prefers_fingerprints(analysed, db, users):
+    rng = np.random.default_rng(3)
+    centers = rng.normal(size=(3, 1280))
+    embedded = analysed[:600]
+    with db.write() as conn:
+        _embed(conn, {t: centers[t % 3] + rng.normal(scale=0.3, size=1280) for t in embedded})
+    bob_c = users["bob"][1]
+    seed = embedded[7]
+    near = [t["id"] for t in bob_c.get(f"/api/v1/tracks/{seed}/similar", params={"limit": 20}).json()]
+    assert len(near) == 20 and all(t % 3 == seed % 3 for t in near)  # same "sound" only
+    # A track without a fingerprint still gets neighbours from the hand-made descriptors.
+    plain = analysed[1000]
+    assert len(bob_c.get(f"/api/v1/tracks/{plain}/similar", params={"limit": 5}).json()) == 5
+
+
+def test_sound_only_source(analysed, db, users):
+    """With source "sound" only detected styles and mixes over the fingerprints are suggested."""
+    rng = np.random.default_rng(4)
+    centers = rng.normal(size=(3, 1280))
+    labels = ["Rock---Shoegaze", "Electronic---Deep House", "Jazz---Cool Jazz"]
+    embedded = analysed[:900]
+    with db.write() as conn:
+        _embed(conn, {t: centers[i % 3] + rng.normal(scale=0.3, size=1280) for i, t in enumerate(embedded)})
+        _add_styles(conn, {t: [(labels[i % 3], 0.8)] for i, t in enumerate(embedded)})
+        analysis_tasks.refresh_detected_genres(conn)
+        autoplaylists.generate(conn)  # "all" first: genre, decade, rule and cluster suggestions
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    assert admin_c.get("/api/v1/admin/autoplaylists/source").json() == {"source": "all"}
+    assert bob_c.put("/api/v1/admin/autoplaylists/source", json={"source": "sound"}).status_code == 403
+    assert admin_c.put("/api/v1/admin/autoplaylists/source", json={"source": "x"}).status_code == 422
+    assert admin_c.put("/api/v1/admin/autoplaylists/source", json={"source": "sound"}).json() == {"source": "sound"}
+    with db.write() as conn:
+        assert autoplaylists.source(conn) == "sound"
+        autoplaylists.generate(conn)
+        rows = conn.execute(select(auto_playlists)).all()
+        sound_items = conn.execute(
+            select(autoplaylists.auto_playlist_items.c.track_id, autoplaylists.auto_playlist_items.c.reason)
+            .join(auto_playlists, auto_playlists.c.id == autoplaylists.auto_playlist_items.c.auto_playlist_id)
+            .where(auto_playlists.c.generator == "sound")
+        ).all()
+    keys = {r.key for r in rows}
+    assert {r.generator for r in rows} == {"tag", "sound"}  # the old suggestions are gone
+    assert {"style:rockshoegaze", "style:electronicdeephouse", "style:jazzcooljazz"} <= keys
+    assert all(k.startswith(("style:", "sound:")) for k in keys)
+    for slug in ("rockshoegaze", "electronicdeephouse", "jazzcooljazz"):
+        assert any(k.startswith(f"sound:{slug}") for k in keys)
+    # Every mix holds one sound only, named after its style, and mixes do not overlap.
+    by_key = {r.key: r for r in rows}
+    assert by_key["sound:rockshoegaze"].name == "Mix: Shoegaze"
+    ids = [r.track_id for r in sound_items]
+    assert ids and len(ids) == len(set(ids)) and set(ids) <= set(embedded)
+    assert {r.reason for r in sound_items} == {"Shoegaze", "Deep House", "Cool Jazz"}
+    origins = {a["key"]: a["origin"] for a in admin_c.get("/api/v1/autoplaylists").json()}
+    assert set(origins.values()) == {"styles"}
+
+
+def test_embedding_matrix_is_reduced_and_normalized(analysed, db):
+    rng = np.random.default_rng(1)
+    with db.write() as conn:
+        _embed(conn, {t: rng.normal(size=1280) for t in analysed[:300]})
+        conn.execute(
+            track_embeddings.insert().values(track_id=analysed[300], model=features.EMBEDDING_MODEL, vector=None)
+        )
+    with db.read() as conn:
+        ids, z = similarity.embedding_matrix(conn, dims=32)
+    assert list(ids) == sorted(analysed[:300]) and z.shape == (300, 32)
+    assert np.allclose(np.linalg.norm(z, axis=1), 1, atol=1e-4)
+
+
+def test_analysis_queues_tracks_without_fingerprint(audio_library, db, settings, monkeypatch):
+    with db.write() as conn:
+        set_state(conn, analysis_tasks.BACKEND_STATE, "essentia")
+        ids = list(conn.execute(select(tracks.c.id)).scalars())
+        conn.execute(
+            track_features.insert(),
+            [
+                {"track_id": t, "analyzer": "essentia", "analyzer_version": features.ANALYZER_VERSION,
+                 "status": "ok", "fingerprint": fp, "analyzed_at": 1}
+                for t, fp in conn.execute(select(tracks.c.id, analysis_tasks._fingerprint_sql()))
+            ],
+        )  # fmt: skip
+        assert analysis_stats(conn)["pending"] == 0
+        set_state(conn, analysis_tasks.BACKEND_STATE, "essentia+effnet")
+        assert analysis_stats(conn)["pending"] == len(ids)
+        _embed(conn, {ids[0]: np.zeros(1280)})
+        assert analysis_stats(conn)["pending"] == len(ids) - 1
+
+
+def test_model_download_checks_the_checksum(tmp_path, monkeypatch):
+    import hashlib
+    import io
+
+    good, bad = b"model-bytes", b"tampered"
+    monkeypatch.setattr(
+        models, "FILES", {"a.pb": ("x/a.pb", hashlib.sha256(good).hexdigest()), "b.json": ("x/b.json", "0" * 64)}
+    )
+    served = {"x/a.pb": good, "x/b.json": bad}
+    monkeypatch.setattr(
+        models.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(served[url.removeprefix(models.BASE_URL)])
+    )
+    assert not models.ensure(tmp_path, download=True)
+    assert (tmp_path / "a.pb").read_bytes() == good
+    assert not (tmp_path / "b.json").exists() and not list(tmp_path.glob("*.part"))
+    assert not models.ensure(tmp_path / "other", download=False)

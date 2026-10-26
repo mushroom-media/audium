@@ -11,8 +11,14 @@ from audium.api.deps import (
     set_session_cookie,
 )
 from audium.api.models import (
+    AppLoginIn,
+    AppLoginOut,
+    AppPasswordCreate,
+    AppPasswordCreated,
+    AppPasswordOut,
     InviteCheck,
     LoginIn,
+    MediaTokenOut,
     MeUpdate,
     Ok,
     PasswordChange,
@@ -27,13 +33,16 @@ from audium.api.models import (
     UserSettings,
     UserSettingsUpdate,
 )
+from audium.auth.media import MEDIA_TTL_MS, make_media_token
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.errors import Forbidden, Unauthorized
+from audium.services import app_passwords
 from audium.services import auth as auth_service
 from audium.services import settings as settings_service
 from audium.services import users as user_service
 from audium.services.users import User
+from audium.util import now_ms
 
 router = APIRouter(tags=["auth"])
 
@@ -98,7 +107,39 @@ def login(
     return _user_out(user)
 
 
-@router.post("/auth/logout", response_model=Ok)
+@router.post(
+    "/auth/app-login",
+    response_model=AppLoginOut,
+    summary="Log in from an audium app: returns a bearer token instead of a cookie",
+)
+def app_login(
+    body: AppLoginIn, request: Request, db: Database = Depends(get_db), settings: Settings = Depends(get_settings)
+):
+    with db.write() as conn:
+        result = auth_service.app_login(conn, settings, body.username, body.password, client_ip(request), body.device)
+    if result is None:
+        raise Unauthorized("invalid username or password")
+    user, _token_id, token = result
+    return {"token": token, "user": _user_out(user)}
+
+
+@router.get(
+    "/auth/media-token",
+    response_model=MediaTokenOut,
+    summary="Signed token for stream, cover and event URLs of an app (they cannot send headers)",
+)
+def media_token(request: Request, principal: Principal = Depends(current_principal), db: Database = Depends(get_db)):
+    if principal.token_id is None:
+        raise Forbidden("media tokens are for API tokens; the web UI uses its cookie")
+    with db.read() as conn:
+        created_at = auth_service.api_token_created_at(conn, principal.token_id)
+    expires_at = now_ms() + MEDIA_TTL_MS
+    key = request.app.state.media_key
+    token = make_media_token(key, principal.token_id, created_at, principal.user.id, expires_at)
+    return {"token": token, "expires_at": expires_at}
+
+
+@router.post("/auth/logout", response_model=Ok, summary="End the session, or revoke the token of an app")
 def logout(
     response: Response,
     principal: Principal = Depends(current_principal),
@@ -108,6 +149,9 @@ def logout(
     if principal.session_id is not None:
         with db.write() as conn:
             auth_service.revoke_session(conn, principal.user.id, principal.session_id)
+    elif principal.token_id is not None:
+        with db.write() as conn:
+            auth_service.revoke_api_token(conn, principal.user.id, principal.token_id)
     clear_session_cookie(response, settings)
     return Ok()
 
@@ -167,6 +211,33 @@ def create_token(body: TokenCreate, user: User = Depends(current_user), db: Data
 def delete_token(token_id: int, user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.write() as conn:
         auth_service.revoke_api_token(conn, user.id, token_id)
+    return Ok()
+
+
+@router.get("/auth/app-passwords", response_model=list[AppPasswordOut], summary="Your app passwords (Subsonic apps)")
+def my_app_passwords(user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        return app_passwords.list_for_user(conn, user.id)
+
+
+@router.post(
+    "/auth/app-passwords",
+    response_model=AppPasswordCreated,
+    status_code=201,
+    summary="Create a password for a Subsonic app (shown only once)",
+)
+def create_app_password(
+    body: AppPasswordCreate, request: Request, user: User = Depends(current_user), db: Database = Depends(get_db)
+):
+    with db.write() as conn:
+        out, password = app_passwords.create(conn, request.app.state.secrets, user.id, body.name)
+    return {**out, "password": password}
+
+
+@router.delete("/auth/app-passwords/{password_id}", response_model=Ok, summary="Revoke an app password")
+def revoke_app_password(password_id: int, user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        app_passwords.revoke(conn, user.id, password_id)
     return Ok()
 
 

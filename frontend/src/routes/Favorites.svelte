@@ -17,12 +17,11 @@
 
   async function playFrom(index: number, shuffle = false) {
     const tracks = await list.slice(index, QUEUE_WINDOW);
-    if (shuffle !== player.queue.shuffle) player.toggleShuffle();
-    player.playTracks(tracks, 0);
+    player.playTracks(tracks, shuffle ? null : 0, shuffle, { kind: "Playlist", name: "Lieblingssongs", path: "/favorites", ref: "favorites" });
   }
 </script>
 
-<VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Lieblingssongs">
+<VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Lieblingssongs" keep="favorites">
   {#snippet header()}
     <header class="hero">
       <div class="badge" aria-hidden="true"><Icon name="heart" size={56} filled /></div>
@@ -32,7 +31,7 @@
         {#if list.total !== null}<p class="count">{plural(list.total, "Titel", "Titel")}</p>{/if}
         <div class="actions">
           <button class="btn primary" disabled={!list.total} onclick={() => playFrom(0)}><Icon name="play" size={18} /> Abspielen</button>
-          <button class="btn" disabled={!list.total} onclick={() => playFrom(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
+          <button class="btn square" disabled={!list.total} onclick={() => playFrom(0, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
         </div>
       </div>
     </header>

@@ -46,6 +46,20 @@ class LoginIn(BaseModel):
     password: str = Field(max_length=256)
 
 
+class AppLoginIn(LoginIn):
+    device: str | None = Field(None, max_length=64, description='Shown in the token list, e.g. "Pixel 8"')
+
+
+class AppLoginOut(BaseModel):
+    token: str = Field(description="Bearer token for all further requests; logging out revokes it")
+    user: "UserOut"
+
+
+class MediaTokenOut(BaseModel):
+    token: str = Field(description="Append as ?mt=... to stream, cover and event URLs")
+    expires_at: int
+
+
 class SetupStatus(BaseModel):
     needs_setup: bool
 
@@ -98,6 +112,23 @@ class TokenCreated(TokenOut):
     token: str = Field(description="Shown only once")
 
 
+class AppPasswordCreate(BaseModel):
+    name: str = Field(max_length=64, description='Which app or device, e.g. "Symfonium Handy"')
+
+
+class AppPasswordOut(BaseModel):
+    id: int
+    name: str
+    prefix: str = Field(description="First characters of the password")
+    created_at: int
+    last_used_at: int | None
+    last_client: str | None = Field(description="Name of the app that used it last")
+
+
+class AppPasswordCreated(AppPasswordOut):
+    password: str = Field(description="Shown only once")
+
+
 class UserCreate(BaseModel):
     username: str = Field(max_length=64)
     password: str = Field(max_length=256)
@@ -138,8 +169,18 @@ class InviteCheck(BaseModel):
 class UserSettings(BaseModel):
     theme: Literal["system", "dark", "light"]
     stream_quality: Literal["auto", "high", "medium", "low"]
+    shortcuts: Literal["on", "off"]
 
 
 class UserSettingsUpdate(BaseModel):
     theme: Literal["system", "dark", "light"] | None = None
     stream_quality: Literal["auto", "high", "medium", "low"] | None = None
+    shortcuts: Literal["on", "off"] | None = None
+
+
+class ServerSettings(BaseModel):
+    artist_album_covers: Literal["on", "off"]
+
+
+class ServerSettingsUpdate(BaseModel):
+    artist_album_covers: Literal["on", "off"] | None = None

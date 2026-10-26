@@ -16,6 +16,8 @@ dependencies = [
     "sqlalchemy>=2.0.30,<2.1",
     "alembic>=1.13,<2",
     "argon2-cffi>=23.1",
+    # AES-GCM for the Subsonic app passwords (stored encrypted, see docs/subsonic.md)
+    "cryptography>=42",
     "mutagen>=1.47",
     "pillow>=10.4",
     "structlog>=24.1",

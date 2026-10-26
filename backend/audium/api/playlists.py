@@ -1,10 +1,12 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from starlette.concurrency import run_in_threadpool
 
-from audium.api.deps import current_user, get_db
+from audium.api.deps import current_user, get_db, get_settings
 from audium.api.models import Ok
 from audium.api.playlist_models import (
+    CoverChoice,
     ItemMove,
     ItemsAdd,
     ItemsChanged,
@@ -16,12 +18,17 @@ from audium.api.playlist_models import (
     ShareOut,
     ShareSet,
 )
+from audium.config import Settings
 from audium.db.engine import Database
 from audium.errors import BadRequest
+from audium.scanner.covers import CoverStore
 from audium.services import playlists as svc
+from audium.services.permissions import require_playlist
 from audium.services.users import User
 
 router = APIRouter(prefix="/playlists", tags=["playlists"])
+
+MAX_COVER_BYTES = 10_000_000
 
 IF_MATCH = Header(None, alias="If-Match", description="Expected playlist version; 409 if it changed")
 
@@ -89,6 +96,54 @@ def update_playlist(
             rule=body.rule,
             if_version=_version(if_match),
         )
+    _publish(request, event)
+    return out
+
+
+@router.put("/{playlist_id}/cover", response_model=PlaylistOut, summary="Pick a built-in cover or reset it (owner)")
+def choose_cover(
+    playlist_id: int,
+    body: CoverChoice,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Database = Depends(get_db),
+):
+    with db.write() as conn:
+        out, event = svc.set_cover(conn, user, playlist_id, preset=body.preset)
+    _publish(request, event)
+    return out
+
+
+@router.post(
+    "/{playlist_id}/cover",
+    response_model=PlaylistOut,
+    summary="Upload a cover image (owner). The body is the image itself (JPEG, PNG, WebP, ...).",
+)
+async def upload_cover(
+    playlist_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    if int(request.headers.get("content-length") or 0) > MAX_COVER_BYTES:
+        raise BadRequest(f"the image must be smaller than {MAX_COVER_BYTES // 1_000_000} MB")
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > MAX_COVER_BYTES:
+            raise BadRequest(f"the image must be smaller than {MAX_COVER_BYTES // 1_000_000} MB")
+    return await run_in_threadpool(_store_upload, playlist_id, bytes(data), request, user, db, settings)
+
+
+def _store_upload(playlist_id: int, data: bytes, request: Request, user: User, db: Database, settings: Settings):
+    with db.read() as conn:
+        require_playlist(conn, user, playlist_id, "manage")  # before spending time on the image
+    rendered = CoverStore(settings.covers_dir).ingest(data)
+    if rendered is None:
+        raise BadRequest("not a readable image")
+    with db.write() as conn:
+        out, event = svc.set_cover(conn, user, playlist_id, upload=rendered)
     _publish(request, event)
     return out
 

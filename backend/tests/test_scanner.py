@@ -1,14 +1,15 @@
 import os
 import threading
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
 
-from audium.db.schema import albums, artists, covers, library_roots, tracks
+from audium.db.schema import albums, artists, covers, library_roots, track_artists, tracks
 from audium.scanner import scan as scan_module
 from audium.scanner.covers import SIZES
 from audium.scanner.fallback import from_path
-from audium.scanner.tags import parse_number, parse_year, read_track
+from audium.scanner.tags import parse_number, parse_year, read_track, split_featured
 from audium.services import roots as root_service
 from audium.util import now_ms
 from tests.conftest import cover_bytes, tags
@@ -104,6 +105,58 @@ def test_number_and_year_parsing():
     assert parse_year("1997-09-22") == 1997
     assert parse_year("ca. 1965") == 1965
     assert parse_year("0000") is None
+
+
+@pytest.mark.parametrize(
+    "name,title,main,guests",
+    [
+        ("AC/DC featuring The Beatles", False, "AC/DC", ["The Beatles"]),
+        ("Jay-Z feat. Kanye West & Rihanna", False, "Jay-Z", ["Kanye West", "Rihanna"]),
+        ("Eminem ft. Dido", False, "Eminem", ["Dido"]),
+        ("Eminem Feat Dido", False, "Eminem", ["Dido"]),
+        ("Calvin Harris (feat. Ellie Goulding)", False, "Calvin Harris", ["Ellie Goulding"]),
+        # Not split: '&' and '/' belong to names, "ft" inside a word is no guest
+        ("Simon & Garfunkel", False, "Simon & Garfunkel", []),
+        ("AC/DC", False, "AC/DC", []),
+        ("Daft Punk", False, "Daft Punk", []),
+        ("feat. Nobody", False, "feat. Nobody", []),
+        ("Stan (feat. Dido) [Live]", True, "Stan [Live]", ["Dido"]),
+        ("Lose Control [ft. Ciara]", True, "Lose Control", ["Ciara"]),
+        ("Song feat. Guest", True, "Song", ["Guest"]),
+        # In titles a bare "feat" is a word
+        ("A Daring Feat of Strength", True, "A Daring Feat of Strength", []),
+    ],
+)
+def test_split_featured(name, title, main, guests):
+    assert split_featured(name, title=title) == (main, guests)
+
+
+def test_featured_artists_are_linked_as_guests(library, db):
+    library.add("a/01.mp3", tags("Rock Song", artist="AC/DC featuring The Beatles", album="Rock"))
+    library.add("a/02.mp3", tags("Other Song", artist="AC/DC", album="Rock"))
+    library.add("b/01.mp3", tags("Stan (feat. Dido)", artist="Eminem", album="Marshall", albumartist="Eminem"))
+    library.scan()
+    # The guest does not make the album "Various Artists", and no combined artist is created
+    assert {a.title: a.artist for a in _albums(db)} == {"Rock": "AC/DC", "Marshall": "Eminem"}
+    with db.read() as conn:
+        credits = conn.execute(
+            select(tracks.c.title, artists.c.name, track_artists.c.role)
+            .join(track_artists, track_artists.c.track_id == tracks.c.id)
+            .join(artists, artists.c.id == track_artists.c.artist_id)
+            .order_by(tracks.c.title, track_artists.c.position)
+        ).all()
+        names = set(conn.execute(select(artists.c.name)).scalars())
+    assert [tuple(c) for c in credits] == [
+        ("Other Song", "AC/DC", "main"),
+        ("Rock Song", "AC/DC", "main"),
+        ("Rock Song", "The Beatles", "feat"),
+        ("Stan (feat. Dido)", "Eminem", "main"),
+        ("Stan (feat. Dido)", "Dido", "feat"),
+    ]
+    assert "AC/DC featuring The Beatles" not in names
+    # The track keeps the artist text from its tags
+    rock = next(t for t in _tracks(db) if t.title == "Rock Song")
+    assert rock.artist_name == "AC/DC featuring The Beatles"
 
 
 @pytest.mark.parametrize(
@@ -214,6 +267,69 @@ def test_same_album_title_by_album_artist_merges_across_folders(library, db):
     library.add("b/02.mp3", tags("Y", artist="P", album="Greatest", albumartist="P"))
     library.scan()
     assert len(_albums(db)) == 1
+
+
+def _artist_cover(db, name):
+    with db.read() as conn:
+        return conn.execute(
+            select(covers.c.hash, covers.c.source)
+            .join(artists, artists.c.cover_id == covers.c.id)
+            .where(artists.c.name == name)
+        ).first()
+
+
+def test_artist_image_from_the_artist_folder(library, db, monkeypatch):
+    library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band", date="2001"))
+    library.add("Band/Later/01.mp3", tags("B", artist="Band", album="Later", albumartist="Band", date="2005"))
+    (library.root / "Band/Later/cover.jpg").write_bytes(cover_bytes((0, 0, 255)))
+    # flat layout: artist.png in the album folder, and it is the only image there
+    library.add("Solo - Debut/01.mp3", tags("C", artist="Solo", album="Debut"))
+    (library.root / "Solo - Debut/Artist.PNG").write_bytes(cover_bytes((0, 200, 0)))
+    library.scan()
+    assert _artist_cover(db, "Band").source == "folder"  # no artist image yet: newest album's cover
+    solo = _artist_cover(db, "Solo")
+    assert solo.source == "artist"
+    assert [a.cover_id for a in _albums(db) if a.title == "Debut"] == [None]  # not the album cover
+
+    (library.root / "Band/artist.jpg").write_bytes(cover_bytes((250, 250, 0)))
+    library.scan()
+    band = _artist_cover(db, "Band")
+    assert band.source == "artist" and library.covers.exists(band.hash)
+
+    # an unchanged artist image is not read again
+    reads = []
+    original = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda p: reads.append(p.name) or original(p))
+    library.scan()
+    assert "artist.jpg" not in reads and "Artist.PNG" not in reads
+    monkeypatch.undo()
+
+    # removed: back to the album cover, and the image is cleaned up
+    (library.root / "Band/artist.jpg").unlink()
+    library.scan()
+    assert _artist_cover(db, "Band").source == "folder"
+    assert not library.covers.exists(band.hash)
+    assert _artist_cover(db, "Solo").hash == solo.hash
+
+
+def test_album_covers_as_artist_images_can_be_turned_off(library, db, admin_client):
+    library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band"))
+    (library.root / "Band/Record/cover.jpg").write_bytes(cover_bytes((0, 0, 255)))
+    library.add("Solo - Debut/01.mp3", tags("C", artist="Solo", album="Debut"))
+    (library.root / "Solo - Debut/artist.png").write_bytes(cover_bytes((0, 200, 0)))
+    library.scan()
+    assert admin_client.get("/api/v1/admin/settings").json() == {"artist_album_covers": "on"}
+
+    r = admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "off"})
+    assert r.status_code == 200 and r.json() == {"artist_album_covers": "off"}
+    assert _artist_cover(db, "Band") is None  # applied at once, without a scan
+    assert _artist_cover(db, "Solo").source == "artist"  # own pictures stay
+    library.scan(force=True)
+    assert _artist_cover(db, "Band") is None
+
+    admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "on"})
+    assert _artist_cover(db, "Band").source == "folder"
+    assert admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "maybe"}).status_code == 422
 
 
 # --- incremental behaviour -----------------------------------------------------------------

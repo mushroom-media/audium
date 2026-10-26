@@ -1,11 +1,12 @@
 // The current user's own data: playlists they can see, favorites, and live updates (SSE).
 
-import { basePath, del, get, post, put, type Playlist, type Track } from "./api";
+import { currentConnection, del, eventsUrl, get, post, put, refreshMediaToken, type Playlist, type Track } from "./api";
 import { promptText } from "./ui.svelte";
 
 export const mine = $state({
   playlists: [] as Playlist[],
   favoriteTracks: new Set<number>(),
+  favoriteAlbums: new Set<number>(),
   /** Latest version the server announced per playlist id; pages reload when it is newer. */
   changed: {} as Record<number, number>,
   /** Bumped when the server asks for a full resync (missed too many events). */
@@ -19,25 +20,35 @@ export async function loadPlaylists() {
   mine.playlists = await get<Playlist[]>("/playlists");
 }
 
+export type FavoriteKind = "track" | "album";
+const FAVORITE_SET = { track: "favoriteTracks", album: "favoriteAlbums" } as const;
+
 export async function loadFavorites() {
-  const r = await get<{ ids: number[] }>("/favorites/track/ids");
-  mine.favoriteTracks = new Set(r.ids);
+  const [t, a] = await Promise.all([
+    get<{ ids: number[] }>("/favorites/track/ids"),
+    get<{ ids: number[] }>("/favorites/album/ids"),
+  ]);
+  mine.favoriteTracks = new Set(t.ids);
+  mine.favoriteAlbums = new Set(a.ids);
 }
 
 export function isFavorite(trackId: number): boolean {
   return mine.favoriteTracks.has(trackId);
 }
 
-export async function toggleFavorite(track: Track) {
-  const on = !mine.favoriteTracks.has(track.id);
+export const toggleFavorite = (track: Track) => toggleFavoriteOf("track", track.id);
+
+export async function toggleFavoriteOf(kind: FavoriteKind, id: number) {
+  const key = FAVORITE_SET[kind];
+  const on = !mine[key].has(id);
   // Optimistic: the heart flips at once, and flips back if the server says no.
-  const next = new Set(mine.favoriteTracks);
-  if (on) next.add(track.id);
-  else next.delete(track.id);
-  mine.favoriteTracks = next;
+  const next = new Set(mine[key]);
+  if (on) next.add(id);
+  else next.delete(id);
+  mine[key] = next;
   try {
-    if (on) await put(`/favorites/track/${track.id}`);
-    else await del(`/favorites/track/${track.id}`);
+    if (on) await put(`/favorites/${kind}/${id}`);
+    else await del(`/favorites/${kind}/${id}`);
   } catch (e) {
     await loadFavorites();
     throw e;
@@ -68,9 +79,16 @@ function scheduleReload() {
 export function connectEvents() {
   if (source) return;
   // EventSource reconnects by itself and sends Last-Event-ID; the server replays what we missed.
-  source = new EventSource(`${basePath}/api/v1/events`);
+  source = new EventSource(eventsUrl());
   source.addEventListener("open", () => (mine.connected = true));
-  source.addEventListener("error", () => (mine.connected = false));
+  source.addEventListener("error", () => {
+    mine.connected = false;
+    // Closed for good (e.g. the media token of an app expired): start over with a fresh URL.
+    if (source?.readyState === EventSource.CLOSED && currentConnection()?.token) {
+      source = null;
+      setTimeout(() => refreshMediaToken().then(connectEvents, () => {}), 5000);
+    }
+  });
   source.addEventListener("playlist", (e) => {
     const data = JSON.parse((e as MessageEvent).data) as { playlist_id: number; type: string; version: number };
     mine.changed = { ...mine.changed, [data.playlist_id]: Math.max(mine.changed[data.playlist_id] ?? 0, data.version) };

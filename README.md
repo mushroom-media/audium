@@ -35,6 +35,7 @@ Each folder directly below `/music` becomes a library folder. If a network share
 - **Formats:** MP3, FLAC, Ogg Vorbis, Opus, AAC/M4A, ALAC, WMA, WAV, AIFF, APE, WavPack, Musepack, DSD and more. Broken or untagged files never stop a scan; missing tags are filled from the folder structure (`Artist/Album (Year)/01 - Title.ext`).
 - **Incremental scanner:** unchanged files cost one `stat()`; moved files keep their identity; scans run in the background, show progress, and can be cancelled and resumed.
 - **Covers:** extracted once (embedded or `cover.jpg`/`folder.jpg`), cached as WebP in 64/256/600 px.
+- **Artist images:** `artist.jpg` or `artist.png` in the artist folder (`Artist/artist.jpg` next to `Artist/Album/`), or in the album folder for flat layouts; otherwise the newest album's cover.
 - **Fast API at scale:** paginated lists, full-text prefix search, OpenAPI docs at `/api/docs`.
 - **Accounts:** first user is admin, invites, argon2id passwords, login rate limiting, API tokens.
 - **Streaming:** original files with HTTP Range (instant seeking, little RAM); formats the browser cannot play (WMA, APE, ...) are transcoded on the fly with ffmpeg to Opus/AAC/MP3. Lower streaming quality per user for slow connections.
@@ -42,6 +43,7 @@ Each folder directly below `/music` becomes a library folder. If a network share
 - **Auto-playlists without the cloud:** genres (normalized), decades, "Rock der 90er", activity and mood lists ("Workout", "Zum Entspannen", ...) and mixes from audio analysis (Essentia: tempo, key, energy, danceability, brightness), each track with a short reason ("128 BPM · hohe Energie"). The admin publishes suggestions and controls who sees them; everyone can save a copy. Smart playlists with your own rules, "similar tracks" and radio from any track.
 - **Playlists & sharing:** your own playlists, favorites and listening history; share a playlist with individual users as viewer or editor, or make it visible to everyone. Changes by others appear live (Server-Sent Events). Permissions are enforced on the server and covered by tests.
 - **App on your phone:** installable as a PWA (needs HTTPS, see [reverse proxy](docs/reverse-proxy.md)), light and dark theme, works on small screens. The next track is preloaded, so albums play without pauses between tracks.
+- **Subsonic apps:** the (Open)Subsonic API under `/rest` lets apps like Symfonium, Amperfy or Feishin play from audium, with offline downloads and CarPlay / Android Auto, using the same favorites, playlists and history. Each app gets its own revocable app password ([docs/apps.md](docs/apps.md)).
 - **Admin area:** add library folders with a folder picker, exclude sub-folders, create and lock accounts, reset passwords, invite links, and see what the background jobs are doing.
 
 ## Updating and backups
@@ -68,4 +70,5 @@ See [docs/development.md](docs/development.md). Design decisions: [docs/decision
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE).
+The server (`backend/`, the Docker image) is [AGPL-3.0-or-later](LICENSE).
+The web frontend (`frontend/`), which the audium apps are built from, is [MIT](frontend/LICENSE).

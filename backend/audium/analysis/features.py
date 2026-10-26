@@ -15,7 +15,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from audium.analysis import models as model_files
+from audium.analysis import styles as style_map
+from audium.logging import get_logger
+
+log = get_logger(__name__)
+
 ANALYZER_VERSION = 1
+# Audio fingerprints and styles (Discogs-EffNet). A track is re-analysed when this changes.
+EMBEDDING_MODEL = "discogs-effnet-bs64-1"
+# EffNet sees the middle of the analysed window only: ~2 s per minute of audio on a CPU, and a
+# minute is plenty for style and sound.
+EFFNET_WINDOW_S = 60
 SAMPLE_RATE = 44100
 WINDOW_S = 120
 SKIP_INTRO_S = 30
@@ -51,10 +62,28 @@ def ml_models(models_dir: Path) -> dict[str, Path] | None:
     return found if all(p.is_file() for p in found.values()) else None
 
 
+def effnet_available() -> bool:
+    """Essentia with TensorFlow (the x86_64 image), able to run the Discogs-EffNet models."""
+    try:
+        import essentia.standard as es
+    except Exception:
+        return False
+    return hasattr(es, "TensorflowPredictEffnetDiscogs")
+
+
+def effnet_ready(models_dir: Path) -> bool:
+    return effnet_available() and model_files.present(models_dir)
+
+
 def backend_name(models_dir: Path) -> str:
     if not essentia_available():
         return "none"
-    return "essentia+ml" if ml_models(models_dir) else "essentia"
+    name = "essentia"
+    if effnet_ready(models_dir):
+        name += "+effnet"
+    if ml_models(models_dir):
+        name += "+moods"
+    return name
 
 
 def _clip(x: float) -> float:
@@ -146,17 +175,21 @@ def analyze(path: str, duration_ms: int, models_dir: Path | None = None) -> dict
         "brightness": round(_clip((centroid_hz - 500) / 3500), 4),
     }
     models = ml_models(models_dir) if models_dir else None
-    if models:
-        result.update(_moods(audio, models))
+    effnet = models_dir is not None and effnet_ready(models_dir)
+    if models or effnet:
+        audio16 = es.Resample(inputSampleRate=SAMPLE_RATE, outputSampleRate=16000)(audio)
+        if models:
+            result.update(_moods(audio16, models))
+        if effnet:
+            result.update(_effnet(audio16, models_dir))
     return result
 
 
-def _moods(audio, models: dict[str, Path]) -> dict:
+def _moods(audio16, models: dict[str, Path]) -> dict:
     """Experimental: Essentia's pre-trained MusiCNN mood classifiers (user-supplied models)."""
     import essentia.standard as es
     import numpy as np
 
-    audio16 = es.Resample(inputSampleRate=SAMPLE_RATE, outputSampleRate=16000)(audio)
     out = {}
     for mood, model in models.items():
         meta_file = model.with_suffix(".json")
@@ -166,6 +199,43 @@ def _moods(audio, models: dict[str, Path]) -> dict:
             positive = classes.index(mood) if mood in classes else 0
         predictions = es.TensorflowPredictMusiCNN(graphFilename=str(model))(audio16)
         out[f"mood_{mood}"] = round(_clip(float(np.mean(predictions[:, positive]))), 4)
+    return out
+
+
+# Loaded once per analysis process: building the TensorFlow graphs takes longer than a track.
+_effnet_cache: dict[str, object] = {}
+
+
+def _effnet(audio16, models_dir: Path) -> dict:
+    """Audio fingerprint (Discogs-EffNet embedding, 1280 values) and the strongest of 400 Discogs
+    styles, both averaged over ~2 s patches of the analysed window. A model error only drops
+    these two (the other descriptors stay), stored as an empty fingerprint."""
+    import essentia.standard as es
+    import numpy as np
+
+    out: dict = {"embedding_model": EMBEDDING_MODEL, "embedding": None, "styles": []}
+    try:
+        if not _effnet_cache:
+            _effnet_cache["embed"] = es.TensorflowPredictEffnetDiscogs(
+                graphFilename=str(models_dir / model_files.EFFNET), output="PartitionedCall:1"
+            )
+            _effnet_cache["styles"] = es.TensorflowPredict2D(
+                graphFilename=str(models_dir / model_files.STYLE_HEAD),
+                input="serving_default_model_Placeholder",
+                output="PartitionedCall:0",
+            )
+            _effnet_cache["labels"] = json.loads((models_dir / model_files.STYLE_LABELS).read_text())["classes"]
+        excess = len(audio16) - EFFNET_WINDOW_S * 16000
+        if excess > 0:
+            audio16 = audio16[excess // 2 : excess // 2 + EFFNET_WINDOW_S * 16000]
+        patches = np.asarray(_effnet_cache["embed"](audio16), dtype=np.float32)
+        if patches.ndim != 2 or not len(patches):
+            return out
+        activations = np.asarray(_effnet_cache["styles"](patches), dtype=np.float32)
+        out["embedding"] = patches.mean(axis=0).astype(np.float16).tobytes()
+        out["styles"] = style_map.top_styles(_effnet_cache["labels"], activations.mean(axis=0))
+    except Exception as exc:
+        log.warning("analysis.effnet_failed", error=f"{type(exc).__name__}: {exc}"[:300])
     return out
 
 

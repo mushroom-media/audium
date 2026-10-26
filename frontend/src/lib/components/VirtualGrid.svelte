@@ -1,6 +1,7 @@
 <script lang="ts">
   // Cover grid on top of VirtualList: as many columns as fit, one virtual row per grid row.
   import type { Snippet } from "svelte";
+  import type { Letter } from "../api";
   import VirtualList from "./VirtualList.svelte";
 
   let {
@@ -11,6 +12,8 @@
     cell,
     onrange,
     header,
+    letters,
+    keep,
   }: {
     count: number;
     minCell?: number;
@@ -19,6 +22,10 @@
     cell: Snippet<[number]>;
     onrange?: (start: number, end: number) => void;
     header?: Snippet;
+    /** A-Z index by item position; mapped to grid rows here. */
+    letters?: Letter[] | null;
+    /** See VirtualList; the position is kept per column count. */
+    keep?: string;
   } = $props();
 
   let width = $state(0);
@@ -28,6 +35,7 @@
   const cellWidth = $derived((inner - gap * (cols - 1)) / cols);
   const rowHeight = $derived(Math.max(1, Math.round(cellWidth + textHeight + gap)));
   const rows = $derived(Math.ceil(count / cols));
+  const rowLetters = $derived(letters?.map((l) => ({ letter: l.letter, offset: Math.floor(l.offset / cols) })));
 </script>
 
 <div class="grid-host" bind:clientWidth={width}>
@@ -37,7 +45,9 @@
       {rowHeight}
       overscan={2}
       {header}
+      keep={keep && `${keep}:${cols}`}
       label="Raster"
+      letters={rowLetters}
       onrange={(s, e) => onrange?.(s * cols, Math.min(count, e * cols))}
     >
       {#snippet row(r)}

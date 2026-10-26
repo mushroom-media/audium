@@ -6,16 +6,42 @@
 // the loading gap (typically 100-500 ms over a network). Sample-exact gapless playback (live
 // albums) would need Web Audio/MSE with encoder-delay trimming; see docs/decisions.md D26.
 
-import { coverUrl, post, streamUrl, type StreamQuality, type Track } from "./api";
+import { coverUrl, get, post, streamUrl, type StreamQuality, type Track } from "./api";
 import { browserCanPlay, chooseSource, type Format } from "./playback";
 import * as Q from "./queue";
+import { closeOverlay, openOverlay, router } from "./router.svelte";
 
 const STORAGE_KEY = "audium.player";
 const MAX_STORED_TRACKS = 1000;
-const RESTART_THRESHOLD_S = 3;
+export const RESTART_THRESHOLD_S = 3;
 // A play counts (history) after 30 s, or half of a shorter track.
 const SCROBBLE_AFTER_S = 30;
 const PRELOAD_BEFORE_END_S = 20;
+/** A radio station starts with this many tracks and grows by as many while it plays. */
+export const RADIO_BATCH = 20;
+const RADIO_REFILL_AT = 5; // tracks left when the station fetches more
+const RADIO_EXCLUDE = 500; // the station's latest tracks it won't repeat
+// The app's phone layout (see App.svelte).
+const phoneLayout = typeof matchMedia === "function" ? matchMedia("(max-width: 860px)") : null;
+const POOL_BATCH = 100; // tracks a pool adds to the queue at a time (≤ the server's by-ids limit)
+const POOL_REFILL_AT = 10;
+const POOL_HISTORY = 500; // played tracks a pool queue keeps for "back"
+
+/** A whole track list played without holding it all: the query for /tracks/ids, e.g.
+ * { sort: "title", q: "abba" }. The queue gets its tracks in batches while it plays, so shuffle
+ * mixes the whole list, not just what was loaded. */
+export type TrackPool = Record<string, string | number | undefined>;
+
+/** Where the queue was started from, shown in the "now playing" view. */
+export interface QueueSource {
+  /** What kind of thing it is, e.g. "Album" or "Playlist". */
+  kind: string;
+  name: string;
+  /** App path to go back to it. */
+  path?: string;
+  /** Stored with each play so "recently played" shows the source, e.g. "album:3" (see RecentItem). */
+  ref?: string;
+}
 
 class Player {
   queue = $state<Q.Queue>(Q.empty);
@@ -26,7 +52,29 @@ class Player {
   volume = $state(0.8);
   muted = $state(false);
   error = $state<string | null>(null);
-  queueOpen = $state(false);
+  #queuePanel = $state(false);
+  #phone = $state(phoneLayout?.matches ?? false);
+  /** The queue is shown: a side panel on wide screens, on phones a page of its own over the
+   * current one (an overlay in the history, so "back" closes it). */
+  get queueOpen(): boolean {
+    return this.#phone ? router.overlay === "queue" : this.#queuePanel;
+  }
+  set queueOpen(open: boolean) {
+    if (!this.#phone) this.#queuePanel = open;
+    else if (open) openOverlay("queue");
+    else closeOverlay("queue");
+  }
+  /** The full-screen "now playing" view is open (an overlay in the history as well). */
+  get nowPlayingOpen(): boolean {
+    return router.overlay === "nowPlaying";
+  }
+  set nowPlayingOpen(open: boolean) {
+    if (open) openOverlay("nowPlaying");
+    else closeOverlay("nowPlaying");
+  }
+  /** The queue is a radio station (see playRadio). */
+  radio = $state(false);
+  source = $state<QueueSource | null>(null);
   quality: StreamQuality = "auto";
 
   current = $derived(Q.current(this.queue));
@@ -42,12 +90,20 @@ class Player {
   #fallbackTried = false;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #reported = false;
+  #station = 0; // counts queues started, so a late radio refill can tell it is out of date
+  #refilling = false;
+  #stationEnded = -1; // a station that had nothing more to add
+  /** The queue walks a pool: its ids (null until fetched, e.g. after a reload) and those not
+   * queued yet, in play order (null: work out from the queue once the ids are there). */
+  #pool: { query: TrackPool; ids: number[] | null; rest: number[] | null } | null = null;
+  #poolBusy = false;
 
   init() {
     if (this.#audio) return;
     this.#audio = this.#wire(new Audio());
     this.#spare = this.#wire(new Audio());
     this.#restore();
+    phoneLayout?.addEventListener("change", () => (this.#phone = phoneLayout.matches));
     this.#applyVolume();
     this.#setupMediaSession();
   }
@@ -92,9 +148,45 @@ class Player {
 
   // --- starting playback -------------------------------------------------------------------
 
-  playTracks(tracks: Track[], start = 0) {
-    this.queue = Q.create(tracks, start, this.queue);
+  /** `start` null: no particular track first (with `shuffle`, a random one). */
+  playTracks(tracks: Track[], start: number | null = 0, shuffle = this.queue.shuffle, source: QueueSource | null = null) {
+    this.radio = false;
+    this.source = source;
+    this.#station++;
+    this.#pool = null;
+    this.queue = Q.create(tracks, start, { ...this.queue, shuffle });
     this.#load(true);
+  }
+
+  /** Play a whole track list (see TrackPool) from the track `startId`; null: from a random one
+   * with shuffle, else from the top. */
+  async playPool(query: TrackPool, startId: number | null = null, shuffle = this.queue.shuffle, source: QueueSource | null = null) {
+    const station = ++this.#station;
+    const ids = await get<number[]>("/tracks/ids", query);
+    if (station !== this.#station || !ids.length) return;
+    const start = startId === null ? -1 : ids.indexOf(startId);
+    let rest: number[];
+    if (shuffle) {
+      const first = start < 0 ? [] : [ids[start]];
+      rest = [...first, ...Q.shuffled(ids.filter((id) => id !== first[0]))];
+    } else {
+      rest = ids.slice(Math.max(0, start));
+    }
+    const tracks = await this.#fetchTracks(rest.splice(0, POOL_BATCH));
+    if (station !== this.#station || !tracks.length) return;
+    // Already in play order: no second shuffle, but the shuffle button shows the mode.
+    this.playTracks(tracks, 0, false, source);
+    this.queue = { ...this.queue, shuffle };
+    this.#pool = { query, ids, rest };
+    this.#scheduleSave();
+  }
+
+  /** A radio station already has its own order, so shuffle stays off while it plays. It grows
+   * while it plays (see #refillRadio); `source.ref` ("radio:album:3") says where from. */
+  playRadio(tracks: Track[], source: QueueSource | null = null, start = 0) {
+    this.playTracks(tracks, start, false, source);
+    this.radio = true;
+    this.#refillRadio();
   }
 
   playNext(tracks: Track[]) {
@@ -135,8 +227,9 @@ class Player {
     this.#advance(false);
   }
 
-  prev() {
-    if (this.position > RESTART_THRESHOLD_S) {
+  /** Back a track; past the first few seconds the button restarts the current one instead. */
+  prev({ restart = true } = {}) {
+    if (restart && this.position > RESTART_THRESHOLD_S) {
       this.seek(0);
       return;
     }
@@ -171,7 +264,13 @@ class Player {
   }
 
   toggleShuffle() {
-    this.queue = Q.setShuffle(this.queue, !this.queue.shuffle);
+    if (this.radio) return;
+    if (this.#pool) {
+      this.queue = { ...this.queue, shuffle: !this.queue.shuffle };
+      this.#reorderPool();
+    } else {
+      this.queue = Q.setShuffle(this.queue, !this.queue.shuffle);
+    }
     this.#scheduleSave();
   }
 
@@ -195,9 +294,114 @@ class Player {
     this.#load(auto || this.playing);
   }
 
+  async #fetchTracks(ids: number[]): Promise<Track[]> {
+    return ids.length ? get<Track[]>("/tracks/by-ids", { ids }) : [];
+  }
+
+  /** The pool's ids, fetched again after a reload. */
+  async #poolIds(): Promise<number[] | null> {
+    const pool = this.#pool;
+    if (!pool) return null;
+    if (!pool.ids) {
+      const ids = await get<number[]>("/tracks/ids", pool.query);
+      if (pool !== this.#pool) return null;
+      pool.ids = ids;
+    }
+    return pool.ids;
+  }
+
+  /** What is left of the pool after the first `upTo` queue entries, in the order the shuffle
+   * mode says: shuffled without those, or in list order after the last of them. */
+  #poolRest(ids: number[], upTo: number): number[] {
+    const q = this.queue;
+    const queued = q.order.slice(0, upTo).map((i) => q.tracks[i].id);
+    if (q.shuffle) {
+      const skip = new Set(queued);
+      return Q.shuffled(ids.filter((id) => !skip.has(id)));
+    }
+    const last = queued.length ? ids.indexOf(queued[queued.length - 1]) : -1;
+    return ids.slice(last + 1);
+  }
+
+  /** Shuffle switched on or off while a pool plays: the tracks after the current one follow the
+   * new mode across the whole pool (shuffling just the loaded ones would only mix those). */
+  async #reorderPool() {
+    const station = this.#station;
+    const pool = this.#pool;
+    const shuffle = this.queue.shuffle;
+    try {
+      const ids = await this.#poolIds();
+      const cur = this.current;
+      if (!ids || !cur || !pool) return;
+      const rest = this.#poolRest(ids, this.queue.pos + 1);
+      const tracks = await this.#fetchTracks(rest.splice(0, POOL_BATCH));
+      if (station !== this.#station || pool !== this.#pool || shuffle !== this.queue.shuffle || cur !== this.current) return;
+      this.#clearSpare();
+      this.queue = Q.replaceUpcoming(this.queue, tracks);
+      pool.rest = rest;
+      this.#scheduleSave();
+    } catch {
+      /* offline: the loaded tracks keep their order */
+    }
+  }
+
+  /** Shortly before the queue runs out, add the pool's next tracks; with repeat all, start over. */
+  async #refillPool() {
+    const pool = this.#pool;
+    if (!pool || this.#poolBusy) return;
+    if (this.queue.order.length - this.queue.pos - 1 > POOL_REFILL_AT) return;
+    this.#poolBusy = true;
+    let rest: number[] | null = null;
+    let batch: number[] = [];
+    try {
+      const ids = await this.#poolIds();
+      if (!ids || pool !== this.#pool) return;
+      if (!pool.rest) pool.rest = this.#poolRest(ids, this.queue.order.length);
+      if (!pool.rest.length && this.queue.repeat === "all") pool.rest = this.queue.shuffle ? Q.shuffled(ids) : ids.slice();
+      rest = pool.rest;
+      batch = rest.splice(0, POOL_BATCH);
+      const tracks = await this.#fetchTracks(batch);
+      if (pool !== this.#pool || rest !== pool.rest) return; // reordered meanwhile
+      this.queue = Q.trimHistory(Q.append(this.queue, tracks), POOL_HISTORY);
+      this.#scheduleSave();
+    } catch {
+      rest?.unshift(...batch); // offline: the next track change tries again
+    } finally {
+      this.#poolBusy = false;
+    }
+  }
+
+  /** Shortly before a radio station runs out, add its next tracks (none it already had). */
+  async #refillRadio() {
+    const ref = this.radio ? this.source?.ref?.match(/^radio:(track|album|artist):(\d+)$/) : null;
+    const station = this.#station;
+    if (!ref || this.#refilling || this.#stationEnded === station) return;
+    if (this.queue.order.length - this.queue.pos - 1 > RADIO_REFILL_AT) return;
+    this.#refilling = true;
+    try {
+      const exclude = this.queue.tracks.slice(-RADIO_EXCLUDE).map((t) => t.id);
+      const more = await get<Track[]>(`/${ref[1]}s/${ref[2]}/radio`, { limit: RADIO_BATCH, exclude });
+      if (station !== this.#station) return; // something else plays by now
+      const have = new Set(this.queue.tracks.map((t) => t.id));
+      const fresh = more.filter((t) => !have.has(t.id));
+      if (!fresh.length) {
+        this.#stationEnded = station;
+        return;
+      }
+      this.queue = Q.append(this.queue, fresh);
+      this.#scheduleSave();
+    } catch {
+      /* offline: the next track change tries again */
+    } finally {
+      this.#refilling = false;
+    }
+  }
+
   #load(autoplay: boolean, startAt = 0, forceTranscode = false) {
     const track = this.current;
     if (!this.#audio || !track) return;
+    this.#refillRadio();
+    this.#refillPool();
     if (startAt === 0 && !forceTranscode && this.#swapIn(track, autoplay)) return;
     this.#clearSpare();
     const a = this.#audio;
@@ -286,7 +490,7 @@ class Player {
       if (!this.playing || this.position < Math.min(SCROBBLE_AFTER_S, half)) return;
     }
     this.#reported = true;
-    post("/history", { track_id: t.id, played_ms: Math.round(this.position * 1000) }).catch(() => {
+    post("/history", { track_id: t.id, played_ms: Math.round(this.position * 1000), context: this.source?.ref ?? null }).catch(() => {
       /* offline or logged out: history is best effort */
     });
   }
@@ -392,6 +596,9 @@ class Player {
         pos: q.pos - from,
         shuffle: q.shuffle,
         repeat: q.repeat,
+        radio: this.radio,
+        source: this.source,
+        pool: this.#pool?.query ?? null,
         position: this.position,
         volume: this.volume,
         muted: this.muted,
@@ -417,6 +624,10 @@ class Player {
           shuffle: !!d.shuffle,
           repeat: ["off", "all", "one"].includes(d.repeat) ? d.repeat : "off",
         };
+        this.radio = !!d.radio;
+        this.source = d.source && typeof d.source.name === "string" ? d.source : null;
+        // The ids come again from the server once they are needed.
+        this.#pool = d.pool && typeof d.pool === "object" ? { query: d.pool, ids: null, rest: null } : null;
         this.position = Number(d.position) || 0;
         this.duration = (this.current?.duration_ms ?? 0) / 1000;
       }

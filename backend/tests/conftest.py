@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from audium.analysis.similarity import VectorIndex
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.db.migrate import migrate
@@ -45,6 +46,7 @@ def settings(tmp_path) -> Settings:
         log_format="console",
         scan_workers=1,  # in-process; test_scan_with_reader_processes covers the pool
         login_max_attempts=5,
+        analysis_download_models=False,  # tests never touch the network
     )
 
 
@@ -58,7 +60,11 @@ def db(settings) -> Database:
 
 @pytest.fixture
 def app(settings, db):
-    return create_app(settings, db)
+    api = create_app(settings, db)
+    # Tests write analysis results straight into the database: reload the vectors in the request,
+    # not in the background (test_vector_index_refreshes_in_background covers that).
+    api.state.vectors = VectorIndex()
+    return api
 
 
 @pytest.fixture

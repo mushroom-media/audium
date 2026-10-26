@@ -38,6 +38,9 @@ IMAGE_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp", "gif", "bmp"})
 
 # Folder images, best first. Matched against the lower-cased file stem.
 FOLDER_COVER_NAMES = ("cover", "folder", "front", "album", "albumart", "albumartlarge", "thumb")
+# Artist images (artist.jpg, ...) in the artist folder, best format first. Never an album cover.
+ARTIST_IMAGE_STEM = "artist"
+ARTIST_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png", "webp")
 
 # Directory names that are never music: NAS metadata, recycle bins, macOS resource forks.
 IGNORED_DIRS = frozenset(

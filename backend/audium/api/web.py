@@ -47,7 +47,8 @@ def make_router(web_dir: Path, base_path: str) -> APIRouter:
 
     @router.get("/{path:path}")
     def spa(path: str, request: Request) -> Response:
-        if path == "api" or path.startswith("api/"):
+        # /rest lands here only with AUDIUM_SUBSONIC_ENABLED=false.
+        if path in ("api", "rest") or path.startswith(("api/", "rest/")):
             return JSONResponse({"error": {"code": "not_found", "message": "unknown API path"}}, status_code=404)
         if path:
             candidate = os.path.realpath(os.path.join(root, path))

@@ -2,7 +2,8 @@
   import { untrack } from "svelte";
   import { ApiError, del, get, patch, post, type Page, type Playlist, type PlaylistItem, type Rule } from "../lib/api";
   import RuleEditor from "../lib/components/RuleEditor.svelte";
-  import Cover from "../lib/components/Cover.svelte";
+  import CoverPicker from "../lib/components/CoverPicker.svelte";
+  import PlaylistCover from "../lib/components/PlaylistCover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
   import VirtualList from "../lib/components/VirtualList.svelte";
@@ -75,6 +76,7 @@
   // Smart playlists fill themselves from their rule: no manual add/remove/reorder.
   const canEdit = $derived((meta?.role === "owner" || meta?.role === "editor") && !isSmart);
   let editingRule = $state(false);
+  let pickingCover = $state(false);
 
   async function saveRule(_name: string, rule: Rule) {
     await patch(`/playlists/${pid}`, { rule });
@@ -84,15 +86,17 @@
   }
   const isOwner = $derived(meta?.role === "owner");
 
-  async function play(index = 0, shuffle = false) {
+  /** `index` null: no particular track first (with `shuffle`, a random one). */
+  async function play(index: number | null = 0, shuffle = false) {
     const items = await list.slice(0, Math.min(list.total ?? PLAY_LIMIT, PLAY_LIMIT));
     const playable = items.filter((i) => i.available);
     if (!playable.length) return;
-    const start = Math.max(0, playable.findIndex((i) => i.item_id === items[index]?.item_id));
-    if (shuffle !== player.queue.shuffle) player.toggleShuffle();
+    const start = index === null ? null : Math.max(0, playable.findIndex((i) => i.item_id === items[index]?.item_id));
     player.playTracks(
       playable.map((i) => i.track),
       start,
+      shuffle,
+      meta && { kind: "Playlist", name: meta.name, path: `/playlists/${pid}`, ref: `playlist:${pid}` },
     );
   }
 
@@ -176,10 +180,17 @@
 {#if error}
   <div class="page"><p class="empty">{error}</p></div>
 {:else if meta}
-  <VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Titel der Playlist">
+  <VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Titel der Playlist" keep="playlist:{id}">
     {#snippet header()}
       <header class="hero">
-        <div class="art"><Cover hash={meta!.cover} size={256} /></div>
+        {#if isOwner}
+          <button class="art edit" onclick={() => (pickingCover = true)} aria-label="Cover ändern" title="Cover ändern">
+            <PlaylistCover playlist={meta!} />
+            <span class="edit-badge" aria-hidden="true"><Icon name="image" size={18} /></span>
+          </button>
+        {:else}
+          <div class="art"><PlaylistCover playlist={meta!} /></div>
+        {/if}
         <div class="info">
           <p class="kind">
             {isSmart ? "Smart-Playlist" : "Playlist"}{#if meta!.visibility === "users"} · für alle sichtbar{/if}{#if meta!.role !== "owner"} · von {meta!.owner.display_name}{/if}
@@ -192,7 +203,7 @@
           </p>
           <div class="actions">
             <button class="btn primary" disabled={!meta!.item_count} onclick={() => play(0, false)}><Icon name="play" size={18} /> Abspielen</button>
-            <button class="btn" disabled={!meta!.item_count} onclick={() => play(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
+            <button class="btn square" disabled={!meta!.item_count} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
             {#if isOwner}
               <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> Teilen</button>
               {#if isSmart}<button class="btn ghost" onclick={() => (editingRule = true)}><Icon name="spark" size={18} /> Regel</button>{/if}
@@ -243,6 +254,18 @@
   <div class="page"></div>
 {/if}
 
+{#if pickingCover && meta}
+  <CoverPicker
+    playlist={meta}
+    onchange={(p) => {
+      meta = p;
+      loadedVersion = p.version;
+      loadPlaylists();
+    }}
+    onclose={() => (pickingCover = false)}
+  />
+{/if}
+
 {#if editingRule && meta?.rule}
   <RuleEditor title="Regel von „{meta.name}“" initial={meta.rule as Rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
 {/if}
@@ -259,6 +282,36 @@
     flex: none;
     box-shadow: 0 18px 44px rgb(0 0 0 / 0.3);
     border-radius: var(--radius-sm);
+  }
+  .art.edit {
+    position: relative;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+  .edit-badge {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgb(0 0 0 / 0.6);
+    color: #fff;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .art.edit:hover .edit-badge,
+  .art.edit:focus-visible .edit-badge {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .edit-badge {
+      opacity: 1;
+    }
   }
   .info {
     min-width: 0;

@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { get, type Album, type Page } from "../lib/api";
+  import { get, type Album, type Page, type RecentItem } from "../lib/api";
   import AlbumCard from "../lib/components/AlbumCard.svelte";
-  import Cover from "../lib/components/Cover.svelte";
+  import PlaylistCover from "../lib/components/PlaylistCover.svelte";
+  import RecentCard from "../lib/components/RecentCard.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import { plural } from "../lib/format";
   import { mine, newPlaylistFlow } from "../lib/mine.svelte";
@@ -10,15 +11,20 @@
   import { session } from "../lib/session.svelte";
 
   let recent = $state<Album[] | null>(null);
-  let played = $state<Album[]>([]);
+  let played = $state<RecentItem[]>([]);
+  // Stations that fit what was played lately (artists, an album, favourite tracks)
+  let radios = $state<RecentItem[]>([]);
 
   $effect(() => {
     const ctrl = new AbortController();
+    get<RecentItem[]>("/radio/suggestions", { limit: 6 }, ctrl.signal)
+      .then((r) => (radios = r))
+      .catch(() => {});
     get<Page<Album>>("/albums", { sort: "added", limit: 12 }, ctrl.signal)
       .then((p) => (recent = p.items))
       .catch(() => {});
-    get<Album[]>("/history/albums", { limit: 6 }, ctrl.signal)
-      .then((a) => (played = a))
+    get<RecentItem[]>("/history/recent", { limit: 6 }, ctrl.signal)
+      .then((r) => (played = r))
       .catch(() => {});
     return () => ctrl.abort();
   });
@@ -40,7 +46,14 @@
   {#if played.length}
     <div class="section-head"><h2>Zuletzt gehört</h2></div>
     <div class="grid">
-      {#each played as album (album.id)}<AlbumCard {album} />{/each}
+      {#each played as item (`${item.type}:${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
+    </div>
+  {/if}
+
+  {#if radios.length}
+    <div class="section-head"><h2>Radios für dich</h2></div>
+    <div class="grid">
+      {#each radios as item (`${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
     </div>
   {/if}
 
@@ -58,7 +71,7 @@
     </a>
     {#each mine.playlists.slice(0, 11) as p (p.id)}
       <a class="list" href={href(`/playlists/${p.id}`)}>
-        <span class="art"><Cover hash={p.cover} size={64} /></span>
+        <span class="art"><PlaylistCover playlist={p} size={64} /></span>
         <span class="meta">
           <strong>{p.name}</strong>
           <small>{p.role === "owner" ? plural(p.item_count, "Titel", "Titel") : `von ${p.owner.display_name}`}</small>
@@ -69,7 +82,7 @@
 
   <div class="section-head">
     <h2>Neu hinzugefügt</h2>
-    <a href={href("/albums")}>Alle Alben</a>
+    <a href={href("/library?tab=albums")}>Alle Alben</a>
   </div>
   {#if recent && recent.length === 0}
     <p class="empty">

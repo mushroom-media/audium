@@ -6,10 +6,11 @@ from sqlalchemy import select
 from audium.api.deps import current_user, get_db
 from audium.api.library_models import AlbumOut
 from audium.api.models import Ok, Page
-from audium.api.playlist_models import FavoriteIds, HistoryEntry, HistoryIn, UserRef
+from audium.api.playlist_models import FavoriteIds, HistoryEntry, HistoryIn, RecentOut, StatsOut, UserRef
 from audium.db.engine import Database
 from audium.db.schema import users
 from audium.services import personal
+from audium.services import radio_suggestions as radio_suggestions_service
 from audium.services.users import User
 
 router = APIRouter(tags=["me"])
@@ -55,7 +56,7 @@ def list_favorites(
 @router.post("/history", response_model=Ok, summary="Report a played track")
 def record_play(body: HistoryIn, user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.write() as conn:
-        personal.record_play(conn, user.id, body.track_id, body.played_ms)
+        personal.record_play(conn, user.id, body.track_id, body.played_ms, body.context)
     return Ok()
 
 
@@ -76,6 +77,33 @@ def recent_albums(
 ):
     with db.read() as conn:
         return personal.recent_albums(conn, user.id, limit)
+
+
+@router.get("/history/recent", response_model=list[RecentOut], summary="Recently played albums, playlists and radios")
+def recently_played(
+    limit: int = Query(12, ge=1, le=50), user: User = Depends(current_user), db: Database = Depends(get_db)
+):
+    with db.read() as conn:
+        return personal.recently_played(conn, user, limit)
+
+
+@router.get("/radio/suggestions", response_model=list[RecentOut], summary="Radio stations that fit your listening")
+def radio_suggestions(
+    limit: int = Query(8, ge=1, le=20), user: User = Depends(current_user), db: Database = Depends(get_db)
+):
+    with db.read() as conn:
+        return radio_suggestions_service.suggestions(conn, user, limit)
+
+
+@router.get("/stats", response_model=StatsOut, summary="Your listening statistics")
+def stats(
+    since: int | None = Query(None, ge=0, description="Only plays from this time on (ms); omit for all"),
+    limit: int = Query(10, ge=1, le=50, description="Entries per top list"),
+    user: User = Depends(current_user),
+    db: Database = Depends(get_db),
+):
+    with db.read() as conn:
+        return personal.listening_stats(conn, user.id, since, limit)
 
 
 @router.get("/users", response_model=list[UserRef], summary="Active users (to share playlists with)")

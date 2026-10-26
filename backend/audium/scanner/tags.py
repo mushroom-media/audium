@@ -33,6 +33,8 @@ class TrackMeta:
     title: str | None = None
     artist_display: str | None = None
     artists: list[str] = field(default_factory=list)
+    # Guests split off "Artist feat. Guest" or "Title (feat. Guest)"; artist_display keeps the original
+    featured_artists: list[str] = field(default_factory=list)
     album_artists: list[str] = field(default_factory=list)
     album: str | None = None
     track_no: int | None = None
@@ -320,6 +322,36 @@ _INT_RE = re.compile(r"^\s*(\d{1,4})")
 _YEAR_RE = re.compile(r"(\d{4})")
 _GAIN_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)")
 _MULTI_SPLIT_RE = re.compile(r"\s*;\s*")
+# Only these words mark a guest. '&', '/', 'and', 'x' are part of too many names (AC/DC,
+# Simon & Garfunkel). In titles a bare "feat" could be a word ("A Daring Feat of ..."), so
+# there it needs brackets or the abbreviation's dot.
+_FEAT_WORD = r"(?:feat\.?|ft\.?|featuring)"
+_BRACKETED_FEAT = rf"\s*[(\[]\s*{_FEAT_WORD}\s+([^)\]]+?)\s*[)\]]"
+_ARTIST_FEAT_RE = re.compile(rf"{_BRACKETED_FEAT}|\s+{_FEAT_WORD}\s+(.+)$", re.I)
+_TITLE_FEAT_RE = re.compile(rf"{_BRACKETED_FEAT}|\s+(?:feat\.|ft\.|featuring)\s+(.+)$", re.I)
+# Several guests: "feat. A, B & C". A guest band with a comma or '&' in its name gets split
+# too, which is rarer than several guests.
+_GUEST_SPLIT_RE = re.compile(r"\s*(?:,|&|;)\s*")
+
+
+def split_featured(name: str, *, title: bool = False) -> tuple[str, list[str]]:
+    """'AC/DC featuring The Beatles' -> ('AC/DC', ['The Beatles']), 'Song (feat. X) [Live]' ->
+    ('Song [Live]', ['X']). Unchanged when there is no guest or nothing would be left of the name."""
+    m = (_TITLE_FEAT_RE if title else _ARTIST_FEAT_RE).search(name)
+    if not m or m.start() == 0:
+        return name, []
+    guests = [g for g in (clean_text(p, 256) for p in _GUEST_SPLIT_RE.split(m.group(1) or m.group(2))) if g]
+    return (name[: m.start()] + name[m.end() :]).strip(), guests
+
+
+def _unique(names: list[str], exclude: list[str] | None = None) -> list[str]:
+    seen = {n.casefold() for n in exclude or []}
+    out: list[str] = []
+    for n in names:
+        if n and n.casefold() not in seen:
+            seen.add(n.casefold())
+            out.append(n)
+    return out
 
 
 def _first(raw: Raw, key: str) -> str | None:
@@ -374,8 +406,18 @@ def _apply(raw: Raw, meta: TrackMeta) -> None:
     meta.title = _first(raw, "title")
     artist_values = [c for c in (clean_text(v) for v in raw.get("artist", ())) if c]
     meta.artist_display = ", ".join(dict.fromkeys(artist_values)) or None
-    meta.artists = _many(raw, "artists") or _many(raw, "artist")
-    meta.album_artists = _many(raw, "albumartist")
+    main: list[str] = []
+    featured: list[str] = []
+    for name in _many(raw, "artists") or _many(raw, "artist"):
+        m, guests = split_featured(name)
+        main.append(m)
+        featured += guests
+    if meta.title:
+        featured += split_featured(meta.title, title=True)[1]
+    meta.artists = _unique(main)
+    meta.featured_artists = _unique(featured, exclude=meta.artists)
+    # An album belongs to its main artist: "X feat. Y" as album artist would be an artist of its own.
+    meta.album_artists = _unique([split_featured(a)[0] for a in _many(raw, "albumartist")])
     meta.album = _first(raw, "album")
     meta.track_no = parse_number(_first(raw, "track"))
     meta.disc_no = parse_number(_first(raw, "disc"))

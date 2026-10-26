@@ -6,7 +6,7 @@ _hasher = PasswordHasher()
 # Verified against when the username does not exist, so response time does not reveal it.
 _DUMMY_HASH = _hasher.hash("audium-dummy-password")
 
-MIN_LENGTH = 8
+MIN_LENGTH = 3
 MAX_LENGTH = 256
 
 

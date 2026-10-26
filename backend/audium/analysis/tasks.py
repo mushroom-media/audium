@@ -1,9 +1,11 @@
 """Jobs of the analysis worker (queue "analysis", runs at nice 19):
 
 - genres:        one-time backfill of normalized genres for tracks scanned before phase 4
-- analyze:       audio features for every track without (current) features; resumable, because
-                 the state lives per track in track_features
-- autoplaylists: regenerate auto-playlist suggestions and smart playlists
+- analyze:       audio features for every track without (current) features, plus fingerprint and
+                 styles where the EffNet models are available; resumable, because the state lives
+                 per track in track_features / track_embeddings
+- autoplaylists: derive detected genres from styles, regenerate auto-playlist suggestions and
+                 smart playlists
 """
 
 import multiprocessing
@@ -13,13 +15,14 @@ from concurrent.futures.process import BrokenProcessPool
 
 from sqlalchemy import Connection, Text, cast, func, literal, or_, select
 
-from audium.analysis import autoplaylists, features
+from audium.analysis import autoplaylists, features, styles
 from audium.analysis import genres as genre_norm
+from audium.analysis import models as model_files
 from audium.analysis.similarity import ANALYSIS_GENERATION
 from audium.config import Settings
 from audium.db.dialect import insert_for
 from audium.db.engine import Database
-from audium.db.schema import genres, library_roots, track_features, track_genres, tracks
+from audium.db.schema import genres, library_roots, track_embeddings, track_features, track_genres, track_styles, tracks
 from audium.db.state import bump_library_generation, get_state, set_state
 from audium.jobs import queue as jobq
 from audium.jobs.worker import JobContext
@@ -48,22 +51,28 @@ def _fingerprint_sql():
     return cast(tracks.c.size, Text) + literal(":") + cast(tracks.c.mtime_ns, Text) + literal(":") + tracks.c.quick_hash
 
 
-def _pending_condition():
-    f = track_features
-    return (
-        (tracks.c.missing_since.is_(None))
-        & (library_roots.c.enabled.is_(True))
-        & or_(
-            f.c.track_id.is_(None),
-            f.c.fingerprint != _fingerprint_sql(),  # file changed since the last analysis
-            (f.c.status == "ok") & (f.c.analyzer_version < features.ANALYZER_VERSION),
-        )
-    )
+def _effnet_on(conn: Connection) -> bool:
+    """The analysis runs the EffNet models (decided at the start of each analysis job)."""
+    return "+effnet" in (get_state(conn, BACKEND_STATE) or "")
+
+
+def _pending_condition(effnet: bool):
+    f, e = track_features, track_embeddings
+    stale = [
+        f.c.track_id.is_(None),
+        f.c.fingerprint != _fingerprint_sql(),  # file changed since the last analysis
+        (f.c.status == "ok") & (f.c.analyzer_version < features.ANALYZER_VERSION),
+    ]
+    if effnet:  # analysed before the models were there (or with an older model)
+        stale.append((f.c.status == "ok") & (e.c.model.is_(None) | (e.c.model != features.EMBEDDING_MODEL)))
+    return (tracks.c.missing_since.is_(None)) & (library_roots.c.enabled.is_(True)) & or_(*stale)
 
 
 def _pending_base():
-    return tracks.join(library_roots, library_roots.c.id == tracks.c.root_id).outerjoin(
-        track_features, track_features.c.track_id == tracks.c.id
+    return (
+        tracks.join(library_roots, library_roots.c.id == tracks.c.root_id)
+        .outerjoin(track_features, track_features.c.track_id == tracks.c.id)
+        .outerjoin(track_embeddings, track_embeddings.c.track_id == tracks.c.id)
     )
 
 
@@ -80,8 +89,24 @@ def analysis_stats(conn: Connection) -> dict:
         .select_from(f.join(tracks, tracks.c.id == f.c.track_id))
         .where(f.c.status == "failed", tracks.c.missing_since.is_(None))
     )
-    pending = select(func.count()).select_from(_pending_base()).where(_pending_condition())
+    pending = select(func.count()).select_from(_pending_base()).where(_pending_condition(_effnet_on(conn)))
+    fingerprints = (
+        select(func.count())
+        .select_from(track_embeddings.join(tracks, tracks.c.id == track_embeddings.c.track_id))
+        .where(
+            track_embeddings.c.model == features.EMBEDDING_MODEL,
+            track_embeddings.c.vector.is_not(None),
+            tracks.c.missing_since.is_(None),
+        )
+    )
+    with_styles = (
+        select(func.count(func.distinct(track_styles.c.track_id)))
+        .select_from(track_styles.join(tracks, tracks.c.id == track_styles.c.track_id))
+        .where(tracks.c.missing_since.is_(None))
+    )
     return {
+        "fingerprints": conn.execute(fingerprints).scalar_one(),
+        "styles": conn.execute(with_styles).scalar_one(),
         "backend": get_state(conn, BACKEND_STATE) or "unknown",
         "tracks": conn.execute(present).scalar_one(),
         "analyzed": conn.execute(ok).scalar_one(),
@@ -90,7 +115,7 @@ def analysis_stats(conn: Connection) -> dict:
     }
 
 
-def _next_batch(conn: Connection, size: int, skip: set[int]):
+def _next_batch(conn: Connection, size: int, skip: set[int], effnet: bool):
     q = (
         select(
             tracks.c.id,
@@ -102,17 +127,21 @@ def _next_batch(conn: Connection, size: int, skip: set[int]):
             library_roots.c.path.label("root"),
         )
         .select_from(_pending_base())
-        .where(_pending_condition())
+        .where(_pending_condition(effnet))
         .order_by(tracks.c.id)
         .limit(size + len(skip))
     )
     return [r for r in conn.execute(q) if r.id not in skip][:size]
 
 
-def _store(conn: Connection, results: list[tuple], analyzer: str) -> tuple[int, int]:
+def _store(conn: Connection, results: list[tuple], analyzer: str, style_cache: dict[str, int]) -> tuple[int, int]:
     ok = failed = 0
     ts = now_ms()
     for track_id, fp, feats, error in results:
+        feats = dict(feats) if feats else None
+        model = feats.pop("embedding_model", None) if feats else None
+        vector = feats.pop("embedding", None) if feats else None
+        found = feats.pop("styles", []) if feats else []
         values = {
             "analyzer": analyzer,
             "analyzer_version": features.ANALYZER_VERSION,
@@ -126,6 +155,8 @@ def _store(conn: Connection, results: list[tuple], analyzer: str) -> tuple[int, 
         }  # fmt: skip
         stmt = insert_for(conn, track_features).values(track_id=track_id, **values)
         conn.execute(stmt.on_conflict_do_update(index_elements=[track_features.c.track_id], set_=values))
+        if model:
+            _store_effnet(conn, track_id, model, vector, found, style_cache)
         if feats:
             ok += 1
         else:
@@ -133,17 +164,36 @@ def _store(conn: Connection, results: list[tuple], analyzer: str) -> tuple[int, 
     return ok, failed
 
 
+def _store_effnet(conn: Connection, track_id: int, model: str, vector, found: list, style_cache: dict[str, int]):
+    emb = {"model": model, "vector": vector}
+    stmt = insert_for(conn, track_embeddings).values(track_id=track_id, **emb)
+    conn.execute(stmt.on_conflict_do_update(index_elements=[track_embeddings.c.track_id], set_=emb))
+    conn.execute(track_styles.delete().where(track_styles.c.track_id == track_id))
+    if found:
+        ids = styles.style_ids(conn, {label for label, _p in found}, style_cache)
+        conn.execute(
+            track_styles.insert(),
+            [{"track_id": track_id, "style_id": ids[label], "prob": prob} for label, prob in found],
+        )
+
+
 def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     models_dir = settings.data_dir / "models"
+    if features.effnet_available() and not model_files.present(models_dir) and settings.analysis_download_models:
+        ctx.progress(0, 0, "Modelle werden geladen")
+        model_files.ensure(models_dir, download=True)
     analyzer = features.backend_name(models_dir)
+    effnet = "+effnet" in analyzer
     with db.write() as conn:
         set_state(conn, BACKEND_STATE, analyzer)
     if analyzer == "none":
         return {"skipped": "Essentia is not available on this platform"}
     with db.read() as conn:
-        total = conn.execute(select(func.count()).select_from(_pending_base()).where(_pending_condition())).scalar_one()
+        pending = select(func.count()).select_from(_pending_base()).where(_pending_condition(effnet))
+        total = conn.execute(pending).scalar_one()
     done = ok = failed = 0
     attempted: set[int] = set()
+    style_cache: dict[str, int] = {}
     workers = max(1, settings.analysis_workers)
     ctx.progress(0, total, "Analyse startet")
 
@@ -154,7 +204,7 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     try:
         while not ctx.should_stop():
             with db.read() as conn:
-                batch = _next_batch(conn, _BATCH, attempted)
+                batch = _next_batch(conn, _BATCH, attempted, effnet)
             if not batch:
                 break
             args = [
@@ -178,7 +228,7 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
                         pool.shutdown(cancel_futures=True)
                 pool = new_pool()
             with db.write() as conn:
-                n_ok, n_failed = _store(conn, results, analyzer)
+                n_ok, n_failed = _store(conn, results, analyzer, style_cache)
                 set_state(conn, ANALYSIS_GENERATION, str(now_ms()))
             ok += n_ok
             failed += n_failed
@@ -233,6 +283,22 @@ def run_genre_backfill(ctx: JobContext, db: Database) -> dict:
     return {"tracks": done, "genres": _count(db, genres)}
 
 
+def refresh_detected_genres(conn: Connection) -> None:
+    """Genres from the detected styles for tracks without genre tags (see analysis/styles.py)."""
+    has_styles = conn.execute(select(track_styles.c.track_id).limit(1)).first() is not None
+    has_detected = conn.execute(
+        select(track_genres.c.track_id).where(track_genres.c.source == "detected").limit(1)
+    ).first()
+    if not has_styles and has_detected is None:
+        return
+    cache: dict[str, int] = {}
+    n = styles.refresh_detected_genres(conn, lambda name: genre_id(conn, cache, name))
+    styles.refresh_style_counts(conn)
+    refresh_genre_counts(conn)
+    bump_library_generation(conn)
+    log.info("genres.detected", tracks=n)
+
+
 def _count(db: Database, table) -> int:
     with db.read() as conn:
         return conn.execute(select(func.count()).select_from(table)).scalar_one()
@@ -245,6 +311,7 @@ def make_handlers(db: Database, settings: Settings):
     def regenerate(ctx: JobContext, payload: dict) -> dict:
         ctx.progress(0, 1, "Auto-Playlists werden erzeugt")
         with db.write() as conn:
+            refresh_detected_genres(conn)
             return autoplaylists.generate(conn)
 
     def backfill(ctx: JobContext, payload: dict) -> dict:

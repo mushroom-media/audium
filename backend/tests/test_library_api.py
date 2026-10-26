@@ -71,6 +71,17 @@ def test_bad_cursors_are_rejected(big):
     assert big.get("/api/v1/tracks", params={"limit": 501}).status_code == 422
 
 
+@pytest.mark.parametrize("sort", ["title", "year"])
+def test_track_ids_match_the_list_and_load_back(big, sort):
+    walked, _, _ = _walk(big, "/api/v1/tracks", sort=sort, limit=500)
+    ids = big.get("/api/v1/tracks/ids", params={"sort": sort}).json()
+    assert ids == [t["id"] for t in walked]
+    pick = [ids[900], ids[3], ids[1200]]
+    got = big.get("/api/v1/tracks/by-ids", params={"ids": [*pick, 999_999]}).json()
+    assert [t["id"] for t in got] == pick  # given order, unknown ids left out
+    assert big.get("/api/v1/tracks/by-ids", params={"ids": list(range(1, 202))}).status_code == 422
+
+
 def test_filters(big):
     artist = big.get("/api/v1/artists", params={"limit": 1}).json()["items"][0]
     albums, total, _ = _walk(big, "/api/v1/albums", artist_id=artist["id"])
@@ -122,6 +133,56 @@ def test_search_prefix_and_diacritics(small):
     r = small.get("/api/v1/search", params={"q": "ac dc high", "types": "track"}).json()
     assert [t["title"] for t in r["tracks"]] == ["Highway to Hell"]
     assert r["albums"] == [] and r["artists"] == []
+
+
+def test_letter_index_matches_list_positions(small, library):
+    library.add("X/1.mp3", tags("99 Luftballons", artist="Nena", album="99 Luftballons"))
+    library.add("X/2.mp3", tags("Ärger", artist="The Beatles", album="Abbey Road", albumartist="The Beatles"))
+    library.scan()
+    for path, params in [
+        ("/tracks", {}),
+        ("/albums", {"sort": "title"}),
+        ("/albums", {"sort": "artist"}),
+        ("/artists", {"role": "all"}),
+    ]:
+        letters = small.get(f"/api/v1{path}/letters", params=params).json()
+        items = small.get(f"/api/v1{path}", params={**params, "limit": 100}).json()["items"]
+        key = "artist" if params.get("sort") == "artist" else "name" if path == "/artists" else "title"
+        names = [i[key] for i in items]
+        assert [entry["offset"] for entry in letters] == sorted(entry["offset"] for entry in letters)
+        for entry in letters:
+            first = names[entry["offset"]]
+            if entry["letter"] != "#":
+                # "The Beatles" sorts under B, "Ärger" under A
+                assert first.removeprefix("The ")[0].upper().replace("Ä", "A") == entry["letter"], (path, entry)
+    assert small.get("/api/v1/tracks/letters").json()[0] == {"letter": "#", "offset": 0}  # "99 Luftballons"
+    assert small.get("/api/v1/albums/letters", params={"sort": "year"}).status_code == 422
+
+
+@pytest.mark.parametrize("q", ["nwa", "n.w.a", "N.W.A.", "n w a", "acdc", "ac/dc", "ac dc", "AC-DC"])
+def test_search_ignores_punctuation(small, library, q):
+    library.add("NWA/Straight/01.mp3", tags("Straight Outta Compton", artist="N.W.A.", album="Straight Outta Compton"))
+    library.scan()
+    names = [a["name"] for a in small.get("/api/v1/search", params={"q": q, "types": "artist"}).json()["artists"]]
+    assert names == (["AC/DC"] if "c" in q.lower() else ["N.W.A."])
+
+
+def test_list_filter_keeps_sort_order(small, library):
+    library.add("Bjork/Post/01.flac", tags("Army of Me", artist="Björk", album="Post", albumartist="Björk"))
+    library.scan()
+    tracks = small.get("/api/v1/tracks", params={"q": "bjor"}).json()
+    assert [t["title"] for t in tracks["items"]] == ["Army of Me", "Hunter", "Jóga"]
+    assert tracks["total"] == 3
+    albums = small.get("/api/v1/albums", params={"q": "bjor", "sort": "title"}).json()
+    assert [a["title"] for a in albums["items"]] == ["Homogenic", "Post"] and albums["total"] == 2
+    artists = small.get("/api/v1/artists", params={"q": "ac", "role": "all"}).json()
+    assert [a["name"] for a in artists["items"]] == ["AC/DC"]
+    # The unfiltered count is cached separately from the filtered one.
+    assert small.get("/api/v1/tracks").json()["total"] == 4
+    letters = small.get("/api/v1/tracks/letters", params={"q": "bjor"}).json()
+    assert letters == [{"letter": "A", "offset": 0}, {"letter": "H", "offset": 1}, {"letter": "J", "offset": 2}]
+    # Too short to search for: no filter.
+    assert small.get("/api/v1/tracks", params={"q": "b"}).json()["total"] == 4
 
 
 @pytest.mark.parametrize("q", ['"', "a", "hun* OR x", "NEAR(a b)", "x" * 200, "-:^"])
@@ -224,3 +285,25 @@ def test_list_queries_use_an_index_for_ordering(big, db, sorts, base):
                 plan = _plan(conn, stmt)
                 assert "TEMP B-TREE" not in plan, (sort.name, desc, plan)
                 assert "USING" in plan and "INDEX" in plan, (sort.name, desc, plan)
+
+
+def test_artist_tracks_and_appears_on(library, admin_client):
+    library.add(
+        "Stones/01.mp3",
+        tags("Paint It Black", artist="The Rolling Stones", album="Aftermath", albumartist="The Rolling Stones"),
+    )
+    library.add("Mix/01.mp3", tags("Satisfaction", artist="The Rolling Stones", album="Hits 1965", compilation="1"))
+    library.add("Mix/02.mp3", tags("Help!", artist="The Beatles", album="Hits 1965", compilation="1"))
+    library.add(
+        "ACDC/01.mp3", tags("Rock Song", artist="AC/DC feat. The Rolling Stones", album="Rock", albumartist="AC/DC")
+    )
+    library.scan()
+    c = admin_client
+    stones = c.get("/api/v1/search", params={"q": "rolling stones", "types": "artist"}).json()["artists"][0]
+    assert stones["name"] == "The Rolling Stones"
+    titles = {t["title"] for t in c.get("/api/v1/tracks", params={"artist_id": stones["id"]}).json()["items"]}
+    assert titles == {"Paint It Black", "Satisfaction", "Rock Song"}
+    own = c.get("/api/v1/albums", params={"artist_id": stones["id"]}).json()
+    assert [a["title"] for a in own["items"]] == ["Aftermath"]
+    others = c.get("/api/v1/albums", params={"appears_on": stones["id"]}).json()
+    assert sorted(a["title"] for a in others["items"]) == ["Hits 1965", "Rock"] and others["total"] == 2

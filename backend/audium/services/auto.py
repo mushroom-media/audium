@@ -12,7 +12,7 @@ import json
 from sqlalchemy import Connection, delete, func, insert, select, update
 
 from audium.analysis import autoplaylists, rules
-from audium.db.schema import auto_playlist_access, auto_playlist_items, auto_playlists, playlists, tracks
+from audium.db.schema import auto_playlist_access, auto_playlist_items, auto_playlists, playlists, track_genres, tracks
 from audium.errors import BadRequest, NotFound
 from audium.services import playlists as playlist_service
 from audium.services.library import track_item, track_select
@@ -49,11 +49,35 @@ def _get(conn: Connection, user: User, auto_id: int):
     return row
 
 
+def _origin(row) -> str:
+    """Where a playlist's tracks come from: tags (genre/year tags of the files), features (measured
+    tempo, energy, ...), styles (the sound recognition model) or a custom rule."""
+    if row.generator == "custom":
+        return "custom"
+    if row.generator in ("rule", "cluster"):
+        return "features"
+    return "styles" if row.generator == "sound" or row.key.startswith("style:") else "tags"
+
+
+def _detected_tracks(conn: Connection, row) -> int | None:
+    """For genre playlists: tracks that are in there by a detected genre (they had no genre tag)."""
+    if not row.key.startswith(("genre:", "genre-decade:")):
+        return None
+    detected = select(track_genres.c.track_id).where(track_genres.c.source == "detected")
+    return conn.execute(
+        select(func.count()).where(
+            auto_playlist_items.c.auto_playlist_id == row.id, auto_playlist_items.c.track_id.in_(detected)
+        )
+    ).scalar_one()
+
+
 def _out(conn: Connection, row, admin: bool) -> dict:
     out = {
         "id": row.id,
         "key": row.key,
         "generator": row.generator,
+        "origin": _origin(row),
+        "detected_tracks": _detected_tracks(conn, row),
         "name": row.name,
         "description": row.description,
         "track_count": row.track_count,
@@ -82,7 +106,7 @@ def list_auto(conn: Connection, user: User, status: str | None = None) -> list[d
         q = q.where(auto_playlists.c.status == status)
     elif not user.is_admin:
         q = q.where(auto_playlists.c.status == "published")
-    order = {"rule": 0, "cluster": 1, "custom": 2, "tag": 3}
+    order = {"rule": 0, "cluster": 1, "sound": 1, "custom": 2, "tag": 3}
     rows = [r for r in conn.execute(q) if _can_view(conn, user, r)]
     rows.sort(key=lambda r: (order.get(r.generator, 9), r.key.startswith("genre-decade"), -r.track_count, r.name))
     return [_out(conn, r, user.is_admin) for r in rows]
@@ -104,6 +128,19 @@ def list_items(conn: Connection, user: User, auto_id: int, limit: int, offset: i
         .offset(offset)
     ).all()
     return [{"reason": r.reason, "track": track_item(r)} for r in rows], row.track_count
+
+
+def track_ids(conn: Connection, user: User, auto_id: int) -> list[int]:
+    _get(conn, user, auto_id)
+    return [
+        r[0]
+        for r in conn.execute(
+            select(auto_playlist_items.c.track_id)
+            .join(tracks, tracks.c.id == auto_playlist_items.c.track_id)
+            .where(auto_playlist_items.c.auto_playlist_id == auto_id, tracks.c.missing_since.is_(None))
+            .order_by(auto_playlist_items.c.rank)
+        )
+    ]
 
 
 def freeze(conn: Connection, user: User, auto_id: int, name: str | None):

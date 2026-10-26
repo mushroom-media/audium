@@ -1,10 +1,15 @@
 """Generates auto-playlist suggestions and re-evaluates smart playlists.
 
 Kinds (`generator`):
-- tag:     per genre, per decade, and the biggest genre x decade combinations ("Rock der 90er")
+- tag:     per genre, per decade, the biggest genre x decade combinations ("Rock der 90er") and
+           per detected style with enough tracks ("Deep House")
 - rule:    built-in rules over audio features ("Workout", "Zum Entspannen", ...)
 - cluster: k-means "mixes" over the feature vectors, named after their dominant traits
+- sound:   k-means "mixes" over the sound fingerprints, named after their most common styles
 - custom:  rule playlists the admin created; only re-evaluated here
+
+The admin picks the source (state key SOURCE_STATE): "all" makes tag, rule, style and cluster
+playlists; "sound" only what the sound recognition found (detected styles and sound mixes).
 
 New playlists start as "suggested" (only the admin sees them) until the admin publishes them.
 Existing ones keep status, access and an admin-given name; only their tracks are refreshed.
@@ -13,12 +18,14 @@ A "dismissed" playlist is never recreated.
 
 import json
 import zlib
+from collections import Counter
 
 import numpy as np
 from sqlalchemy import Connection, delete, func, insert, select, update
 
 from audium.analysis import explain, rules
-from audium.analysis.similarity import feature_matrix
+from audium.analysis.similarity import embedding_matrix, feature_matrix
+from audium.analysis.styles import MIN_STYLE_PROB
 from audium.db.schema import (
     auto_playlist_items,
     auto_playlists,
@@ -26,10 +33,13 @@ from audium.db.schema import (
     genres,
     playlist_items,
     playlists,
+    styles,
     track_features,
     track_genres,
+    track_styles,
     tracks,
 )
+from audium.db.state import get_state
 from audium.logging import get_logger
 from audium.util import now_ms
 
@@ -40,9 +50,14 @@ MIN_GENRE_TRACKS = 30
 MIN_DECADE_TRACKS = 30
 MIN_COMBO_TRACKS = 25
 MAX_COMBOS = 12
+MIN_STYLE_TRACKS = 25
+MAX_STYLES = 30
 MIN_ANALYZED_FOR_RULES = 50
 MIN_ANALYZED_FOR_CLUSTERS = 200
 MIN_RULE_TRACKS = 15
+MIX_SIZE = 200
+SOURCE_STATE = "autoplaylists.source"
+SOURCES = ("all", "sound")  # the first one is the default
 
 # Built-in rule playlists: key -> (name, description, rule, explain fields)
 BUILTIN_RULES: dict[str, tuple[str, str, dict, tuple[str, ...]]] = {
@@ -114,6 +129,11 @@ _TRAIT_WORDS = {
 }
 
 
+def source(conn: Connection) -> str:
+    value = get_state(conn, SOURCE_STATE)
+    return value if value in SOURCES else SOURCES[0]
+
+
 def seed_of(key: str) -> int:
     return zlib.crc32(key.encode())
 
@@ -173,6 +193,8 @@ def _tag_specs(conn: Connection) -> list[dict]:
             }
         )
 
+    specs += _style_specs(conn, {g.name for g in genre_rows})
+
     decade = (tracks.c.year // 10) * 10
     decade_rows = conn.execute(
         select(decade.label("d"), func.count())
@@ -227,6 +249,38 @@ def _tag_specs(conn: Connection) -> list[dict]:
     return specs
 
 
+def _style_specs(conn: Connection, genre_playlists: set[str]) -> list[dict]:
+    """Detected styles with enough tracks; one that only repeats a genre ("House") is left out."""
+    specs = []
+    rows = conn.execute(
+        select(styles.c.id, styles.c.name, styles.c.slug, styles.c.genre)
+        .where(styles.c.track_count >= MIN_STYLE_TRACKS)
+        .order_by(styles.c.track_count.desc())
+        .limit(MAX_STYLES)
+    ).all()
+    for s in rows:
+        if s.name in genre_playlists:
+            continue
+        key = f"style:{s.slug}"
+        stmt = (
+            select(tracks.c.id)
+            .join(track_styles, track_styles.c.track_id == tracks.c.id)
+            .where(track_styles.c.style_id == s.id, track_styles.c.prob >= MIN_STYLE_PROB, _present())
+        )
+        ids = [r[0] for r in conn.execute(_shuffled(stmt, key))]
+        part_of = f" (gehört zu {s.genre})" if s.genre else ""
+        specs.append(
+            {
+                "key": key,
+                "generator": "tag",
+                "name": s.name,
+                "description": f"Vom Klang her als {s.name} erkannt{part_of}.",
+                "items": [(t, s.name) for t in ids],
+            }
+        )
+    return specs
+
+
 def _rule_specs(conn: Connection, analyzed: int, mood_columns: bool) -> list[dict]:
     if analyzed < MIN_ANALYZED_FOR_RULES:
         return []
@@ -264,8 +318,7 @@ def kmeans(z: np.ndarray, k: int, seed: int = 7, iterations: int = 40) -> tuple[
     centroids = np.array(centroids, dtype=np.float32)
     labels = np.zeros(n, dtype=np.int64)
     for iteration in range(iterations):
-        dist = ((z[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
-        new = dist.argmin(axis=1)
+        new = sq_distances(z, centroids).argmin(axis=1)
         if iteration > 0 and np.array_equal(new, labels):
             break
         labels = new
@@ -274,6 +327,12 @@ def kmeans(z: np.ndarray, k: int, seed: int = 7, iterations: int = 40) -> tuple[
             if len(members):
                 centroids[j] = members.mean(axis=0)
     return centroids, labels
+
+
+def sq_distances(z: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Squared euclidean distances (n x k), without an n x k x d intermediate (fingerprints are 128 wide)."""
+    d = (z**2).sum(axis=1)[:, None] - 2 * z @ centroids.T + (centroids**2).sum(axis=1)[None, :]
+    return np.maximum(d, 0)
 
 
 def _cluster_name(centroid: np.ndarray, names: list[str]) -> str:
@@ -308,14 +367,14 @@ def _cluster_specs(conn: Connection, analyzed: int) -> list[dict]:
     )
     # Every track belongs to its nearest centroid; a mix holds only its own members (closest
     # first), so mixes do not overlap.
-    all_dist = ((z[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
+    all_dist = sq_distances(z, centroids)
     labels = all_dist.argmin(axis=1)
     specs, used_names = [], set()
     for rank, j in enumerate(order, start=1):
         members = np.flatnonzero(labels == j)
         if len(members) < MIN_RULE_TRACKS:
             continue
-        nearest = members[np.argsort(all_dist[members, j])][:200]
+        nearest = members[np.argsort(all_dist[members, j])][:MIX_SIZE]
         name = _cluster_name(centroids[j], names)
         while name in used_names:
             name += " +"
@@ -328,6 +387,68 @@ def _cluster_specs(conn: Connection, analyzed: int) -> list[dict]:
                 "name": name,
                 "description": "Ähnlich klingende Titel aus deiner Bibliothek, automatisch gruppiert.",
                 "items": _with_reasons(conn, track_ids, ("bpm", "energy", "danceability")),
+            }
+        )
+    return specs
+
+
+def _top_styles(conn: Connection) -> dict[int, tuple[str, str]]:
+    """track id -> (name, slug) of its most likely detected style."""
+    rows = conn.execute(
+        select(track_styles.c.track_id, styles.c.name, styles.c.slug)
+        .join(styles, styles.c.id == track_styles.c.style_id)
+        .where(track_styles.c.prob >= MIN_STYLE_PROB)
+        .order_by(track_styles.c.track_id, track_styles.c.prob.desc())
+    )
+    top: dict[int, tuple[str, str]] = {}
+    for r in rows:
+        top.setdefault(r.track_id, (r.name, r.slug))
+    return top
+
+
+def _sound_cluster_specs(conn: Connection) -> list[dict]:
+    """Mixes over the sound fingerprints: k-means on the unit-length PCA vectors, every track in
+    its nearest mix only, named and keyed after the styles most common among its members."""
+    ids, z = embedding_matrix(conn)
+    if len(ids) < MIN_ANALYZED_FOR_CLUSTERS:
+        return []
+    rng = np.random.default_rng(1)
+    sample = rng.choice(len(ids), size=min(len(ids), 20_000), replace=False)
+    k = int(np.clip(round(np.sqrt(len(ids) / 40)), 4, 16))
+    centroids, _ = kmeans(z[sample], k)
+    all_dist = sq_distances(z, centroids)
+    labels = all_dist.argmin(axis=1)
+    top = _top_styles(conn)
+    clusters = []
+    for j in range(k):
+        members = np.flatnonzero(labels == j)
+        if len(members) < MIN_RULE_TRACKS:
+            continue
+        counts = Counter(top[int(ids[i])] for i in members if int(ids[i]) in top)
+        # The styles that make up a real share of the mix, most common first.
+        named = [st for st, n in counts.most_common(2) if n >= 0.15 * len(members)]
+        clusters.append((len(members), j, members, named))
+    specs, used_keys = [], set()
+    # Biggest first, so the plain key (and name) goes to the main mix of a style.
+    for _size, j, members, named in sorted(clusters, key=lambda c: (-c[0], c[1])):
+        nearest = members[np.argsort(all_dist[members, j])][:MIX_SIZE]
+        base = "sound:" + ("+".join(slug for _name, slug in named) or "mixed")
+        key, n = base, 1
+        while key in used_keys:
+            n += 1
+            key = f"{base}-{n}"
+        used_keys.add(key)
+        name = "Mix: " + (" & ".join(name for name, _slug in named) or "bunt gemischt")
+        if n > 1:
+            name += f" ({n})"
+        track_ids = [int(ids[i]) for i in nearest]
+        specs.append(
+            {
+                "key": key,
+                "generator": "sound",
+                "name": name,
+                "description": "Titel mit ähnlichem Klang-Fingerabdruck, automatisch gruppiert.",
+                "items": [(t, top[t][0] if t in top else None) for t in track_ids],
             }
         )
     return specs
@@ -433,12 +554,17 @@ def generate(conn: Connection) -> dict:
         ).scalar_one()
         > 0
     )
-    specs = [
-        *_tag_specs(conn),
-        *_rule_specs(conn, analyzed, mood_columns),
-        *_cluster_specs(conn, analyzed),
-        *_custom_specs(conn),
-    ]
+    src = source(conn)
+    if src == "sound":
+        # Without genre playlists a style may share a genre's name ("House"), so none is left out.
+        specs = [*_style_specs(conn, set()), *_sound_cluster_specs(conn), *_custom_specs(conn)]
+    else:
+        specs = [
+            *_tag_specs(conn),
+            *_rule_specs(conn, analyzed, mood_columns),
+            *_cluster_specs(conn, analyzed),
+            *_custom_specs(conn),
+        ]
     produced = {s["key"] for s in specs}
     stats = {"created": 0, "updated": 0, "skipped": 0, "removed": 0}
     for spec in specs:
@@ -454,7 +580,7 @@ def generate(conn: Connection) -> dict:
             conn.execute(delete(auto_playlists).where(auto_playlists.c.id == row.id))
             stats["removed"] += 1
     stats["smart"] = refresh_smart_playlists(conn)
-    log.info("autoplaylists.generated", analyzed=analyzed, **stats)
+    log.info("autoplaylists.generated", source=src, analyzed=analyzed, **stats)
     return stats
 
 

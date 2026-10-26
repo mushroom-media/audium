@@ -1,6 +1,7 @@
 """Cover images, stored once per distinct image as WebP thumbnails.
 
 Layout: <data>/covers/<hash[:2]>/<hash>_<size>.webp, hash = xxh3-128 of the original bytes.
+JPEG copies (<hash>_<size>.jpg) appear next to them when a client that cannot show WebP asks.
 Because the hash is part of the URL, responses can be cached forever (immutable).
 """
 
@@ -17,6 +18,7 @@ from PIL import Image, ImageOps
 SIZES = (64, 256, 600)
 _WEBP_QUALITY = 80
 _WEBP_METHOD = 2  # 0 (fast) .. 6 (small); 2 is ~2.5x faster than the default 4 for a few % more bytes
+_JPEG_QUALITY = 85
 _MAX_PIXELS = 80_000_000  # ~9000x9000; larger "covers" are almost certainly not covers
 _MEMO_LIMIT = 100_000
 
@@ -139,8 +141,34 @@ class CoverStore:
                     known[digest] = result
         return [known[d] if d else None for d in digests]
 
+    def jpeg_path(self, digest: str, size: int) -> Path:
+        return self.root / digest[:2] / f"{digest}_{size}.jpg"
+
+    def jpeg(self, digest: str, size: int) -> Path | None:
+        """A JPEG copy of a thumbnail, for clients that cannot show WebP (some Subsonic apps).
+        Made from the WebP thumbnail on first request and kept next to it."""
+        target = self.jpeg_path(digest, size)
+        if target.is_file():
+            return target
+        source = self.path(digest, size)
+        try:
+            with Image.open(source) as img:
+                rgb = img.convert("RGB")  # JPEG has no alpha
+            fd, tmp = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    rgb.save(f, "JPEG", quality=_JPEG_QUALITY)
+                os.replace(tmp, target)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
+        except (OSError, ValueError, SyntaxError):
+            return None
+        return target
+
     def delete(self, digest: str) -> None:
         with self._lock:
             self._done.pop(digest, None)
         for size in SIZES:
             self.path(digest, size).unlink(missing_ok=True)
+            self.jpeg_path(digest, size).unlink(missing_ok=True)

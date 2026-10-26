@@ -1,11 +1,13 @@
 <script lang="ts">
   import { get, type AlbumDetail } from "../lib/api";
   import Cover from "../lib/components/Cover.svelte";
+  import Heart from "../lib/components/Heart.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
   import { openTrackMenu } from "../lib/ui.svelte";
   import { longDuration, plural } from "../lib/format";
   import { player } from "../lib/player.svelte";
+  import { startGroupRadio } from "../lib/radio";
   import { href } from "../lib/router.svelte";
 
   let { id }: { id: string } = $props();
@@ -24,10 +26,8 @@
 
   const multiDisc = $derived(album ? new Set(album.tracks.map((t) => t.disc_no ?? 1)).size > 1 : false);
 
-  function play(index = 0, shuffle = false) {
-    if (!album) return;
-    if (shuffle !== player.queue.shuffle) player.toggleShuffle();
-    player.playTracks(album.tracks, index);
+  function play(index: number | null = 0, shuffle = false) {
+    if (album) player.playTracks(album.tracks, index, shuffle, { kind: "Album", name: album.title, path: `/albums/${album.id}`, ref: `album:${album.id}` });
   }
 </script>
 
@@ -47,7 +47,9 @@
         </p>
         <div class="actions">
           <button class="btn primary" onclick={() => play(0, false)}><Icon name="play" size={18} /> Abspielen</button>
-          <button class="btn" onclick={() => play(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
+          <button class="btn square" onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
+          <button class="btn" onclick={() => album && startGroupRadio("albums", album.id, album.title)}><Icon name="radio" size={18} /> Radio</button>
+          <Heart kind="album" id={album.id} size={22} />
           <button class="icon-btn" title="Mehr" aria-label="Mehr zu {album.title}" onclick={(e) => album && openTrackMenu(e, album.tracks, album.title)}><Icon name="more" size={20} /></button>
         </div>
       </div>
@@ -58,7 +60,7 @@
           <h2 class="disc">CD {t.disc_no ?? 1}</h2>
         {/if}
         <div class="row-h">
-          <TrackRow track={t} number={t.track_no ?? i + 1} showCover={false} showAlbum={false} onplay={() => play(i, player.queue.shuffle)} />
+          <TrackRow track={t} number={t.track_no ?? i + 1} showCover={false} showAlbum={false} linkArtist={false} onplay={() => play(i, false)} />
         </div>
       {/each}
     </div>
@@ -138,6 +140,7 @@
     }
     .art {
       width: min(240px, 70vw);
+      align-self: center;
     }
   }
 </style>

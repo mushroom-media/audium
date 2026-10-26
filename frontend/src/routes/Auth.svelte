@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { ApiError, get, post } from "../lib/api";
+  import { ApiError, currentConnection, get, isApp, post } from "../lib/api";
   import { navigate } from "../lib/router.svelte";
   import { loadSession, login } from "../lib/session.svelte";
 
   let { mode, token = "" }: { mode: "login" | "setup" | "invite"; token?: string } = $props();
 
+  // Apps only: which server to log in to (remembered from the last time).
+  let server = $state(currentConnection()?.server ?? "");
   let username = $state("");
   let password = $state("");
   let password2 = $state("");
@@ -27,8 +29,9 @@
       if (e.status === 401) return "Benutzername oder Passwort falsch.";
       if (e.status === 403 && mode === "setup") return "Das Setup-Token stimmt nicht.";
       if (e.status === 409) return "Dieser Benutzername ist schon vergeben.";
-      return e.message;
+      return e.message; // includes "server not reachable" / "not an audium server" of the apps
     }
+    if (isApp) return "Keine Verbindung zum Server. Stimmt die Adresse, und ist der Server erreichbar?";
     return "Keine Verbindung zum Server.";
   }
 
@@ -42,7 +45,7 @@
     busy = true;
     try {
       if (mode === "login") {
-        await login(username, password);
+        await login(username, password, server);
       } else if (mode === "setup") {
         await post("/setup", { setup_token: setupToken, username, password });
         await loadSession();
@@ -78,13 +81,19 @@
       {#if inviteValid === false}<p class="error">Diese Einladung ist ungültig oder abgelaufen.</p>{/if}
     {/if}
 
+    {#if isApp && mode === "login"}
+      <label>
+        Server
+        <input bind:value={server} required placeholder="z. B. 192.168.1.5:8091" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" />
+      </label>
+    {/if}
     <label>Benutzername<input bind:value={username} required autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
     <label>
       Passwort
-      <input type="password" bind:value={password} required minlength={mode === "login" ? 1 : 8} autocomplete={mode === "login" ? "current-password" : "new-password"} />
+      <input type="password" bind:value={password} required minlength={mode === "login" ? 1 : 3} autocomplete={mode === "login" ? "current-password" : "new-password"} />
     </label>
     {#if mode !== "login"}
-      <label>Passwort wiederholen<input type="password" bind:value={password2} required minlength="8" autocomplete="new-password" /></label>
+      <label>Passwort wiederholen<input type="password" bind:value={password2} required minlength="3" autocomplete="new-password" /></label>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <button class="btn primary wide" disabled={busy || (mode === "invite" && inviteValid === false)}>

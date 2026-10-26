@@ -16,15 +16,18 @@ from audium.api.library_models import (
     RootUpdate,
     ScanRequest,
 )
-from audium.api.models import Ok, Page
+from audium.api.models import Ok, Page, ServerSettings, ServerSettingsUpdate
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.db.pagination import Sort, fetch_ordered, page_ids
 from audium.db.schema import albums, artists, jobs, tracks
+from audium.db.state import bump_library_generation
 from audium.errors import NotFound
 from audium.jobs import queue as jobq
+from audium.scanner.scan import refresh_artists
 from audium.scanner.tasks import enqueue_scan
 from audium.services import roots as root_service
+from audium.services import server_settings as server_settings_service
 from audium.services.users import User
 
 router = APIRouter(prefix="/admin", tags=["admin: library"])
@@ -162,6 +165,24 @@ def cancel_job(job_id: int, _admin: User = Depends(require_admin), db: Database 
             raise NotFound("job not found")
         row = conn.execute(select(jobs).where(jobs.c.id == job_id)).first()
     return _job_out(row)
+
+
+@router.get("/settings", response_model=ServerSettings, summary="Server-wide settings")
+def server_settings(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        return server_settings_service.get_server_settings(conn)
+
+
+@router.patch("/settings", response_model=ServerSettings)
+def update_server_settings(
+    body: ServerSettingsUpdate, _admin: User = Depends(require_admin), db: Database = Depends(get_db)
+):
+    with db.write() as conn:
+        merged, changed = server_settings_service.update_server_settings(conn, body.model_dump(exclude_none=True))
+        if "artist_album_covers" in changed:
+            refresh_artists(conn)
+            bump_library_generation(conn)
+    return merged
 
 
 @router.get("/stats", response_model=LibraryStats)

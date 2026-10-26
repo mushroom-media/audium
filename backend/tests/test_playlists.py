@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from audium.api import events as events_module
 from audium.db.schema import playlist_items, tracks
 from audium.services import playlists as svc
-from tests.conftest import USER_PW, create_user, login, tags
+from tests.conftest import USER_PW, cover_bytes, create_user, login, tags
 
 
 @pytest.fixture
@@ -299,6 +299,31 @@ def test_versions_and_cached_stats(world):
     assert alice.patch(f"/api/v1/playlists/{world['pl']}", json={"name": "   "}).status_code == 400
 
 
+def test_cover_preset_upload_and_reset(world, library):
+    alice, bob = client_of(world, "alice"), client_of(world, "bob")
+    url = f"/api/v1/playlists/{world['pl']}/cover"
+    upload = {"X-Requested-With": "audium", "Content-Type": "image/jpeg"}
+    assert alice.get(f"/api/v1/playlists/{world['pl']}").json()["cover_source"] == "auto"
+
+    pl = alice.put(url, json={"preset": 3}).json()
+    assert (pl["cover_source"], pl["cover_preset"], pl["cover"]) == ("preset", 3, None)
+    assert alice.put(url, json={"preset": 21}).status_code == 422
+    assert bob.put(url, json={"preset": 1}).status_code == 403  # editors may not
+
+    r = alice.post(url, content=cover_bytes(), headers=upload)
+    assert r.status_code == 200
+    pl = r.json()
+    assert pl["cover_source"] == "upload" and pl["cover_preset"] is None and pl["cover"]
+    assert alice.get(f"/api/v1/covers/{pl['cover']}/256").status_code == 200
+    assert alice.post(url, content=b"not an image", headers=upload).status_code == 400
+    assert bob.post(url, content=cover_bytes(), headers=upload).status_code == 403
+    library.scan()  # the orphan cleanup keeps covers that playlists use
+    assert alice.get(f"/api/v1/covers/{pl['cover']}/256").status_code == 200
+
+    pl = alice.put(url, json={}).json()
+    assert pl["cover_source"] == "auto" and pl["cover_preset"] is None
+
+
 def test_missing_tracks_stay_but_are_marked_and_purge_cleans_up(world, db, library):
     (library.root / "A/2.mp3").unlink()
     library.scan()
@@ -428,6 +453,60 @@ def test_history(world):
     assert bob.get("/api/v1/history").json() == []
     albums = alice.get("/api/v1/history/albums").json()
     assert len(albums) == 1 and albums[0]["title"] == "Album"
+
+
+def test_listening_stats(world, db):
+    alice, bob = client_of(world, "alice"), client_of(world, "bob")
+    t = world["tracks"]
+    for tid in (t[1], t[0], t[1], t[2], t[1], t[0]):
+        assert alice.post("/api/v1/history", json={"track_id": tid, "played_ms": 30000}).status_code == 200
+    lengths = {tid: alice.get(f"/api/v1/tracks/{tid}").json()["duration_ms"] for tid in t[:3]}
+
+    s = alice.get("/api/v1/stats").json()
+    assert s["since"] is None and s["plays"] == 6
+    assert s["listening_ms"] == 3 * lengths[t[1]] + 2 * lengths[t[0]] + lengths[t[2]]
+    assert [(e["track"]["id"], e["plays"]) for e in s["tracks"]] == [(t[1], 3), (t[0], 2), (t[2], 1)]
+    assert [(e["album"]["title"], e["plays"]) for e in s["albums"]] == [("Album", 6)]
+    assert s["artists"][0]["plays"] == 6 and s["artists"][0]["listening_ms"] == s["listening_ms"]
+    assert s["tracks"][0]["listening_ms"] == 3 * lengths[t[1]]
+    assert len(alice.get("/api/v1/stats", params={"limit": 1}).json()["tracks"]) == 1
+
+    # a period that starts after the plays has none; other users see only their own
+    later = alice.get("/api/v1/stats", params={"since": 2**50}).json()
+    assert later["plays"] == 0 and later["listening_ms"] == 0 and later["tracks"] == []
+    assert bob.get("/api/v1/stats").json()["plays"] == 0
+
+
+def test_recently_played_shows_sources(world):
+    alice, bob = client_of(world, "alice"), client_of(world, "bob")
+    t, pl = world["tracks"], world["pl"]
+
+    def play(c, tid, context=None):
+        r = c.post("/api/v1/history", json={"track_id": tid, "played_ms": 30000, "context": context})
+        assert r.status_code == 200, r.text
+
+    album_id = alice.get(f"/api/v1/tracks/{t[0]}").json()["album_id"]
+    play(alice, t[0])  # no source (e.g. search): counts for the album
+    play(alice, t[1], f"radio:track:{t[0]}")
+    play(alice, t[2], f"radio:track:{t[0]}")
+    play(alice, t[0], f"playlist:{pl}")
+    play(alice, t[3], "favorites")
+    play(alice, t[4], f"album:{album_id}")
+    recent = alice.get("/api/v1/history/recent").json()
+    assert [(r["type"], r["id"], r["radio_of"]) for r in recent] == [
+        ("album", album_id, None),
+        ("favorites", None, None),
+        ("playlist", pl, None),
+        ("radio", t[0], "track"),
+    ]
+    assert recent[2]["name"] == "Road Trip" and recent[3]["name"] == "Song 1"
+    assert alice.post("/api/v1/history", json={"track_id": t[0], "played_ms": 1, "context": "x:1"}).status_code == 422
+
+    # a playlist bob can no longer see disappears from his list
+    play(bob, t[0], f"playlist:{pl}")
+    assert [r["type"] for r in bob.get("/api/v1/history/recent").json()] == ["playlist"]
+    alice.delete(f"/api/v1/playlists/{pl}/shares/{uid(world, 'bob')}")
+    assert bob.get("/api/v1/history/recent").json() == []
 
 
 def test_playlist_cascade_when_owner_is_deleted(world, db):

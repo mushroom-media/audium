@@ -11,7 +11,8 @@ from sqlalchemy import Select, and_, exists, func, not_, or_, select
 
 from audium.analysis.features import KEYS
 from audium.analysis.genres import slug as genre_slug
-from audium.db.schema import albums, genres, track_features, track_genres, tracks
+from audium.analysis.styles import MIN_STYLE_PROB
+from audium.db.schema import albums, genres, styles, track_features, track_genres, track_styles, tracks
 from audium.errors import BadRequest
 from audium.util import now_ms
 
@@ -39,6 +40,7 @@ FIELDS: dict[str, Field] = {
     f.name: f
     for f in (
         Field("genre", "Genre", "text", ("is", "is_not")),
+        Field("style", "Stil (erkannt)", "text", ("is", "is_not"), needs_analysis=True),
         Field("artist", "Künstler", "text", TEXT_OPS),
         Field("album", "Album", "text", TEXT_OPS),
         Field("title", "Titel", "text", ("contains",)),
@@ -155,6 +157,14 @@ def _condition(c: dict):
             track_genres.c.track_id == tracks.c.id,
             track_genres.c.genre_id == genres.c.id,
             or_(func.lower(genres.c.name) == value.lower(), genres.c.slug == genre_slug(value)),
+        )
+        return has if op == "is" else not_(has)
+    if field == "style":
+        has = exists().where(
+            track_styles.c.track_id == tracks.c.id,
+            track_styles.c.style_id == styles.c.id,
+            track_styles.c.prob >= MIN_STYLE_PROB,
+            or_(func.lower(styles.c.name) == value.lower(), styles.c.slug == genre_slug(value)),
         )
         return has if op == "is" else not_(has)
     if field in ("artist", "title"):

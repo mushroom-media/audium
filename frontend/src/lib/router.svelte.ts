@@ -40,10 +40,26 @@ function currentPath(): string {
   return (p.startsWith(basePath) ? p.slice(basePath.length) : p) || "/";
 }
 
-export const router = $state({ route: match("/", "") });
+/** `overlay`: a full-screen view open over the page (see openOverlay). */
+export const router = $state({ route: match("/", ""), depth: 0, overlay: null as string | null });
 
+interface EntryState {
+  depth?: number;
+  /** Tells the history entries apart, e.g. for the scroll position each one had. */
+  key?: string;
+  overlay?: string;
+}
+
+const newKey = () => Math.random().toString(36).slice(2, 10);
+let entryKey = "";
+
+// Each history entry we push carries its depth, so we know whether "back" stays inside the app.
 function update() {
+  const state = (history.state as EntryState | null) ?? {};
   router.route = match(currentPath(), window.location.search);
+  router.depth = state.depth ?? 0;
+  router.overlay = state.overlay ?? null;
+  entryKey = state.key ?? "";
 }
 
 export function href(path: string): string {
@@ -52,12 +68,49 @@ export function href(path: string): string {
 
 export function navigate(path: string, { replace = false } = {}) {
   const url = href(path);
-  if (replace) history.replaceState(null, "", url);
-  else history.pushState(null, "", url);
+  if (replace) history.replaceState({ depth: router.depth, key: entryKey }, "", url);
+  // Leaving an overlay for a page takes its place: "back" then returns to the page under it.
+  else if (router.overlay) history.replaceState({ depth: router.depth, key: newKey() }, "", url);
+  else history.pushState({ depth: router.depth + 1, key: newKey() }, "", url);
   update();
 }
 
+/** Full-screen views (now playing, the queue on phones) get a history entry of their own, so
+ * "back" (the system's swipe back too) closes them and leaves the page under them as it was. */
+export function openOverlay(name: string) {
+  if (router.overlay === name) return;
+  const state: EntryState = { depth: router.depth + 1, key: entryKey, overlay: name };
+  if (router.overlay) history.replaceState({ ...state, depth: router.depth }, "", window.location.href);
+  else history.pushState(state, "", window.location.href);
+  update();
+}
+
+export function closeOverlay(name: string) {
+  if (router.overlay === name) history.back();
+}
+
+// Scroll positions per history entry: coming back to a page finds it where it was left.
+const scrolls = new Map<string, number>();
+
+/** `id` tells apart what scrolls on the page (and lists that should not share a position). */
+export function rememberScroll(id: string, top: number) {
+  scrolls.set(`${entryKey}|${id}`, top);
+}
+
+export function recallScroll(id: string): number {
+  return scrolls.get(`${entryKey}|${id}`) ?? 0;
+}
+
+/** Back to the previous page of the app, or to `fallback` when the app was opened right here. */
+export function goBack(fallback: string) {
+  if (router.depth > 0) history.back();
+  else navigate(fallback, { replace: true });
+}
+
 export function startRouter() {
+  // A reload opens the page itself, not an overlay that was open; each entry gets its key.
+  const state = (history.state as EntryState | null) ?? {};
+  history.replaceState({ depth: state.depth ?? 0, key: state.key ?? newKey() }, "", window.location.href);
   update();
   window.addEventListener("popstate", update);
   // Intercept clicks on internal links so navigation never reloads the page (and the player).

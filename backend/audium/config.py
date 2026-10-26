@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     api_db_readers: int = 1
     web_dir: Path = Path("/opt/audium/web")
     max_transcodes: int = 4
+    subsonic_enabled: bool = True
+    # Origins of the audium apps (Tauri), allowed to call /api with a bearer token (CORS, never
+    # with cookies). Comma-separated; empty: no app can connect.
+    app_origins: str = "tauri://localhost,http://tauri.localhost,https://tauri.localhost"
 
     # Logging
     log_level: str = "info"
@@ -40,6 +44,8 @@ class Settings(BaseSettings):
     admin_password: str | None = None
     login_max_attempts: int = 10
     login_window_minutes: int = 15
+    # Encrypts the Subsonic app passwords. Unset: a random key in <data>/secret.key.
+    secret_key: str | None = None
 
     # Library / scanner
     library_roots: str | None = None
@@ -48,6 +54,8 @@ class Settings(BaseSettings):
     scan_workers: int = 4
     analysis_enabled: bool = True
     analysis_workers: int = 1
+    # Download the pre-trained style/fingerprint models (~20 MB) into <data>/models on first use.
+    analysis_download_models: bool = True
     missing_grace_days: int = 7
     ignored_articles: str = "The El La Los Las Le Les Os As O A"
 
@@ -68,8 +76,16 @@ class Settings(BaseSettings):
         return self.data_dir / "covers"
 
     @property
+    def secret_key_file(self) -> Path:
+        return self.data_dir / "secret.key"
+
+    @property
     def backups_dir(self) -> Path:
         return self.data_dir / "backups"
+
+    @cached_property
+    def app_origin_list(self) -> list[str]:
+        return [o.strip().rstrip("/") for o in self.app_origins.split(",") if o.strip()]
 
     @cached_property
     def articles(self) -> tuple[str, ...]:

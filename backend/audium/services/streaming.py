@@ -25,6 +25,10 @@ _CONTENT_TYPES = {
 }
 
 
+def content_type(container: str | None) -> str:
+    return _CONTENT_TYPES.get(container or "", "application/octet-stream")
+
+
 @dataclass(frozen=True)
 class TrackFile:
     path: str
@@ -56,5 +60,5 @@ def track_file(conn: Connection, track_id: int) -> TrackFile:
         codec=row.codec,
         container=row.container,
         duration_ms=row.duration_ms,
-        content_type=_CONTENT_TYPES.get(row.container or "", "application/octet-stream"),
+        content_type=content_type(row.container),
     )

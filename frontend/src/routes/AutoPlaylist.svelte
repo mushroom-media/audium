@@ -8,6 +8,7 @@
   import TrackRow from "../lib/components/TrackRow.svelte";
   import VirtualList from "../lib/components/VirtualList.svelte";
   import { longDuration, plural } from "../lib/format";
+  import { ORIGINS, originText } from "../lib/origin";
   import { loadPlaylists } from "../lib/mine.svelte";
   import { player } from "../lib/player.svelte";
   import { navigate } from "../lib/router.svelte";
@@ -42,10 +43,8 @@
     return () => ctrl.abort();
   });
 
-  function play(index = 0, shuffle = false) {
-    if (!items.length) return;
-    if (shuffle !== player.queue.shuffle) player.toggleShuffle();
-    player.playTracks(items.map((i) => i.track), index);
+  function play(index: number | null = 0, shuffle = false) {
+    if (items.length) player.playTracks(items.map((i) => i.track), index, shuffle, auto && { kind: "Playlist", name: auto.name, path: `/discover/${id}`, ref: `auto:${id}` });
   }
 
   async function freeze() {
@@ -104,21 +103,22 @@
 {#if error}
   <div class="page"><p class="empty">{error}</p></div>
 {:else if auto}
-  <VirtualList count={items.length} rowHeight={56} label="Titel">
+  <VirtualList count={items.length} rowHeight={56} label="Titel" keep="auto:{id}">
     {#snippet header()}
       <header class="hero">
         <div class="art"><Cover hash={auto!.cover} size={256} /></div>
         <div class="info">
           <p class="kind">
-            <Icon name="spark" size={13} /> Automatische Playlist
+            <Icon name={ORIGINS[auto!.origin].icon} size={13} /> Automatische Playlist · {ORIGINS[auto!.origin].label}
             {#if isAdmin && auto!.status}· {STATUS[auto!.status]} · {ACCESS[auto!.access ?? "all"]}{/if}
           </p>
           <h1>{auto!.name}</h1>
           {#if auto!.description}<p class="desc">{auto!.description}</p>{/if}
+          <p class="origin">{originText(auto!)}</p>
           <p class="by">{plural(auto!.track_count, "Titel", "Titel")}{#if auto!.duration_ms}, {longDuration(auto!.duration_ms)}{/if}</p>
           <div class="actions">
             <button class="btn primary" disabled={!items.length} onclick={() => play(0)}><Icon name="play" size={18} /> Abspielen</button>
-            <button class="btn" disabled={!items.length} onclick={() => play(0, true)}><Icon name="shuffle" size={18} /> Zufällig</button>
+            <button class="btn square" disabled={!items.length} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
             <button class="btn ghost" disabled={!items.length} onclick={freeze}><Icon name="plus" size={18} /> Als Playlist speichern</button>
           </div>
           {#if isAdmin}
@@ -175,6 +175,11 @@
 {/if}
 
 <style>
+  .origin {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
   .hero {
     display: flex;
     gap: 28px;

@@ -52,9 +52,10 @@ from audium.scanner.fallback import (
     from_path,
     is_disc_dir,
 )
-from audium.scanner.formats import FOLDER_COVER_NAMES
+from audium.scanner.formats import ARTIST_IMAGE_EXTENSIONS, ARTIST_IMAGE_STEM, FOLDER_COVER_NAMES
 from audium.scanner.tags import TrackMeta, read_track
 from audium.scanner.walk import iter_dirs
+from audium.services.server_settings import server_setting
 from audium.util import norm, now_ms, sort_key
 
 log = get_logger(__name__)
@@ -158,6 +159,39 @@ def refresh_genre_counts(conn: Connection) -> None:
     )
 
 
+_ARTIST_AGG = """
+    UPDATE artists SET
+      track_count = (SELECT count(*) FROM track_artists ta JOIN tracks t ON t.id = ta.track_id
+                     WHERE ta.artist_id = artists.id AND t.missing_since IS NULL),
+      album_count = (SELECT count(*) FROM albums a WHERE a.album_artist_id = artists.id AND a.track_count > 0),
+      cover_id = coalesce(image_id, CASE WHEN :album_covers = 1 THEN (SELECT a.cover_id FROM albums a
+                  WHERE a.album_artist_id = artists.id AND a.cover_id IS NOT NULL AND a.track_count > 0
+                  ORDER BY a.year DESC, a.id DESC LIMIT 1) END)
+"""
+
+
+def refresh_artists(conn: Connection, ids: set[int] | None = None) -> None:
+    """Counts and image of the artists (all with `ids` None). The image is the artist's own
+    picture, else, if the server setting allows it, the cover of the newest album."""
+    album_covers = int(server_setting(conn, "artist_album_covers") == "on")
+    if ids is None:
+        conn.execute(text(_ARTIST_AGG), {"album_covers": album_covers})
+        return
+    stmt = text(_ARTIST_AGG + " WHERE id IN :ids").bindparams(bindparam("ids", expanding=True))
+    for chunk in _chunks(sorted(ids)):
+        conn.execute(stmt, {"ids": chunk, "album_covers": album_covers})
+
+
+def _artist_image(names: list[str]) -> str | None:
+    """artist.jpg / artist.png / ... among a folder's images (any case), best format first."""
+    by_ext = {}
+    for n in names:
+        stem, _, ext = n.rpartition(".")
+        if stem.lower() == ARTIST_IMAGE_STEM:
+            by_ext.setdefault(ext.lower(), n)
+    return next((by_ext[e] for e in ARTIST_IMAGE_EXTENSIONS if e in by_ext), None)
+
+
 def _chunks(items: list, n: int = _CHUNK) -> Iterable[list]:
     for i in range(0, len(items), n):
         yield items[i : i + n]
@@ -244,12 +278,15 @@ class Scanner:
         pending: list[Dir] = []
         pending_files = 0
         files_in_root = 0
+        artist_images: dict[str, str] = {}  # rel_dir -> artist image file name
 
         for rel_dir, files, images in iter_dirs(root_path, excludes):
             if self.ctx.should_stop():
                 break
             files_in_root += len(files)
             self.stats.files_seen += len(files)
+            if images and (name := _artist_image(images)):
+                artist_images[rel_dir] = name
             if not files:
                 continue
             existing = self._existing(root.id, rel_dir, files)
@@ -295,6 +332,7 @@ class Scanner:
                 .where(library_roots.c.id == root.id)
                 .values(status="online", status_message=None, last_scan_at=now_ms(), track_count=count)
             )
+        self._scan_artist_images(root.id, root_path, artist_images, force)
 
     def _existing(self, root_id: int, rel_dir: str, files) -> dict:
         rels = [f"{rel_dir}/{n}" if rel_dir else n for n, _, _ in files]
@@ -393,6 +431,8 @@ class Scanner:
         by_stem: dict[str, str] = {}
         for n in names:
             stem, _, ext = n.rpartition(".")
+            if stem.lower() == ARTIST_IMAGE_STEM:
+                continue  # the artist's picture, even when it is the only image in an album folder
             if ext.lower() in ("jpg", "jpeg", "png", "webp", "gif", "bmp"):
                 by_stem.setdefault(stem.lower(), n)
         candidates = [by_stem[s] for s in FOLDER_COVER_NAMES if s in by_stem]
@@ -404,6 +444,71 @@ class Scanner:
             except OSError:
                 continue
         return None
+
+    # --- artist images -------------------------------------------------------------------
+
+    def _scan_artist_images(self, root_id: int, root_path: Path, found: dict[str, str], force: bool) -> None:
+        """artist.jpg/.png after a complete walk of a root. It belongs to the album artist of the
+        albums in the folders below (Artist/Album/), or, for flat layouts, sits in an album folder.
+        Artist folders hold no audio, so this cannot happen per batch. Files are read only when
+        new or changed; an image this root no longer has is dropped."""
+        album_dirs: dict[int, set[str]] = {}
+        with self.db.read() as conn:
+            for r in conn.execute(
+                select(albums.c.album_artist_id, tracks.c.rel_path)
+                .join(albums, albums.c.id == tracks.c.album_id)
+                .where(tracks.c.root_id == root_id, tracks.c.missing_since.is_(None))
+            ):
+                track_dir = str(PurePosixPath(r.rel_path).parent)
+                album_dir = album_dir_of("" if track_dir == "." else track_dir)
+                if album_dir:  # tracks right in the root have no artist folder
+                    album_dirs.setdefault(r.album_artist_id, set()).add(album_dir)
+            current = {
+                r.id: r.image_key
+                for r in conn.execute(select(artists.c.id, artists.c.image_key).where(artists.c.image_key.is_not(None)))
+            }
+        keys: dict[int, tuple[str, str]] = {}  # artist id -> (rel path, image key)
+        for artist_id, dirs in album_dirs.items():
+            parents = sorted({p for d in dirs if (p := str(PurePosixPath(d).parent)) != "."})
+            folder = next((p for p in parents if p in found), None)
+            if folder is None:
+                folder = next((d for d in sorted(dirs) if d in found), None)
+            if folder is None:
+                continue
+            rel = f"{folder}/{found[folder]}"
+            try:
+                st = (root_path / rel).stat()
+            except OSError:
+                continue
+            keys[artist_id] = (rel, f"{root_id}:{rel}:{st.st_size}:{st.st_mtime_ns}")
+        prefix = f"{root_id}:"
+        todo = [a for a, (_rel, key) in keys.items() if force or current.get(a) != key]
+        gone = [a for a, key in current.items() if key.startswith(prefix) and a not in keys]
+        if not todo and not gone:
+            return
+
+        def read(artist_id: int) -> bytes | None:
+            try:
+                return (root_path / keys[artist_id][0]).read_bytes()
+            except OSError:
+                return None
+
+        images = list(self._pool.map(read, todo)) if self._pool else [read(a) for a in todo]
+        rendered = self.covers.ingest_many(images, self._map)
+        with self.db.write() as conn:
+            for artist_id, cover in zip(todo, rendered, strict=True):
+                # An unreadable image keeps its key, so it is not retried until the file changes.
+                image_id = self._cover_id(conn, cover, "artist") if cover else None
+                conn.execute(
+                    update(artists)
+                    .where(artists.c.id == artist_id)
+                    .values(image_id=image_id, image_key=keys[artist_id][1])
+                )
+            for chunk in _chunks(gone):
+                conn.execute(update(artists).where(artists.c.id.in_(chunk)).values(image_id=None, image_key=None))
+            self._refresh_artists(conn, set(todo) | set(gone))
+            bump_library_generation(conn)
+        log.info("scan.artist_images", root_id=root_id, updated=len(todo), removed=len(gone))
 
     # --- writing a batch -----------------------------------------------------------------
 
@@ -508,6 +613,13 @@ class Scanner:
                 self._artist_id(conn, name, r["mb_artist_id"] if len(r["artists"]) == 1 else None)
                 for name in r["artists"]
             ]
+            # (artist id, role) per track_artists row; a guest who is also a main artist counts once
+            credits = [(aid, "main") for aid in dict.fromkeys(artist_ids)]
+            credits += [
+                (aid, "feat")
+                for aid in dict.fromkeys(self._artist_id(conn, name, None) for name in r["featured"])
+                if aid not in artist_ids
+            ]
             cover_id = None
             cover = w.cover or d.folder_cover
             if cover:
@@ -553,15 +665,15 @@ class Scanner:
                     self.stats.moved += 1
                 else:
                     self.stats.updated += 1
-                updated.append((w, r, artist_ids))
+                updated.append((w, r, credits))
             else:
                 values["added_at"] = min(ts, w.mtime_ns // 1_000_000) if first_scan else ts
                 new_rows.append(values)
-                inserted.append((w, r, artist_ids))
+                inserted.append((w, r, credits))
             if r["tag_status"] == "error":
                 self.stats.errors += 1
             touched_albums.add(album_id)
-            touched_artists.update(artist_ids)
+            touched_artists.update(aid for aid, _role in credits)
             touched_artists.add(album_artist_id)
 
         # New tracks in one multi-row INSERT .. RETURNING (ids come back in parameter order).
@@ -579,9 +691,9 @@ class Scanner:
         conn.execute(
             track_artists.insert(),
             [
-                {"track_id": w.existing_id, "artist_id": aid, "role": "main", "position": i}
-                for w, _r, artist_ids in done
-                for i, aid in enumerate(dict.fromkeys(artist_ids))
+                {"track_id": w.existing_id, "artist_id": aid, "role": role, "position": i}
+                for w, _r, track_credits in done
+                for i, (aid, role) in enumerate(track_credits)
             ],
         )
         if changed_ids:
@@ -627,6 +739,7 @@ class Scanner:
         return {
             "title": title,
             "artists": artists_list,
+            "featured": meta.featured_artists,
             "artist_display": meta.artist_display or ", ".join(artists_list),
             "album": album,
             "album_artist": album_artist,
@@ -722,16 +835,6 @@ class Scanner:
                       WHERE t.album_id = albums.id AND t.cover_id IS NOT NULL AND t.missing_since IS NULL
                       ORDER BY coalesce(t.disc_no, 0), coalesce(t.track_no, 0), t.id LIMIT 1)
     """
-    _ARTIST_AGG = """
-        UPDATE artists SET
-          track_count = (SELECT count(*) FROM track_artists ta JOIN tracks t ON t.id = ta.track_id
-                         WHERE ta.artist_id = artists.id AND t.missing_since IS NULL),
-          album_count = (SELECT count(*) FROM albums a WHERE a.album_artist_id = artists.id AND a.track_count > 0),
-          cover_id = (SELECT a.cover_id FROM albums a
-                      WHERE a.album_artist_id = artists.id AND a.cover_id IS NOT NULL AND a.track_count > 0
-                      ORDER BY a.year DESC, a.id DESC LIMIT 1)
-    """
-
     _PLAYLIST_AGG = """
         UPDATE playlists SET
           item_count = (SELECT count(*) FROM playlist_items i WHERE i.playlist_id = playlists.id),
@@ -749,12 +852,7 @@ class Scanner:
             conn.execute(stmt, {"ids": chunk})
 
     def _refresh_artists(self, conn: Connection, ids: set[int] | None) -> None:
-        if ids is None:
-            conn.execute(text(self._ARTIST_AGG))
-            return
-        stmt = text(self._ARTIST_AGG + " WHERE id IN :ids").bindparams(bindparam("ids", expanding=True))
-        for chunk in _chunks(sorted(ids)):
-            conn.execute(stmt, {"ids": chunk})
+        refresh_artists(conn, ids)
 
     # --- end of a complete scan ----------------------------------------------------------
 
@@ -818,7 +916,9 @@ class Scanner:
                     "SELECT id, hash FROM covers WHERE id NOT IN ("
                     " SELECT cover_id FROM tracks WHERE cover_id IS NOT NULL"
                     " UNION SELECT cover_id FROM albums WHERE cover_id IS NOT NULL"
-                    " UNION SELECT cover_id FROM artists WHERE cover_id IS NOT NULL)"
+                    " UNION SELECT cover_id FROM artists WHERE cover_id IS NOT NULL"
+                    " UNION SELECT image_id FROM artists WHERE image_id IS NOT NULL"
+                    " UNION SELECT cover_id FROM playlists WHERE cover_id IS NOT NULL)"
                 )
             ).all()
             for chunk in _chunks(orphan_covers):

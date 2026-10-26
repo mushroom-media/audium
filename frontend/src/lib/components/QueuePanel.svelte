@@ -12,8 +12,9 @@
 
 <aside class="panel" aria-label="Warteschlange">
   <header>
+    <button class="icon-btn back" aria-label="Zurück" onclick={() => (player.queueOpen = false)}><Icon name="back" /></button>
     <h2>Warteschlange</h2>
-    <button class="icon-btn" aria-label="Schließen" onclick={() => (player.queueOpen = false)}><Icon name="close" /></button>
+    <button class="icon-btn close" aria-label="Schließen" onclick={() => (player.queueOpen = false)}><Icon name="close" /></button>
   </header>
   {#if current}
     <div class="label">Läuft gerade</div>
@@ -136,5 +137,50 @@
     padding: 8px 20px;
     color: var(--text-faint);
     font-size: 0.9rem;
+  }
+  .back {
+    display: none;
+  }
+  /* Phones: a page of its own over the current one, with a way back like the detail pages. */
+  @media (max-width: 860px) {
+    .panel {
+      width: 100%;
+      border-left: 0;
+      background: var(--bg);
+      padding-top: env(safe-area-inset-top);
+      animation: slide-in 0.22s cubic-bezier(0.2, 0.8, 0.25, 1);
+    }
+    header {
+      justify-content: flex-start;
+      gap: 8px;
+      height: var(--top-h);
+      padding: 0 16px 0 8px;
+    }
+    h2 {
+      font-size: 1.15rem;
+    }
+    .back {
+      display: grid;
+    }
+    .close {
+      display: none;
+    }
+  }
+  @keyframes slide-in {
+    from {
+      transform: translateX(40%);
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .panel {
+      animation: none;
+    }
+  }
+  /* No hover on touch screens: the remove buttons stay visible. */
+  @media (hover: none) {
+    .rm {
+      opacity: 1;
+    }
   }
 </style>

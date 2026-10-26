@@ -16,6 +16,16 @@ def retry_after(conn: Connection, key: str, now: int, window_ms: int, limit: int
     return max(1, (row.window_start + window_ms - now + 999) // 1000)
 
 
+def failures(conn: Connection, key: str, now: int, window_ms: int) -> int:
+    """Failures of `key` in the current window."""
+    row = conn.execute(
+        select(login_attempts.c.window_start, login_attempts.c.count).where(login_attempts.c.key == key)
+    ).first()
+    if row is None or row.window_start + window_ms <= now:
+        return 0
+    return row.count
+
+
 def register_failure(conn: Connection, key: str, now: int, window_ms: int) -> None:
     row = conn.execute(
         select(login_attempts.c.window_start, login_attempts.c.count).where(login_attempts.c.key == key)

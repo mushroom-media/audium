@@ -15,6 +15,8 @@ OPTIONS: dict[str, tuple[str, ...]] = {
     # auto: original file when the browser can play it, otherwise transcode at high quality.
     # high/medium/low: always transcode (saves bandwidth on slow connections).
     "stream_quality": ("auto", "high", "medium", "low"),
+    # Keyboard shortcuts in the web UI.
+    "shortcuts": ("on", "off"),
 }
 
 

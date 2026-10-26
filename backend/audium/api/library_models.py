@@ -80,6 +80,11 @@ class SearchOut(BaseModel):
     artists: list[ArtistOut]
 
 
+class LetterOut(BaseModel):
+    letter: str = Field(description='"A"-"Z", or "#" for digits, symbols and other scripts')
+    offset: int = Field(description="Position of the first entry with this initial (use as offset)")
+
+
 # --- admin ---------------------------------------------------------------------------------
 
 

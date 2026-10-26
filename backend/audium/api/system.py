@@ -18,7 +18,13 @@ _WORKER_STALE_MS = 60_000
 
 @router.get("/health", summary="Liveness/readiness for Docker and monitoring (no auth)")
 def health(db: Database = Depends(get_db)):
-    body: dict = {"status": "ok", "version": __version__, "ffmpeg": shutil.which("ffmpeg") is not None}
+    # "server" lets an app tell audium from other servers (e.g. Subsonic ones) when connecting.
+    body: dict = {
+        "status": "ok",
+        "server": "audium",
+        "version": __version__,
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+    }
     try:
         with db.read() as conn:
             conn.execute(text("SELECT 1"))

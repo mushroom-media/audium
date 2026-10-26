@@ -4,7 +4,8 @@ audium works on plain HTTP in your LAN (`http://<server>:8091`). Put it behind a
 
 - **install it as an app** (PWA, "Zum Startbildschirm hinzufügen"): browsers allow service workers only on HTTPS or `localhost`. On `http://192.168.x.x` audium works normally, it just cannot be installed or start offline;
 - reach it from outside your home network;
-- copy invite links with one click (the clipboard API also needs HTTPS; the link is shown either way).
+- copy invite links with one click (the clipboard API also needs HTTPS; the link is shown either way);
+- use Subsonic apps on your phone outside the home network ([apps.md](apps.md)).
 
 What every proxy needs:
 
@@ -12,6 +13,7 @@ What every proxy needs:
 2. Do not buffer `/api/v1/events` (Server-Sent Events) and allow idle connections of at least 30 s. audium sends a keep-alive every 15 s.
 3. Pass `Range` headers through (all three below do by default).
 4. Under a sub-path: set `AUDIUM_BASE_PATH=/audium` and forward the **full** path; do not strip the prefix.
+5. Forward `/rest` (the Subsonic API for apps) like everything else, and do not buffer its `stream` responses: transcoded audio is produced while it is sent. The examples below forward every path, so nothing extra is needed. Do not add authentication in front of `/rest` (basic auth, SSO): the apps cannot log in to it.
 
 The examples assume audium runs in the same Docker network as the proxy under the service name `audium` (port 8080 inside the container). If the proxy runs on the host instead, use `127.0.0.1:8091`.
 
@@ -79,5 +81,6 @@ Traefik streams responses without buffering by default. For a sub-path, use ``ru
 ## Checking it
 
 - `https://music.example.org/api/health` returns `{"status": "ok", ...}`.
+- `https://music.example.org/rest/ping` returns a small XML answer (an error about missing parameters is fine: it comes from audium).
 - After logging in, the browser's developer tools show the `audium_session` cookie with the `Secure` flag.
 - Chrome/Edge show an install icon in the address bar; on iOS use Share → "Zum Home-Bildschirm".
