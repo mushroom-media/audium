@@ -91,14 +91,52 @@ export function closeOverlay(name: string) {
 
 // Scroll positions per history entry: coming back to a page finds it where it was left.
 const scrolls = new Map<string, number>();
+const SCROLLS_KEY = "audium.scrolls";
+const MAX_SCROLLS = 500;
 
 /** `id` tells apart what scrolls on the page (and lists that should not share a position). */
 export function rememberScroll(id: string, top: number) {
-  scrolls.set(`${entryKey}|${id}`, top);
+  const key = `${entryKey}|${id}`;
+  scrolls.delete(key);
+  scrolls.set(key, top);
+  if (scrolls.size > MAX_SCROLLS) scrolls.delete(scrolls.keys().next().value!);
 }
 
 export function recallScroll(id: string): number {
   return scrolls.get(`${entryKey}|${id}`) ?? 0;
+}
+
+// Phones drop a page in the background without notice: the positions outlive that (per tab).
+function saveScrolls() {
+  try {
+    sessionStorage.setItem(SCROLLS_KEY, JSON.stringify([...scrolls]));
+  } catch {
+    /* private mode */
+  }
+}
+
+function loadScrolls() {
+  try {
+    for (const [key, top] of JSON.parse(sessionStorage.getItem(SCROLLS_KEY) ?? "[]")) scrolls.set(key, top);
+  } catch {
+    /* private mode, or nothing usable */
+  }
+}
+
+// What else a page wants back with "back" (its data, a filter, a radio mix). Per history entry, so
+// opening a page anew starts fresh; in memory only, and the oldest go first.
+const kept = new Map<string, unknown>();
+const MAX_KEPT = 50;
+
+export function rememberEntry(id: string, value: unknown) {
+  const key = `${entryKey}|${id}`;
+  kept.delete(key);
+  kept.set(key, value);
+  if (kept.size > MAX_KEPT) kept.delete(kept.keys().next().value!);
+}
+
+export function recallEntry<T>(id: string): T | undefined {
+  return kept.get(`${entryKey}|${id}`) as T | undefined;
 }
 
 /** Back to the previous page of the app, or to `fallback` when the app was opened right here. */
@@ -112,7 +150,11 @@ export function startRouter() {
   const state = (history.state as EntryState | null) ?? {};
   history.replaceState({ depth: state.depth ?? 0, key: state.key ?? newKey() }, "", window.location.href);
   update();
+  loadScrolls();
   window.addEventListener("popstate", update);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveScrolls();
+  });
   // Intercept clicks on internal links so navigation never reloads the page (and the player).
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

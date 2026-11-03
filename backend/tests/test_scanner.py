@@ -8,11 +8,11 @@ from sqlalchemy import select, update
 from audium.db.schema import albums, artists, covers, library_roots, track_artists, tracks
 from audium.scanner import scan as scan_module
 from audium.scanner.covers import SIZES
-from audium.scanner.fallback import from_path
+from audium.scanner.fallback import from_path, split_disc
 from audium.scanner.tags import parse_number, parse_year, read_track, split_featured
 from audium.services import roots as root_service
 from audium.util import now_ms
-from tests.conftest import cover_bytes, tags
+from tests.conftest import USER_PW, cover_bytes, create_user, login, tags
 
 
 def _tracks(db, include_missing=False):
@@ -150,13 +150,40 @@ def test_featured_artists_are_linked_as_guests(library, db):
         ("Other Song", "AC/DC", "main"),
         ("Rock Song", "AC/DC", "main"),
         ("Rock Song", "The Beatles", "feat"),
-        ("Stan (feat. Dido)", "Eminem", "main"),
-        ("Stan (feat. Dido)", "Dido", "feat"),
+        ("Stan", "Eminem", "main"),
+        ("Stan", "Dido", "feat"),
     ]
     assert "AC/DC featuring The Beatles" not in names
-    # The track keeps the artist text from its tags
-    rock = next(t for t in _tracks(db) if t.title == "Rock Song")
-    assert rock.artist_name == "AC/DC featuring The Beatles"
+    # Display text: all artists, comma-separated; the guest is not repeated in the title
+    assert {t.title: t.artist_name for t in _tracks(db)} == {
+        "Other Song": "AC/DC",
+        "Rock Song": "AC/DC, The Beatles",
+        "Stan": "Eminem, Dido",
+    }
+
+
+def test_guests_in_file_and_folder_names(library, db):
+    library.add("Sido feat. Bushido/Album/01 - Song (feat. Dido).mp3")
+    library.scan()
+    track = _tracks(db)[0]
+    assert (track.title, track.artist_name) == ("Song", "Sido, Bushido, Dido")
+
+
+def test_full_rescan_cleans_up_old_guest_artists(library, db):
+    library.add("a/01.mp3", tags("Stan (feat. Dido)", artist="Eminem feat. Sido", album="Marshall"))
+    library.scan()
+    with db.write() as conn:  # as an older version stored it
+        old = conn.execute(
+            artists.insert().values(name="Eminem feat. Sido", name_sort="e", name_norm="eminem feat sido", created_at=0)
+        )
+        conn.execute(track_artists.delete())
+        conn.execute(track_artists.insert().values(track_id=1, artist_id=old.inserted_primary_key[0], role="main"))
+        conn.execute(tracks.update().values(title="Stan (feat. Dido)", artist_name="Eminem feat. Sido"))
+    library.scan(force=True)
+    track = _tracks(db)[0]
+    assert (track.title, track.artist_name) == ("Stan", "Eminem, Sido, Dido")
+    with db.read() as conn:
+        assert "Eminem feat. Sido" not in set(conn.execute(select(artists.c.name)).scalars())
 
 
 @pytest.mark.parametrize(
@@ -165,6 +192,10 @@ def test_featured_artists_are_linked_as_guests(library, db):
         ("Artist/Album (1999)/03 - Song.mp3", "Song", 3, None, "Album", 1999, "Artist"),
         ("Artist/2001 - Album/1-04 Song.flac", "Song", 4, 1, "Album", 2001, "Artist"),
         ("Artist/Album/CD2/05. Song.mp3", "Song", 5, 2, "Album", None, "Artist"),
+        ("Artist/Album/Disc 3 - Bonus/05. Song.mp3", "Song", 5, 3, "Album", None, "Artist"),
+        ("Artist/Album/02/05. Song.mp3", "Song", 5, 2, "Album", None, "Artist"),
+        ("Artist/01 - Album/05. Song.mp3", "Song", 5, None, "01 - Album", None, "Artist"),
+        ("Artist/Album (2001) CD02/05. Song.mp3", "Song", 5, 2, "Album", 2001, "Artist"),
         ("Album/1979.mp3", "1979", None, None, "Album", None, None),
         ("loose_track.mp3", "loose track", None, None, None, None, None),
     ],
@@ -231,6 +262,26 @@ def test_scan_builds_library(library, db, settings):
     assert root.track_count == 6
 
 
+def test_cover_color_is_found_once_and_reaches_the_album(library, db, admin_client):
+    library.add("Band/Red/01.mp3", tags("A", artist="Band", album="Red"), picture=cover_bytes((200, 30, 30)))
+    library.add("Band/Gray/01.mp3", tags("B", artist="Band", album="Gray"), picture=cover_bytes((90, 90, 90)))
+    library.add("Band/Bare/01.mp3", tags("C", artist="Band", album="Bare"))
+    library.scan()
+
+    by_title = {a.title: a for a in _albums(db)}
+    color = admin_client.get(f"/api/v1/albums/{by_title['Red'].id}").json()["cover_color"]
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    assert r > g + 60 and r > b + 60
+    assert admin_client.get(f"/api/v1/albums/{by_title['Gray'].id}").json()["cover_color"] is None
+    assert admin_client.get(f"/api/v1/albums/{by_title['Bare'].id}").json()["cover_color"] is None
+    # The gray cover was looked at ("") and is not read again; older covers get theirs in the next scan.
+    with db.write() as conn:
+        assert sorted(c.color == "" for c in conn.execute(select(covers.c.color))) == [False, True]
+        conn.execute(update(covers).where(covers.c.color != "").values(color=None))
+    library.scan()
+    assert admin_client.get(f"/api/v1/albums/{by_title['Red'].id}").json()["cover_color"] == color
+
+
 def test_compilation_and_untagged_album_artist(library, db):
     # No album artist, different track artists in one folder -> one album by "Various Artists"
     library.add("Mix/01.mp3", tags("A", artist="One", album="Summer Mix"))
@@ -260,6 +311,79 @@ def test_multi_disc_folders_form_one_album(library, db):
     assert rows[0].cover_id is not None  # parent folder image is used for disc folders
     discs = sorted(t.disc_no for t in _tracks(db))
     assert discs == [1, 2]
+
+
+def test_disc_folders_with_any_name_form_one_album(library, db, admin_client):
+    # Named after the album in the tags: its subfolders are discs, whatever they are called
+    library.add("Band/Live in Rome (2003)/CD1/01.mp3", tags("Opening", artist="Band", album="Live in Rome"))
+    library.add("Band/Live in Rome (2003)/CD1/02.mp3", tags("Second", artist="Band", album="Live in Rome", track=2))
+    library.add("Band/Live in Rome (2003)/Encore/01.mp3", tags("Encore", artist="Band", album="Live in Rome"))
+    library.add("Band/Live in Rome (2003)/Disc 3 - Rehearsal/01.mp3", tags("Take", artist="Band", album="Live in Rome"))
+    (library.root / "Band/Live in Rome (2003)/Scans").mkdir()
+    (library.root / "Band/Live in Rome (2003)/Scans/back.jpg").write_bytes(cover_bytes())
+    (library.root / "Band/Live in Rome (2003)/cover.jpg").write_bytes(cover_bytes())
+    # Untagged, numbered folders
+    library.add("Band/Sessions/1/01 - First.mp3", None)
+    library.add("Band/Sessions/2/01 - Second.mp3", None)
+    # Two albums in an artist folder stay two albums
+    library.add("Band/Debut/01.mp3", tags("A", artist="Band", album="Debut"))
+    library.add("Band/Later/01.mp3", tags("B", artist="Band", album="Later"))
+    library.scan()
+
+    by_title = {a.title: a for a in _albums(db)}
+    assert sorted(by_title) == ["Debut", "Later", "Live in Rome", "Sessions"]
+    live = by_title["Live in Rome"]
+    assert live.track_count == 4 and live.cover_id is not None
+    discs = {t.title: t.disc_no for t in _tracks(db) if t.album_id == live.id}
+    assert discs == {"Opening": 1, "Second": 1, "Take": 3, "Encore": 4}  # after the numbered ones
+    assert sorted(t.disc_no for t in _tracks(db) if t.album_id == by_title["Sessions"].id) == [1, 2]
+
+    album = admin_client.get(f"/api/v1/albums/{live.id}").json()
+    assert album["discs"] == [
+        {"disc_no": 1, "title": None},
+        {"disc_no": 3, "title": "Rehearsal"},
+        {"disc_no": 4, "title": "Encore"},
+    ]
+    assert admin_client.get(f"/api/v1/albums/{by_title['Debut'].id}").json()["discs"] == []
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Album CD01", ("Album", 1)),
+        ("Album - Disc 2", ("Album", 2)),
+        ("Album (CD 3)", ("Album", 3)),
+        ("Album [Disc 2 of 3]", ("Album", 2)),
+        ("CD2", ("CD2", None)),
+        ("Abacab", ("Abacab", None)),
+    ],
+)
+def test_split_disc(name, expected):
+    assert split_disc(name) == expected
+
+
+def test_discs_ripped_as_albums_of_their_own_form_one_album(library, db, admin_client):
+    # Album artist tags, every disc tagged 1/1: the name says which disc it is
+    for disc in (1, 2):
+        library.add(
+            f"Band/Best Of CD0{disc}/01.mp3",
+            tags(f"Hit {disc}", artist="Band", album=f"Best Of CD0{disc}", albumartist="Band", disc=1),
+        )
+    # Only an artist tag: the folders sit side by side
+    for disc in (1, 2):
+        library.add(f"Solo/Live (Disc {disc})/01.mp3", tags(f"Song {disc}", artist="Solo", album=f"Live (Disc {disc})"))
+    # Untagged
+    library.add("Duo/Hits CD1/01 - A.mp3", None)
+    library.add("Duo/Hits CD2/01 - B.mp3", None)
+    library.scan()
+
+    by_title = {a.title: a for a in _albums(db)}
+    assert sorted(by_title) == ["Best Of", "Hits", "Live"]
+    for album in by_title.values():
+        assert album.track_count == 2
+        assert sorted(t.disc_no for t in _tracks(db) if t.album_id == album.id) == [1, 2]
+    discs = admin_client.get(f"/api/v1/albums/{by_title['Best Of'].id}").json()["discs"]
+    assert discs == [{"disc_no": 1, "title": None}, {"disc_no": 2, "title": None}]
 
 
 def test_same_album_title_by_album_artist_merges_across_folders(library, db):
@@ -312,24 +436,102 @@ def test_artist_image_from_the_artist_folder(library, db, monkeypatch):
     assert _artist_cover(db, "Solo").hash == solo.hash
 
 
-def test_album_covers_as_artist_images_can_be_turned_off(library, db, admin_client):
+def test_folder_jpg_in_the_artist_folder(library, db, admin_client):
+    library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band"))
+    (library.root / "Band/Record/folder.jpg").write_bytes(cover_bytes((0, 0, 255)))
+    (library.root / "Band/folder.jpg").write_bytes(cover_bytes((250, 0, 0)))
+    # Rock/ holds albums of two artists: its folder.jpg is nobody's picture
+    library.add("Rock/One/01.mp3", tags("B", artist="One", album="One", albumartist="One"))
+    library.add("Rock/Two/01.mp3", tags("C", artist="Two", album="Two", albumartist="Two"))
+    (library.root / "Rock/folder.jpg").write_bytes(cover_bytes((0, 250, 0)))
+    library.scan()
+    assert _artist_cover(db, "Band").source == "artist"
+    assert [a.cover_id is not None for a in _albums(db) if a.title == "Record"] == [True]  # still its cover
+    assert _artist_cover(db, "One") is None and _artist_cover(db, "Two") is None
+
+    r = admin_client.patch("/api/v1/admin/settings", json={"artist_folder_images": "off"})
+    assert r.status_code == 200 and r.json()["artist_folder_images"] == "off"
+    library.scan()
+    assert _artist_cover(db, "Band").source == "folder"  # back to the album cover
+
+    # artist.jpg wins over folder.jpg
+    admin_client.patch("/api/v1/admin/settings", json={"artist_folder_images": "on"})
+    (library.root / "Band/artist.jpg").write_bytes(cover_bytes((250, 250, 0)))
+    library.scan()
+    with db.read() as conn:
+        key = conn.execute(select(artists.c.image_key).where(artists.c.name == "Band")).scalar_one()
+    assert "Band/artist.jpg" in key
+
+
+def test_album_covers_as_artist_images_per_user(library, db, admin_client, make_client):
     library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band"))
     (library.root / "Band/Record/cover.jpg").write_bytes(cover_bytes((0, 0, 255)))
     library.add("Solo - Debut/01.mp3", tags("C", artist="Solo", album="Debut"))
     (library.root / "Solo - Debut/artist.png").write_bytes(cover_bytes((0, 200, 0)))
     library.scan()
-    assert admin_client.get("/api/v1/admin/settings").json() == {"artist_album_covers": "on"}
+    assert admin_client.get("/api/v1/admin/settings").json()["artist_album_covers"] == "on"
+    album_cover, own = _artist_cover(db, "Band"), _artist_cover(db, "Solo")
+    assert album_cover.source == "folder" and own.source == "artist"
+    create_user(db, "ulla", USER_PW)
+    ulla = make_client()
+    login(ulla, "ulla", USER_PW)
 
+    def shown(client):
+        page = client.get("/api/v1/artists", params={"role": "all"}).json()
+        return {a["name"]: a["cover"] for a in page["items"]}
+
+    assert shown(ulla) == {"Band": album_cover.hash, "Solo": own.hash}
+
+    # The admin turns it off for everyone who follows the server's choice: at once, no scan.
     r = admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "off"})
-    assert r.status_code == 200 and r.json() == {"artist_album_covers": "off"}
-    assert _artist_cover(db, "Band") is None  # applied at once, without a scan
-    assert _artist_cover(db, "Solo").source == "artist"  # own pictures stay
+    assert r.status_code == 200 and r.json()["artist_album_covers"] == "off"
+    assert shown(ulla) == {"Band": None, "Solo": own.hash}  # own pictures stay
+    assert shown(admin_client)["Band"] is None
     library.scan(force=True)
-    assert _artist_cover(db, "Band") is None
+    assert _artist_cover(db, "Band").hash == album_cover.hash  # the fallback is always stored
 
+    # Ulla wants them anyway; the admin still follows the server.
+    r = ulla.patch("/api/v1/auth/me/settings", json={"artist_images": "on"})
+    assert r.json()["artist_images"] == "on" and r.json()["artist_images_default"] == "off"
+    assert shown(ulla)["Band"] == album_cover.hash
+    band_id = ulla.get("/api/v1/artists", params={"role": "all"}).json()["items"][0]["id"]
+    assert ulla.get(f"/api/v1/artists/{band_id}").json()["cover"] == album_cover.hash
+    assert (
+        ulla.get("/api/v1/search", params={"q": "band", "types": "artist"}).json()["artists"][0]["cover"]
+        == album_cover.hash
+    )
+    assert admin_client.get(f"/api/v1/artists/{band_id}").json()["cover"] is None
+    ulla.patch("/api/v1/auth/me/settings", json={"artist_images": "off"})
     admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "on"})
-    assert _artist_cover(db, "Band").source == "folder"
+    assert shown(ulla)["Band"] is None and shown(admin_client)["Band"] == album_cover.hash
+
+    # Radio stations always get a picture (their colours come from it), whatever the setting.
+    assert ulla.get(f"/api/v1/artists/{band_id}").json()["fallback_cover"] == album_cover.hash
+    track_id = ulla.get("/api/v1/tracks").json()["items"][0]["id"]
+    ulla.post("/api/v1/history", json={"track_id": track_id, "played_ms": 30_000, "context": f"radio:artist:{band_id}"})
+    [station] = [r for r in ulla.get("/api/v1/history/recent").json() if r["type"] == "radio"]
+    assert station["cover"] == album_cover.hash
     assert admin_client.patch("/api/v1/admin/settings", json={"artist_album_covers": "maybe"}).status_code == 422
+
+
+def test_tracks_carry_replaygain(library, db, admin_client):
+    library.add("A/1.mp3", tags("Loud"))
+    library.add("A/2.mp3", tags("Plain", track=2))
+    library.scan()
+    with db.write() as conn:
+        conn.execute(
+            update(tracks)
+            .where(tracks.c.title == "Loud")
+            .values(rg_track_gain=-7.5, rg_track_peak=0.98, rg_album_gain=-6.0)
+        )
+    items = {t["title"]: t for t in admin_client.get("/api/v1/tracks").json()["items"]}
+    assert items["Loud"]["replaygain"] == {
+        "track_gain": -7.5,
+        "track_peak": 0.98,
+        "album_gain": -6.0,
+        "album_peak": None,
+    }
+    assert items["Plain"]["replaygain"] is None
 
 
 # --- incremental behaviour -----------------------------------------------------------------

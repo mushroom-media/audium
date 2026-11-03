@@ -1,19 +1,28 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
-from audium.api.deps import current_user, get_db
+from audium.api.deps import current_user, get_db, viewer
 from audium.api.library_models import AlbumOut
 from audium.api.models import Ok, Page
-from audium.api.playlist_models import FavoriteIds, HistoryEntry, HistoryIn, RecentOut, StatsOut, UserRef
+from audium.api.playlist_models import (
+    FavoriteIds,
+    HistoryEntry,
+    HistoryIn,
+    HistoryRecorded,
+    ListenedIn,
+    RecentOut,
+    StatsOut,
+    UserRef,
+)
 from audium.db.engine import Database
 from audium.db.schema import users
 from audium.services import personal
-from audium.services import radio_suggestions as radio_suggestions_service
 from audium.services.users import User
 
-router = APIRouter(tags=["me"])
+# Favorites, history, stats and radio suggestions list artists: apply the user's view preferences.
+router = APIRouter(tags=["me"], dependencies=[Depends(viewer)])
 
 ItemType = Literal["track", "album", "artist"]
 
@@ -53,10 +62,24 @@ def list_favorites(
     return {"items": items, "total": total, "next_cursor": None}
 
 
-@router.post("/history", response_model=Ok, summary="Report a played track")
+@router.post("/history", response_model=HistoryRecorded, summary="Report a played track")
 def record_play(body: HistoryIn, user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.write() as conn:
-        personal.record_play(conn, user.id, body.track_id, body.played_ms, body.context)
+        play_id = personal.record_play(
+            conn, user.id, body.track_id, body.played_ms, body.context, listened_ms=body.listened_ms
+        )
+    return HistoryRecorded(id=play_id)
+
+
+@router.post(
+    "/history/{play_id}/listened",
+    response_model=Ok,
+    summary="Report how long a play really sounded",
+    description="Sent when the track stops (next track, skip, closing the tab); the value only grows.",
+)
+def set_listened(play_id: int, body: ListenedIn, user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        personal.set_listened(conn, user.id, play_id, body.listened_ms)
     return Ok()
 
 
@@ -89,10 +112,13 @@ def recently_played(
 
 @router.get("/radio/suggestions", response_model=list[RecentOut], summary="Radio stations that fit your listening")
 def radio_suggestions(
-    limit: int = Query(8, ge=1, le=20), user: User = Depends(current_user), db: Database = Depends(get_db)
+    request: Request,
+    limit: int = Query(8, ge=1, le=20),
+    user: User = Depends(current_user),
+    db: Database = Depends(get_db),
 ):
     with db.read() as conn:
-        return radio_suggestions_service.suggestions(conn, user, limit)
+        return request.app.state.suggestions.get(conn, user, limit)
 
 
 @router.get("/stats", response_model=StatsOut, summary="Your listening statistics")

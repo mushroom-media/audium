@@ -12,7 +12,7 @@ import json
 from sqlalchemy import Connection, delete, func, insert, select, update
 
 from audium.analysis import autoplaylists, rules
-from audium.db.schema import auto_playlist_access, auto_playlist_items, auto_playlists, playlists, track_genres, tracks
+from audium.db.schema import auto_playlist_access, auto_playlist_items, auto_playlists, playlists, tracks
 from audium.errors import BadRequest, NotFound
 from audium.services import playlists as playlist_service
 from audium.services.library import track_item, track_select
@@ -23,7 +23,20 @@ STATUSES = ("suggested", "published", "dismissed")
 ACCESS = ("all", "restricted", "admin_only")
 
 
-def _can_view(conn: Connection, user: User, row) -> bool:
+def _access_lists(conn: Connection, ids: list[int] | None = None) -> dict[int, list[int]]:
+    """Users with access per restricted auto-playlist (all of them, or those with `ids`)."""
+    q = select(auto_playlist_access.c.auto_playlist_id, auto_playlist_access.c.user_id).order_by(
+        auto_playlist_access.c.user_id
+    )
+    if ids is not None:
+        q = q.where(auto_playlist_access.c.auto_playlist_id.in_(ids))
+    out: dict[int, list[int]] = {}
+    for auto_id, user_id in conn.execute(q):
+        out.setdefault(auto_id, []).append(user_id)
+    return out
+
+
+def _can_view(user: User, row, access: dict[int, list[int]]) -> bool:
     if user.is_admin:
         return True
     if row.status != "published":
@@ -31,20 +44,13 @@ def _can_view(conn: Connection, user: User, row) -> bool:
     if row.access == "all":
         return True
     if row.access == "restricted":
-        return (
-            conn.execute(
-                select(auto_playlist_access.c.user_id).where(
-                    auto_playlist_access.c.auto_playlist_id == row.id, auto_playlist_access.c.user_id == user.id
-                )
-            ).first()
-            is not None
-        )
+        return user.id in access.get(row.id, ())
     return False
 
 
 def _get(conn: Connection, user: User, auto_id: int):
     row = conn.execute(select(auto_playlists).where(auto_playlists.c.id == auto_id)).first()
-    if row is None or not _can_view(conn, user, row):
+    if row is None or not _can_view(user, row, _access_lists(conn, [auto_id])):
         raise NotFound("auto-playlist not found")
     return row
 
@@ -59,25 +65,14 @@ def _origin(row) -> str:
     return "styles" if row.generator == "sound" or row.key.startswith("style:") else "tags"
 
 
-def _detected_tracks(conn: Connection, row) -> int | None:
-    """For genre playlists: tracks that are in there by a detected genre (they had no genre tag)."""
-    if not row.key.startswith(("genre:", "genre-decade:")):
-        return None
-    detected = select(track_genres.c.track_id).where(track_genres.c.source == "detected")
-    return conn.execute(
-        select(func.count()).where(
-            auto_playlist_items.c.auto_playlist_id == row.id, auto_playlist_items.c.track_id.in_(detected)
-        )
-    ).scalar_one()
-
-
-def _out(conn: Connection, row, admin: bool) -> dict:
+def _out(row, admin: bool, access: dict[int, list[int]]) -> dict:
     out = {
         "id": row.id,
         "key": row.key,
         "generator": row.generator,
         "origin": _origin(row),
-        "detected_tracks": _detected_tracks(conn, row),
+        # Stored by the generator: counting per request took seconds in big libraries.
+        "detected_tracks": row.detected_tracks,
         "name": row.name,
         "description": row.description,
         "track_count": row.track_count,
@@ -89,12 +84,7 @@ def _out(conn: Connection, row, admin: bool) -> dict:
     if admin:
         out["status"] = row.status
         out["access"] = row.access
-        out["user_ids"] = [
-            r[0]
-            for r in conn.execute(
-                select(auto_playlist_access.c.user_id).where(auto_playlist_access.c.auto_playlist_id == row.id)
-            )
-        ]
+        out["user_ids"] = access.get(row.id, [])
     return out
 
 
@@ -106,14 +96,15 @@ def list_auto(conn: Connection, user: User, status: str | None = None) -> list[d
         q = q.where(auto_playlists.c.status == status)
     elif not user.is_admin:
         q = q.where(auto_playlists.c.status == "published")
-    order = {"rule": 0, "cluster": 1, "sound": 1, "custom": 2, "tag": 3}
-    rows = [r for r in conn.execute(q) if _can_view(conn, user, r)]
+    order = {"rule": 0, "cluster": 1, "sound": 1, "custom": 2, "family": 3, "tag": 3}
+    access = _access_lists(conn)
+    rows = [r for r in conn.execute(q) if _can_view(user, r, access)]
     rows.sort(key=lambda r: (order.get(r.generator, 9), r.key.startswith("genre-decade"), -r.track_count, r.name))
-    return [_out(conn, r, user.is_admin) for r in rows]
+    return [_out(r, user.is_admin, access) for r in rows]
 
 
 def get_auto(conn: Connection, user: User, auto_id: int) -> dict:
-    return _out(conn, _get(conn, user, auto_id), user.is_admin)
+    return _out(_get(conn, user, auto_id), user.is_admin, _access_lists(conn, [auto_id]))
 
 
 def list_items(conn: Connection, user: User, auto_id: int, limit: int, offset: int):
@@ -127,7 +118,8 @@ def list_items(conn: Connection, user: User, auto_id: int, limit: int, offset: i
         .limit(limit)
         .offset(offset)
     ).all()
-    return [{"reason": r.reason, "track": track_item(r)} for r in rows], row.track_count
+    # Why a track is in there is for the admin only ("Warum?" column); everybody else sees the list.
+    return [{"reason": r.reason if user.is_admin else None, "track": track_item(r)} for r in rows], row.track_count
 
 
 def track_ids(conn: Connection, user: User, auto_id: int) -> list[int]:

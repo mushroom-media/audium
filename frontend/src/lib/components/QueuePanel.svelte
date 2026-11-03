@@ -5,9 +5,18 @@
   import Cover from "./Cover.svelte";
   import Icon from "./Icon.svelte";
   import VirtualList from "./VirtualList.svelte";
+  import { navigate } from "../router.svelte";
 
   const upcoming = $derived(Q.upcoming(player.queue));
   const current = $derived(player.current);
+  const source = $derived(player.source);
+
+  /** To the page the queue was started from; on phones the queue covers it, so it closes. */
+  function openSource() {
+    if (!source?.path) return;
+    if (matchMedia("(max-width: 860px)").matches) player.queueOpen = false;
+    navigate(source.path);
+  }
 </script>
 
 <aside class="panel" aria-label="Warteschlange">
@@ -16,6 +25,13 @@
     <h2>Warteschlange</h2>
     <button class="icon-btn close" aria-label="Schließen" onclick={() => (player.queueOpen = false)}><Icon name="close" /></button>
   </header>
+  {#if source}
+    <div class="label">Gestartet von</div>
+    <div class="item now">
+      <div class="meta"><div class="a">{source.kind}</div><div class="t src">{source.name}</div></div>
+      {#if source.path}<button class="btn" onclick={openSource}>Öffnen</button>{/if}
+    </div>
+  {/if}
   {#if current}
     <div class="label">Läuft gerade</div>
     <div class="item now">
@@ -120,6 +136,10 @@
   }
   .now .t {
     color: var(--accent);
+  }
+  .now .t.src {
+    color: var(--text);
+    font-weight: 600;
   }
   .a,
   .d {

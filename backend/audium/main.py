@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,7 @@ from audium.api import (
     library,
     personal,
     playlists,
+    setup,
     stream,
     subsonic,
     system,
@@ -26,6 +28,7 @@ from audium.api import (
 )
 from audium.api.devices import DeviceRegistry
 from audium.api.eventbus import EventBus
+from audium.api.fastpaths import Compress, CoverShortcut
 from audium.auth.media import media_key
 from audium.auth.secretbox import SecretBox, load_key
 from audium.config import Settings
@@ -36,6 +39,7 @@ from audium.logging import get_logger
 from audium.media.transcode import Transcoder
 from audium.services import auth as auth_service
 from audium.services.nowplaying import NowPlaying
+from audium.services.radio_suggestions import SuggestionCache
 
 log = get_logger(__name__)
 
@@ -51,12 +55,12 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     async def lifespan(_app):
         bus.bind(asyncio.get_running_loop())
         with db.write() as conn:
-            token = auth_service.bootstrap(conn, settings)
-        if token:
+            open_setup = auth_service.bootstrap(conn, settings)
+        if open_setup:
             log.warning(
                 "setup.required",
-                setup_token=token,
-                hint="Create the admin account with this token: open /api/docs and call POST /api/v1/setup.",
+                minutes=auth_service.SETUP_WINDOW_S // 60,
+                hint="Open audium in a browser and create the admin account. After this time, restart to get more.",
             )
         api.state.vectors.warm()
         yield
@@ -77,11 +81,13 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     api.state.transcoder = Transcoder(settings.max_transcodes)
     api.state.bus = bus
     api.state.devices = DeviceRegistry(bus)
-    api.state.vectors = VectorIndex(db)
+    api.state.vectors = VectorIndex(db, directory=settings.vectors_dir)
     secret = load_key(settings)
     api.state.secrets = SecretBox(secret)
     api.state.media_key = media_key(secret)
     api.state.now_playing = NowPlaying()
+    api.state.suggestions = SuggestionCache()
+    api.state.setup_until = time.monotonic() + auth_service.SETUP_WINDOW_S
 
     api.include_router(system.router, prefix="/api")
     routers = (
@@ -96,6 +102,7 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
         discover.admin,
         admin_users.router,
         admin_library.router,
+        setup.router,
     )
     for r in routers:
         api.include_router(r, prefix="/api/v1")
@@ -103,6 +110,8 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
         api.include_router(subsonic.make_router())
     api.include_router(web.make_router(settings.web_dir, settings.base_path))  # last: catch-all
     api.add_middleware(CsrfGuard, base_path=settings.base_path)
+    api.add_middleware(CoverShortcut, settings=settings, db=db)
+    api.add_middleware(Compress)
     if settings.app_origin_list:
         # The audium apps (another origin) call /api with a bearer token. Never with cookies
         # (allow_credentials=False), so a foreign page cannot ride on a browser session (D15a).

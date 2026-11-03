@@ -3,7 +3,9 @@
   import { duration } from "../format";
   import { player } from "../player.svelte";
   import { href } from "../router.svelte";
-  import { openTrackMenu } from "../ui.svelte";
+  import { swipe } from "../swipe";
+  import { openTrackMenu, toast } from "../ui.svelte";
+  import ArtistLinks from "./ArtistLinks.svelte";
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
@@ -16,6 +18,7 @@
     linkArtist = true,
     onplay,
     onremove,
+    ondislike,
     unavailable = false,
     note,
     count,
@@ -28,6 +31,8 @@
     linkArtist?: boolean;
     onplay: () => void;
     onremove?: () => void;
+    /** Radio stations: the track doesn't fit, take it out. */
+    ondislike?: () => void;
     unavailable?: boolean;
     /** Shown instead of the album, e.g. why the track is in an auto-playlist. */
     note?: string | null;
@@ -43,11 +48,59 @@
   function onRowClick(e: MouseEvent) {
     if (touch && !(e.target as Element).closest("a, button")) onplay();
   }
+
+  // --- swipe left: into the queue, like the "archive" of a mail app ---------------------------
+
+  // Far enough at a third of the row, but no more than this on wide phones and tablets.
+  const QUEUE_SHARE = 1 / 3;
+  const QUEUE_MAX_PX = 140;
+  /** Past the threshold the row follows the finger only this much, so going further feels like an end. */
+  const PAST_THRESHOLD = 0.3;
+
+  let rowEl = $state<HTMLElement>();
+  let pull = $state(0); // how far the row is moved, in px to the left
+  let pastThreshold = $state(false);
+  let settling = $state(false);
+
+  const threshold = () => Math.min(QUEUE_MAX_PX, (rowEl?.offsetWidth ?? 0) * QUEUE_SHARE);
+
+  const queueSwipe = {
+    enabled: () => touch && !!track && !unavailable,
+    onmove(dx: number) {
+      const finger = Math.max(0, -dx);
+      const t = threshold();
+      settling = false;
+      pull = finger > t ? t + (finger - t) * PAST_THRESHOLD : finger;
+      const past = finger > t;
+      if (past !== pastThreshold) navigator.vibrate?.(8);
+      pastThreshold = past;
+    },
+    onend(_dx: number, _velocity: number, cancelled: boolean) {
+      if (pastThreshold && !cancelled && track) {
+        player.enqueue([track]);
+        toast("Zur Warteschlange hinzugefügt");
+      }
+      settling = pull > 0;
+      pull = 0;
+      pastThreshold = false;
+    },
+  };
 </script>
 
 {#if track}
+  <div class="swipe" class:open={pull > 0 || settling} use:swipe={queueSwipe}>
+  {#if pull > 0 || settling}
+    <div class="to-queue" class:past={pastThreshold} class:settling style:width="{pull}px" aria-hidden="true">
+      <Icon name="queue" size={20} />
+    </div>
+  {/if}
   <div
+    bind:this={rowEl}
     class="row"
+    class:settling
+    style:transform={pull ? `translateX(${-pull}px)` : undefined}
+    ontransitionend={() => (settling = false)}
+    ontransitioncancel={() => (settling = false)}
     class:active
     class:unavailable
     title={unavailable ? "Datei fehlt gerade in der Bibliothek" : undefined}
@@ -71,8 +124,7 @@
     {#if showCover}<div class="thumb"><Cover hash={track.cover} size={64} /></div>{/if}
     <div class="main">
       <div class="title">{track.title}</div>
-      {#if linkArtist || !touch}<a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
-      {:else}<span class="artist">{track.artist}</span>{/if}
+      <div class="artist"><ArtistLinks {track} link={linkArtist || !touch} /></div>
     </div>
     {#if showAlbum}
       {#if note}<span class="album note" title={note}>{note}</span>
@@ -81,6 +133,11 @@
     {#if count != null}<div class="count">{count.toLocaleString("de-DE")}</div>{/if}
     <div class="dur">{duration(track.duration_ms)}</div>
     <div class="actions">
+      {#if ondislike}
+        <button class="icon-btn" title="Mag ich nicht" aria-label="{track.title}: Mag ich nicht" onclick={(e) => (e.stopPropagation(), ondislike())}>
+          <Icon name="dislike" size={17} />
+        </button>
+      {/if}
       <Heart {track} size={17} />
       {#if onremove}
         <button class="icon-btn" title="Aus Playlist entfernen" aria-label="Aus Playlist entfernen" onclick={(e) => (e.stopPropagation(), onremove())}>
@@ -92,11 +149,65 @@
       </button>
     </div>
   </div>
+  </div>
 {:else}
   <div class="row skeleton" aria-hidden="true"><div class="num"></div><div class="main"><div class="bar"></div></div></div>
 {/if}
 
 <style>
+  .swipe {
+    position: relative;
+    height: 100%;
+  }
+  .swipe.open {
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+  }
+  @media (hover: none) {
+    .swipe {
+      touch-action: pan-y;
+    }
+  }
+  .to-queue {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    overflow: hidden;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    transition: background-color 0.12s, color 0.12s;
+  }
+  .to-queue.past {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .to-queue :global(svg) {
+    flex: none;
+    margin-right: 20px;
+    transition: transform 0.12s;
+  }
+  .to-queue.past :global(svg) {
+    transform: scale(1.2);
+  }
+  .to-queue.settling {
+    transition: width 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .row.settling {
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .to-queue.settling,
+    .row.settling {
+      transition-duration: 0.08s;
+    }
+    .to-queue.past :global(svg) {
+      transform: none;
+    }
+  }
   .row {
     display: grid;
     grid-template-columns: 40px 44px minmax(0, 1fr) minmax(0, 0.8fr) 56px auto;
@@ -106,6 +217,9 @@
     padding: 0 16px 0 8px;
     border-radius: var(--radius-sm);
     outline: none;
+    /* A double-click plays; it shouldn't also mark a word. */
+    user-select: none;
+    -webkit-user-select: none;
   }
   .row.no-album {
     grid-template-columns: 40px minmax(0, 1fr) 56px auto;
@@ -169,7 +283,6 @@
     width: fit-content;
     max-width: 100%;
   }
-  .artist:hover,
   .album:hover {
     color: var(--text);
     text-decoration: underline;

@@ -11,9 +11,10 @@
   import VirtualGrid from "../lib/components/VirtualGrid.svelte";
   import VirtualList from "../lib/components/VirtualList.svelte";
   import { plural } from "../lib/format";
-  import { PagedList } from "../lib/paged.svelte";
+  import { keptList } from "../lib/paged.svelte";
   import { player } from "../lib/player.svelte";
   import { href, navigate, router } from "../lib/router.svelte";
+  import { saveSettings, session } from "../lib/session.svelte";
 
   type Tab = "tracks" | "albums" | "artists";
   const TABS: Tab[] = ["tracks", "albums", "artists"];
@@ -43,8 +44,10 @@
     }
   }
 
+  // Without ?tab: the start tab of the user's settings, or the one open last time on this device.
   const tab = $derived.by<Tab>(() => {
-    const t = router.route.query.get("tab") ?? stored("audium.library.tab");
+    const start = session.settings.library_tab;
+    const t = router.route.query.get("tab") ?? (start === "last" ? stored("audium.library.tab") : start);
     return TABS.find((x) => x === t) ?? "tracks";
   });
   const q = $derived(router.route.query.get("q")?.trim() ?? "");
@@ -65,30 +68,29 @@
     setParams({ tab: t });
   }
 
-  let trackSort = $state<TrackSort>((stored("audium.tracks.sort") as TrackSort) || "title");
-  let albumSort = $state<AlbumSort>((stored("audium.albums.sort") as AlbumSort) || "title");
-  $effect(() => store("audium.tracks.sort", trackSort));
-  $effect(() => store("audium.albums.sort", albumSort));
-  let artistRole = $state<ArtistRole>(stored("audium.artists.role") === "all" ? "all" : "album");
-  $effect(() => store("audium.artists.role", artistRole));
+  // Sorting and the artist list belong to the account (Einstellungen > Bibliothek), on every device.
+  const trackSort = $derived<TrackSort>(session.settings.track_sort);
+  const albumSort = $derived<AlbumSort>(session.settings.album_sort);
+  const artistRole = $derived<ArtistRole>(session.settings.artist_role);
+  const keep = (changes: Parameters<typeof saveSettings>[0]) => saveSettings(changes).catch(() => {});
 
   const tracks = $derived(
     tab === "tracks"
-      ? new PagedList<Track>((offset, limit, signal) =>
+      ? keptList<Track>(`library:tracks:${trackSort}:${filter}`, (offset, limit, signal) =>
           get<Page<Track>>("/tracks", { sort: trackSort, q: filter, offset, limit }, signal),
         )
       : null,
   );
   const albums = $derived(
     tab === "albums"
-      ? new PagedList<Album>((offset, limit, signal) =>
+      ? keptList<Album>(`library:albums:${albumSort}:${filter}`, (offset, limit, signal) =>
           get<Page<Album>>("/albums", { sort: albumSort, q: filter, offset, limit }, signal),
         )
       : null,
   );
   const artists = $derived(
     tab === "artists"
-      ? new PagedList<Artist>((offset, limit, signal) =>
+      ? keptList<Artist>(`library:artists:${artistRole}:${filter}`, (offset, limit, signal) =>
           get<Page<Artist>>("/artists", { role: artistRole, q: filter, offset, limit }, signal),
         )
       : null,
@@ -162,10 +164,10 @@
 
   /** The whole (filtered) track list goes into the queue, so shuffle mixes all of it. On the
    * album and artist tabs the shuffle button plays the titles matching the filter. */
-  function playAll(startId: number | null, shuffle?: boolean) {
+  function playAll(first: Track | null, shuffle?: boolean) {
     const path = `/library?tab=tracks${filter ? `&q=${encodeURIComponent(filter)}` : ""}`;
     const sort = tab === "tracks" ? trackSort : "title";
-    player.playPool({ sort, q: filter || undefined }, startId, shuffle, { kind: "Bibliothek", name: filter ? `„${filter}“` : "Alle Titel", path });
+    player.playPool({ sort, q: filter || undefined }, first?.id ?? null, shuffle, { kind: "Bibliothek", name: filter ? `„${filter}“` : "Alle Titel", path }, first);
   }
 </script>
 
@@ -201,15 +203,15 @@
         <label class="sort">
           <span class="sr-only">Sortierung</span>
           {#if tab === "tracks"}
-            <select bind:value={trackSort}>
+            <select value={trackSort} onchange={(e) => keep({ track_sort: e.currentTarget.value as TrackSort })}>
               {#each Object.entries(TRACK_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
             </select>
           {:else if tab === "albums"}
-            <select bind:value={albumSort}>
+            <select value={albumSort} onchange={(e) => keep({ album_sort: e.currentTarget.value as AlbumSort })}>
               {#each Object.entries(ALBUM_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
             </select>
           {:else}
-            <select bind:value={artistRole}>
+            <select value={artistRole} onchange={(e) => keep({ artist_role: e.currentTarget.value as ArtistRole })}>
               {#each Object.entries(ARTIST_ROLES) as [key, label] (key)}<option value={key}>{label}</option>{/each}
             </select>
           {/if}
@@ -237,7 +239,7 @@
       {#key tracks}
         <VirtualList count={tracks.total ?? 0} rowHeight={56} onrange={(s, e) => tracks.ensure(s, e)} label="Titel" {letters} header={phone ? spacer : undefined} keep="library:tracks:{trackSort}:{filter}">
           {#snippet row(i)}
-            <div class="pad"><TrackRow track={tracks.get(i)} number={i + 1} onplay={() => { const t = tracks.get(i); if (t) playAll(t.id); }} /></div>
+            <div class="pad"><TrackRow track={tracks.get(i)} number={i + 1} onplay={() => { const t = tracks.get(i); if (t) playAll(t); }} /></div>
           {/snippet}
         </VirtualList>
       {/key}

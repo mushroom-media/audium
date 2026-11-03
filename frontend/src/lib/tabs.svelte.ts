@@ -260,8 +260,8 @@ export class TabRemote extends RemotePlayer {
     this.#here(() => localPlayer.playTracks(tracks, start, shuffle, source));
   }
   async playPool(...args: Parameters<RemotePlayer["playPool"]>) {
-    const [query, startId = null, shuffle = this.queue.shuffle, source = null] = args;
-    this.#here(() => localPlayer.playPool(query, startId, shuffle, source).catch(() => {}));
+    const [query, startId = null, shuffle = this.queue.shuffle, source = null, first = null] = args;
+    this.#here(() => localPlayer.playPool(query, startId, shuffle, source, first).catch(() => {}));
   }
   playRadio(...args: Parameters<RemotePlayer["playRadio"]>) {
     this.#here(() => localPlayer.playRadio(...args));
@@ -283,5 +283,9 @@ export class TabRemote extends RemotePlayer {
   append(tracks: Parameters<RemotePlayer["append"]>[0]) {
     if (this.current) super.append(tracks);
     else this.#here(() => localPlayer.append(tracks));
+  }
+  enqueue(tracks: Parameters<RemotePlayer["enqueue"]>[0]) {
+    if (this.current) super.enqueue(tracks);
+    else this.#here(() => localPlayer.enqueue(tracks));
   }
 }

@@ -21,7 +21,7 @@
       </div>
     </div>
     <div class="set-row">
-      <div class="set-label"><strong>Abmelden</strong><small>Beendet die Sitzung auf diesem Gerät.</small></div>
+      <div class="set-label"><strong>Abmelden</strong></div>
       <button class="btn" onclick={doLogout}><Icon name="logout" size={18} /> Abmelden</button>
     </div>
   </div>

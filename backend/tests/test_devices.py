@@ -110,6 +110,11 @@ def test_state_commands_and_control(app, people):
     assert alice.delete(f"/api/v1/devices/{DESK}/control/{PHONE}").status_code == 204
     assert alice.get("/api/v1/devices").json()[0]["controllers"] == []
 
+    r = alice.patch(f"/api/v1/devices/{DESK}", json={"name": "  Wohnzimmer   PC "})
+    assert r.status_code == 200 and r.json()["name"] == "Wohnzimmer PC"
+    assert bob.patch(f"/api/v1/devices/{DESK}", json={"name": "Mine"}).status_code == 404
+    assert alice.patch(f"/api/v1/devices/{DESK}", json={"name": ""}).status_code == 422
+
     too_long = {"status": {}, "queue": {"offset": 0, "tracks": [track] * (devices_module.MAX_QUEUE_WINDOW + 1)}}
     assert alice.put(f"/api/v1/devices/{DESK}/state", json=too_long).status_code == 422
 

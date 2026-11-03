@@ -7,7 +7,7 @@
 // operate that device. It is a remote control only: this device's own playback just carries on,
 // and nothing plays on both at once.
 
-import { del, get, isApp, post, put } from "./api";
+import { del, get, isApp, patch, post, put } from "./api";
 import { control, localPlayer } from "./player.svelte";
 import { playerStatus, queueWindow, runCommand, watchPlayer, WINDOW_SIZE, type PlayerStatus, type QueueWindow } from "./playerLink";
 import { RemotePlayer } from "./remotePlayer.svelte";
@@ -52,7 +52,35 @@ export const deviceId: string = (() => {
   }
 })();
 
-function deviceName(): string {
+const NAME_KEY = "audium.device.name";
+
+/** The name chosen in Einstellungen > Geräte, if any (kept in this browser). */
+export function customDeviceName(): string | null {
+  try {
+    return localStorage.getItem(NAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Rename this browser; empty: back to the automatic name. Other devices see it at once. */
+export async function renameDevice(name: string) {
+  const clean = name.trim();
+  try {
+    if (clean) localStorage.setItem(NAME_KEY, clean);
+    else localStorage.removeItem(NAME_KEY);
+  } catch {
+    /* private mode: it lasts as long as this connection */
+  }
+  try {
+    upsert(await patch<Device>(`/devices/${deviceId}`, { name: clean || autoDeviceName() }));
+  } catch {
+    /* not connected right now: the next connection brings the name along */
+  }
+}
+
+/** E.g. "Chrome auf Windows". */
+export function autoDeviceName(): string {
   const ua = navigator.userAgent;
   const browser =
     /Edg\//.test(ua) ? "Edge"
@@ -81,7 +109,8 @@ function deviceKind(): Device["kind"] {
 }
 
 /** Query parameters that make the event connection the device: only the leading tab's. */
-export const deviceParams = () => (tabs.role === "leader" ? { device: deviceId, name: deviceName(), kind: deviceKind() } : undefined);
+export const deviceParams = () =>
+  tabs.role === "leader" ? { device: deviceId, name: customDeviceName() || autoDeviceName(), kind: deviceKind() } : undefined;
 
 export const self = () => devices.list.find((d) => d.id === deviceId);
 export const others = () => devices.list.filter((d) => d.id !== deviceId);

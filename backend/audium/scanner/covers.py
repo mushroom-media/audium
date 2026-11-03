@@ -5,6 +5,7 @@ JPEG copies (<hash>_<size>.jpg) appear next to them when a client that cannot sh
 Because the hash is part of the URL, responses can be cached forever (immutable).
 """
 
+import colorsys
 import io
 import os
 import tempfile
@@ -21,12 +22,41 @@ _WEBP_METHOD = 2  # 0 (fast) .. 6 (small); 2 is ~2.5x faster than the default 4 
 _JPEG_QUALITY = 85
 _MAX_PIXELS = 80_000_000  # ~9000x9000; larger "covers" are almost certainly not covers
 _MEMO_LIMIT = 100_000
+_COLOR_SAMPLE = 32
+_COLOR_BUCKETS = 12
+_COLOR_MIN_CHROMA = 30
+_COLOR_MIN_SHARE = 0.05  # of the pixels must have a color, otherwise the image counts as colorless
 
 CoverResult = tuple[str, int, int] | None  # (hash, width, height), None = not a usable image
 
 
 def hash_bytes(data: bytes) -> str:
     return xxhash.xxh3_128_hexdigest(data)
+
+
+def dominant_color(img: Image.Image) -> str:
+    """The strongest hue by summed chroma as "#rrggbb", kept in a range that tints light and dark
+    backgrounds alike; "" if the image has no clear color (black and white covers)."""
+    px = img.convert("RGB").resize((_COLOR_SAMPLE, _COLOR_SAMPLE), Image.Resampling.BOX).tobytes()
+    buckets = [[0, 0, 0, 0] for _ in range(_COLOR_BUCKETS)]  # weight, weighted r, g, b
+    colored = 0
+    for i in range(0, len(px), 3):
+        r, g, b = px[i], px[i + 1], px[i + 2]
+        chroma = max(r, g, b) - min(r, g, b)
+        if chroma < _COLOR_MIN_CHROMA:
+            continue  # gray pixels do not vote
+        colored += 1
+        bucket = buckets[int(colorsys.rgb_to_hsv(r, g, b)[0] * _COLOR_BUCKETS) % _COLOR_BUCKETS]
+        bucket[0] += chroma
+        bucket[1] += r * chroma
+        bucket[2] += g * chroma
+        bucket[3] += b * chroma
+    if colored < _COLOR_SAMPLE**2 * _COLOR_MIN_SHARE:
+        return ""
+    weight, r, g, b = max(buckets, key=lambda bucket: bucket[0])
+    h, lightness, s = colorsys.rgb_to_hls(r / weight / 255, g / weight / 255, b / weight / 255)
+    rgb = colorsys.hls_to_rgb(h, min(max(lightness, 0.4), 0.6), min(s, 0.7))
+    return "#" + "".join(f"{round(v * 255):02x}" for v in rgb)
 
 
 def render(root: str, data: bytes) -> CoverResult:
@@ -140,6 +170,15 @@ class CoverStore:
                     self._remember(digest, result)
                     known[digest] = result
         return [known[d] if d else None for d in digests]
+
+    def color(self, digest: str) -> str | None:
+        """The image's main color (see dominant_color), read from its smallest thumbnail;
+        None if that cannot be read."""
+        try:
+            with Image.open(self.path(digest, SIZES[0])) as img:
+                return dominant_color(img)
+        except (OSError, ValueError, SyntaxError):
+            return None
 
     def jpeg_path(self, digest: str, size: int) -> Path:
         return self.root / digest[:2] / f"{digest}_{size}.jpg"

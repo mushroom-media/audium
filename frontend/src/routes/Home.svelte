@@ -6,25 +6,35 @@
   import Icon from "../lib/components/Icon.svelte";
   import { plural } from "../lib/format";
   import { mine, newPlaylistFlow } from "../lib/mine.svelte";
-  import { href, navigate } from "../lib/router.svelte";
+  import { keepScroll } from "../lib/keepScroll";
+  import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { ui } from "../lib/ui.svelte";
   import { session } from "../lib/session.svelte";
 
-  let recent = $state<Album[] | null>(null);
-  let played = $state<RecentItem[]>([]);
+  let recent = $state<Album[] | null>(recallEntry("home:recent") ?? null);
+  let played = $state<RecentItem[]>(recallEntry("home:played") ?? []);
   // Stations that fit what was played lately (artists, an album, favourite tracks)
-  let radios = $state<RecentItem[]>([]);
+  let radios = $state<RecentItem[]>(recallEntry("home:radios") ?? []);
 
   $effect(() => {
     const ctrl = new AbortController();
     get<RecentItem[]>("/radio/suggestions", { limit: 6 }, ctrl.signal)
-      .then((r) => (radios = r))
+      .then((r) => {
+        radios = r;
+        rememberEntry("home:radios", r);
+      })
       .catch(() => {});
     get<Page<Album>>("/albums", { sort: "added", limit: 12 }, ctrl.signal)
-      .then((p) => (recent = p.items))
+      .then((p) => {
+        recent = p.items;
+        rememberEntry("home:recent", p.items);
+      })
       .catch(() => {});
     get<RecentItem[]>("/history/recent", { limit: 6 }, ctrl.signal)
-      .then((r) => (played = r))
+      .then((r) => {
+        played = r;
+        rememberEntry("home:played", r);
+      })
       .catch(() => {});
     return () => ctrl.abort();
   });
@@ -40,7 +50,7 @@
   });
 </script>
 
-<div class="page">
+<div class="page" use:keepScroll>
   <div class="toolbar"><h1>{greeting}, {session.user?.display_name}</h1></div>
 
   {#if played.length}

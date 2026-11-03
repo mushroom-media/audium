@@ -2,7 +2,7 @@
   // The "…" menu for tracks: queue actions, add to playlist, favorite. Rendered once in App.
   import { addToPlaylist, createPlaylist, editable, mine, toggleFavorite } from "../mine.svelte";
   import { player } from "../player.svelte";
-  import { startRadio } from "../radio";
+  import { radioPath } from "../radio";
   import { navigate } from "../router.svelte";
   import { promptText, toast, ui } from "../ui.svelte";
   import Icon from "./Icon.svelte";
@@ -17,7 +17,7 @@
   const pos = $derived.by(() => {
     if (!menu) return { left: 0, top: 0 };
     const w = 260;
-    const h = 320;
+    const h = 440;
     return {
       left: Math.max(8, Math.min(menu.x - w, window.innerWidth - w - 8)),
       top: Math.max(8, Math.min(menu.y, window.innerHeight - h - 8)),
@@ -78,18 +78,35 @@
       <button role="menuitem" onclick={() => (player.playNext(menu.tracks), done("Wird als Nächstes gespielt"))}>
         <Icon name="next" size={16} /> Als Nächstes spielen
       </button>
-      <button role="menuitem" onclick={() => (player.append(menu.tracks), done("Zur Warteschlange hinzugefügt"))}>
+      <button role="menuitem" onclick={() => (player.enqueue(menu.tracks), done("Zur Warteschlange hinzugefügt"))}>
         <Icon name="queue" size={16} /> Zur Warteschlange
       </button>
       <button role="menuitem" onclick={() => (sub = true)}>
         <Icon name="plus" size={16} /> Zu Playlist hinzufügen <span class="chev">›</span>
       </button>
       {#if single}
-        <button role="menuitem" onclick={() => { startRadio(single); done(); }}>
-          <Icon name="radio" size={16} /> Radio starten
+        <button role="menuitem" onclick={() => { navigate(radioPath("track", single.id)); done(); }}>
+          <Icon name="radio" size={16} /> Zum Radio
         </button>
         <button role="menuitem" onclick={() => { navigate(`/tracks/${single.id}/similar`); done(); }}>
           <Icon name="spark" size={16} /> Ähnliche Titel
+        </button>
+        {#if single.artists && single.artists.length > 1}
+          {#each single.artists as a (a.id)}
+            <button role="menuitem" onclick={() => { navigate(`/artists/${a.id}`); done(); }}>
+              <Icon name="artist" size={16} /> Zu {a.name}
+            </button>
+          {/each}
+        {:else}
+          <button role="menuitem" onclick={() => { navigate(`/artists/${single.artist_id}`); done(); }}>
+            <Icon name="artist" size={16} /> Zum Künstler / zur Künstlerin
+          </button>
+        {/if}
+        <button role="menuitem" onclick={() => { navigate(`/albums/${single.album_id}`); done(); }}>
+          <Icon name="album" size={16} /> Zum Album
+        </button>
+        <button role="menuitem" onclick={() => { ui.info = { trackId: single.id }; done(); }}>
+          <Icon name="info" size={16} /> Info
         </button>
         <button role="menuitem" onclick={() => { toggleFavorite(single); done(); }}>
           <Icon name="heart" size={16} /> {mine.favoriteTracks.has(single.id) ? "Aus Lieblingssongs entfernen" : "Zu Lieblingssongs"}

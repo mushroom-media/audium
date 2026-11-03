@@ -5,10 +5,13 @@
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
+  import VirtualGrid from "../lib/components/VirtualGrid.svelte";
   import { plural } from "../lib/format";
   import { player } from "../lib/player.svelte";
-  import { startGroupRadio } from "../lib/radio";
-  import { href } from "../lib/router.svelte";
+  import { radioPath } from "../lib/radio";
+  import { keepScroll } from "../lib/keepScroll";
+  import { pageTitle } from "../lib/headerTitle.svelte";
+  import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
 
   type View = "covers" | "tracks";
   const VIEW_KEY = "audium.artist.view";
@@ -20,10 +23,11 @@
   const ROW_H = 52; // .row-h
 
   let { id }: { id: string } = $props();
-  let artist = $state<Artist | null>(null);
-  let albums = $state<Album[]>([]);
+  const kept = untrack(() => recallEntry<{ artist: Artist; albums: Album[] }>(`artist:${id}`));
+  let artist = $state<Artist | null>(kept?.artist ?? null);
+  let albums = $state<Album[]>(kept?.albums ?? []);
   // Track lists of the own albums, fetched in the track view as they come near the screen
-  let details = $state<Record<string, AlbumDetail>>({});
+  let details = $state<Record<string, AlbumDetail>>(untrack(() => recallEntry(`artist:${id}:details`)) ?? {});
   let error = $state<string | null>(null);
   let view = $state<View>(stored() === "tracks" ? "tracks" : "covers");
 
@@ -47,9 +51,6 @@
 
   $effect(() => {
     const ctrl = new AbortController();
-    artist = null;
-    albums = [];
-    details = {};
     error = null;
     Promise.all([
       get<Artist>(`/artists/${id}`, undefined, ctrl.signal),
@@ -58,6 +59,7 @@
       .then(([a, own]) => {
         artist = a;
         albums = own.items;
+        rememberEntry(`artist:${id}`, { artist: a, albums: own.items });
       })
       .catch((e) => e.name !== "AbortError" && (error = e.message));
     return () => ctrl.abort();
@@ -90,7 +92,10 @@
       const signal = detailCtrl.signal;
       loading++;
       get<AlbumDetail>(`/albums/${albumId}`, undefined, signal)
-        .then((d) => (details[albumId] = d))
+        .then((d) => {
+          details[albumId] = d;
+          rememberEntry(`artist:${id}:details`, details);
+        })
         .catch((e) => e.name !== "AbortError" && (error = e.message))
         .finally(() => {
           if (signal.aborted) return;
@@ -123,21 +128,19 @@
   }
 </script>
 
-<div class="page">
-  {#if error}
-    <p class="empty">{error}</p>
-  {:else if artist}
+{#snippet head()}
+  {#if artist}
     <header class="hero">
       <div class="avatar"><Cover hash={artist.cover} size={256} round /></div>
       <div>
         <p class="kind">Künstler</p>
-        <h1>{artist.name}</h1>
+        <h1 use:pageTitle={artist.name}>{artist.name}</h1>
         <p class="stats">{plural(artist.album_count, "Album", "Alben")} · {plural(artist.track_count, "Titel", "Titel")}</p>
         {#if artist.track_count > 0}
           <div class="actions">
             <button class="btn primary" onclick={() => playAll(false)}><Icon name="play" size={18} /> Alle abspielen</button>
             <button class="btn square" onclick={() => playAll(true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
-            <button class="btn" onclick={() => artist && startGroupRadio("artists", artist.id, artist.name)}><Icon name="radio" size={18} /> Radio</button>
+            <button class="btn" onclick={() => artist && navigate(radioPath("artist", artist.id))}><Icon name="radio" size={18} /> Radio</button>
           </div>
         {/if}
       </div>
@@ -153,11 +156,24 @@
           {/each}
         </div>
       </div>
-      {#if view === "covers"}
-        <div class="grid">
-          {#each albums as album (album.id)}<AlbumCard {album} showYear />{/each}
-        </div>
-      {:else}
+    {/if}
+  {/if}
+{/snippet}
+
+{#if artist && !error && albums.length && view === "covers"}
+  <!-- An artist can have hundreds of albums (Various Artists): only those in view are drawn. -->
+  <div class="fill">
+    <VirtualGrid count={albums.length} header={head} keep="artist:{id}">
+      {#snippet cell(i)}<AlbumCard album={albums[i]} showYear />{/snippet}
+    </VirtualGrid>
+  </div>
+{:else}
+  <div class="page" use:keepScroll>
+    {#if error}
+      <p class="empty">{error}</p>
+    {:else if artist}
+      {@render head()}
+      {#if albums.length}
         <div class="discography">
           {#each albums as album (album.id)}
             {@const d = details[album.id]}
@@ -191,8 +207,8 @@
         </div>
       {/if}
     {/if}
-  {/if}
-</div>
+  </div>
+{/if}
 
 <style>
   .hero {
@@ -242,11 +258,8 @@
     place-items: center;
     padding: 6px 12px;
   }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-    gap: 20px;
-    padding: 0 24px 32px;
+  .fill {
+    height: 100%;
   }
   .discography {
     display: flex;
@@ -298,11 +311,6 @@
     }
     .section-bar {
       margin: 24px 16px 12px;
-    }
-    .grid {
-      grid-template-columns: repeat(2, 1fr);
-      padding: 0 16px 24px;
-      gap: 14px;
     }
     .discography {
       padding: 0 16px 24px;

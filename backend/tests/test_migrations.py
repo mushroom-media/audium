@@ -105,6 +105,8 @@ def test_upgrade_from_0006_adds_subsonic_tables_and_artist_images(tmp_path):
     engine = create_engine(url)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT played_at, client FROM play_history")).one() == (5, None)
+        # 0013: older plays have no measured time (the statistics count the track's length)
+        assert conn.execute(text("SELECT listened_ms FROM play_history")).scalar() is None
         assert conn.execute(text("SELECT count(*) FROM app_passwords")).scalar() == 0
         assert conn.execute(text("SELECT count(*) FROM play_queue")).scalar() == 0
         # 0008: existing artists have no artist image yet (the next scan looks for artist.jpg)

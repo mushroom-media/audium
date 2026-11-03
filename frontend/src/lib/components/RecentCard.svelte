@@ -5,6 +5,7 @@
   import { player } from "../player.svelte";
   import { radioPath, startGroupRadio, startRadio } from "../radio";
   import { href } from "../router.svelte";
+  import CardPlay from "./CardPlay.svelte";
   import Icon from "./Icon.svelte";
   import PlaylistCover from "./PlaylistCover.svelte";
 
@@ -20,11 +21,16 @@
   });
   const badge = $derived(item.type === "radio" ? "radio" : item.type === "album" ? null : "list");
 
-  async function play(e: MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  // What this entry plays under: a station's ref also says what it is the radio of (see radio.ts).
+  const ref = $derived.by(() => {
+    const { type, id, radio_of } = item;
+    if (type === "favorites") return "favorites";
+    return type === "radio" ? `radio:${radio_of ?? "album"}:${id}` : `${type}:${id}`;
+  });
+
+  async function play() {
     const { type, id, name } = item;
-    const source = { kind: "Playlist", name, path, ref: type === "favorites" ? "favorites" : `${type}:${id}` };
+    const source = { kind: "Playlist", name, path, ref };
     if (type === "album") {
       const detail = await get<AlbumDetail>(`/albums/${id}`);
       player.playTracks(detail.tracks, 0, undefined, { ...source, kind: "Album", name: detail.title });
@@ -56,7 +62,7 @@
     {#if badge}
       <span class="badge" title={item.type === "radio" ? "Radio" : "Playlist"}><Icon name={badge} size={30} /></span>
     {/if}
-    <button class="play" aria-label="{item.name} abspielen" onclick={play}><Icon name="play" size={22} /></button>
+    <CardPlay {ref} name={item.name} start={play} />
   </div>
   <div class="title">{item.name}</div>
   <div class="sub">{item.subtitle ?? ""}</div>
@@ -113,35 +119,5 @@
     backdrop-filter: blur(4px);
     box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
     pointer-events: none;
-  }
-  .play {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 0;
-    display: grid;
-    place-items: center;
-    background: var(--accent);
-    color: var(--accent-contrast);
-    box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
-    opacity: 0;
-    transform: translateY(6px);
-    transition:
-      opacity 0.15s,
-      transform 0.15s;
-    cursor: pointer;
-  }
-  .card:hover .play,
-  .play:focus-visible {
-    opacity: 1;
-    transform: none;
-  }
-  @media (hover: none) {
-    .play {
-      display: none;
-    }
   }
 </style>

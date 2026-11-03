@@ -31,9 +31,8 @@ _FFPROBE_TIMEOUT_S = 20
 @dataclass
 class TrackMeta:
     title: str | None = None
-    artist_display: str | None = None
     artists: list[str] = field(default_factory=list)
-    # Guests split off "Artist feat. Guest" or "Title (feat. Guest)"; artist_display keeps the original
+    # Guests split off "Artist feat. Guest" or "Title (feat. Guest)"; neither name keeps them
     featured_artists: list[str] = field(default_factory=list)
     album_artists: list[str] = field(default_factory=list)
     album: str | None = None
@@ -344,7 +343,7 @@ def split_featured(name: str, *, title: bool = False) -> tuple[str, list[str]]:
     return (name[: m.start()] + name[m.end() :]).strip(), guests
 
 
-def _unique(names: list[str], exclude: list[str] | None = None) -> list[str]:
+def unique_names(names: list[str], exclude: list[str] | None = None) -> list[str]:
     seen = {n.casefold() for n in exclude or []}
     out: list[str] = []
     for n in names:
@@ -403,21 +402,20 @@ def parse_float(value: str | None) -> float | None:
 
 def _apply(raw: Raw, meta: TrackMeta) -> None:
     meta.has_tags = any(raw.get(k) for k in ("title", "artist", "album", "albumartist"))
-    meta.title = _first(raw, "title")
-    artist_values = [c for c in (clean_text(v) for v in raw.get("artist", ())) if c]
-    meta.artist_display = ", ".join(dict.fromkeys(artist_values)) or None
     main: list[str] = []
     featured: list[str] = []
     for name in _many(raw, "artists") or _many(raw, "artist"):
         m, guests = split_featured(name)
         main.append(m)
         featured += guests
-    if meta.title:
-        featured += split_featured(meta.title, title=True)[1]
-    meta.artists = _unique(main)
-    meta.featured_artists = _unique(featured, exclude=meta.artists)
+    title = _first(raw, "title")
+    if title:
+        meta.title, title_guests = split_featured(title, title=True)
+        featured += title_guests
+    meta.artists = unique_names(main)
+    meta.featured_artists = unique_names(featured, exclude=meta.artists)
     # An album belongs to its main artist: "X feat. Y" as album artist would be an artist of its own.
-    meta.album_artists = _unique([split_featured(a)[0] for a in _many(raw, "albumartist")])
+    meta.album_artists = unique_names([split_featured(a)[0] for a in _many(raw, "albumartist")])
     meta.album = _first(raw, "album")
     meta.track_no = parse_number(_first(raw, "track"))
     meta.disc_no = parse_number(_first(raw, "disc"))

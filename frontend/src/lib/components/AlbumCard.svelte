@@ -2,15 +2,13 @@
   import { get, type Album, type AlbumDetail } from "../api";
   import { player } from "../player.svelte";
   import { href } from "../router.svelte";
+  import CardPlay from "./CardPlay.svelte";
   import Cover from "./Cover.svelte";
-  import Icon from "./Icon.svelte";
 
   /** `showYear`: the year sits right-aligned next to the artist (lists sorted by year). */
   let { album, showYear = false }: { album: Album | undefined; showYear?: boolean } = $props();
 
-  async function play(e: MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function play() {
     if (!album) return;
     const detail = await get<AlbumDetail>(`/albums/${album.id}`);
     player.playTracks(detail.tracks, 0, false, { kind: "Album", name: detail.title, path: `/albums/${album.id}`, ref: `album:${album.id}` });
@@ -21,7 +19,7 @@
   <a class="card" href={href(`/albums/${album.id}`)} title={album.title}>
     <div class="art">
       <Cover hash={album.cover} alt="" />
-      <button class="play" aria-label="{album.title} abspielen" onclick={play}><Icon name="play" size={22} /></button>
+      <CardPlay ref="album:{album.id}" name={album.title} start={play} />
     </div>
     <div class="title">{album.title}</div>
     <div class="sub">
@@ -87,35 +85,5 @@
   .bar.short {
     width: 50%;
     margin-top: 6px;
-  }
-  .play {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 0;
-    display: grid;
-    place-items: center;
-    background: var(--accent);
-    color: var(--accent-contrast);
-    box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
-    opacity: 0;
-    transform: translateY(6px);
-    transition:
-      opacity 0.15s,
-      transform 0.15s;
-    cursor: pointer;
-  }
-  .card:hover .play,
-  .play:focus-visible {
-    opacity: 1;
-    transform: none;
-  }
-  @media (hover: none) {
-    .play {
-      display: none;
-    }
   }
 </style>

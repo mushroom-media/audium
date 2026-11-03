@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from sqlalchemy import Connection, select
 
 from audium.auth import passwords, ratelimit
-from audium.auth.tokens import hash_token, new_api_token, new_token, tokens_equal
+from audium.auth.tokens import hash_token, new_api_token, new_token
 from audium.config import Settings
 from audium.db.schema import api_tokens, sessions, users
 from audium.db.state import delete_state, get_state, set_state
-from audium.errors import Conflict, Forbidden, NotFound, RateLimited
+from audium.errors import BadRequest, Conflict, Forbidden, NotFound, RateLimited
 from audium.logging import get_logger
 from audium.services.users import (
     User,
@@ -23,7 +23,11 @@ from audium.util import now_ms
 
 log = get_logger(__name__)
 
-SETUP_TOKEN_KEY = "setup.token_hash"
+SETUP_STATE_KEY = "setup.state"  # "pending": the first-run dialog is not finished; "done"
+_OLD_SETUP_TOKEN_KEY = "setup.token_hash"  # versions before the dialog
+# How long after the start of the server the first admin can be created in the browser.
+SETUP_WINDOW_S = 30 * 60
+_SETUP_MIN_PASSWORD = 8
 _LAST_SEEN_RESOLUTION_MS = 5 * 60 * 1000
 _IP_LIMIT_FACTOR = 3  # one address may fail more often than one username (NAT, households)
 
@@ -255,53 +259,66 @@ def revoke_api_token(conn: Connection, user_id: int, token_id: int) -> None:
 # --- First-run setup -----------------------------------------------------------------------
 
 
-def bootstrap(conn: Connection, settings: Settings) -> str | None:
-    """Called once when the API starts.
+def bootstrap(conn: Connection, settings: Settings) -> bool:
+    """Called once when the API starts. True: the first admin has to be created in the browser.
 
     With AUDIUM_ADMIN_USER/PASSWORD set and no users yet, the admin is created directly.
-    Otherwise, while no user exists, a fresh one-time setup token is generated and returned
-    so the caller can log it. Whoever opens the instance first cannot claim it without it.
+    The state of the first-run dialog is decided once: an installation that already has users
+    (from before the dialog) never sees it, one that restarts in the middle of it continues.
     """
-    if count_users(conn) > 0:
-        delete_state(conn, SETUP_TOKEN_KEY)
-        return None
+    delete_state(conn, _OLD_SETUP_TOKEN_KEY)
+    has_users = count_users(conn) > 0
+    if get_state(conn, SETUP_STATE_KEY) is None:
+        set_state(conn, SETUP_STATE_KEY, "done" if has_users else "pending")
+    if has_users:
+        return False
     if settings.admin_user and settings.admin_password:
         user = create_user(conn, settings.admin_user, settings.admin_password, role="admin")
         log.info("auth.admin_created_from_env", username=user.username)
-        return None
-    token = new_token(18)
-    set_state(conn, SETUP_TOKEN_KEY, hash_token(token))
-    return token
+        return False
+    return True
 
 
 def needs_setup(conn: Connection) -> bool:
     return count_users(conn) == 0
 
 
+def setup_pending(conn: Connection) -> bool:
+    return get_state(conn, SETUP_STATE_KEY) == "pending"
+
+
+def setup_holds_scan(conn: Connection, settings: Settings) -> bool:
+    """Scans wait for the first-run dialog, where the admin picks the folders and decides about
+    the analysis. Unless the instance is configured through the environment: it then has to work
+    without anyone opening a browser. An unknown state (the API has not started yet) waits too."""
+    if settings.library_roots or (settings.admin_user and settings.admin_password):
+        return False
+    return get_state(conn, SETUP_STATE_KEY) != "done"
+
+
+def finish_setup(conn: Connection) -> None:
+    set_state(conn, SETUP_STATE_KEY, "done")
+
+
 def complete_setup(
     conn: Connection,
     settings: Settings,
-    setup_token: str,
     username: str,
     password: str,
     display_name: str | None,
     ip: str,
     ua: str | None,
+    window_open: bool,
 ):
+    """Creates the first admin. Whoever opens a new instance first gets it, so this is only
+    possible for a while after the start; AUDIUM_ADMIN_* avoids that moment altogether."""
     if count_users(conn) > 0:
         raise Conflict("setup is already complete")
-    now = now_ms()
-    window = settings.login_window_minutes * 60_000
-    key = f"setup:{ip}"
-    wait = ratelimit.retry_after(conn, key, now, window, settings.login_max_attempts)
-    if wait:
-        raise RateLimited(wait)
-    stored = get_state(conn, SETUP_TOKEN_KEY)
-    if stored is None or not tokens_equal(stored, hash_token(setup_token.strip())):
-        ratelimit.register_failure(conn, key, now, window)
-        return None  # caller commits the failure, then answers 403
+    if not window_open:
+        raise Forbidden("the time for the setup has run out")
+    if len(password) < _SETUP_MIN_PASSWORD:
+        raise BadRequest(f"the admin password needs at least {_SETUP_MIN_PASSWORD} characters")
     user = create_user(conn, username, password, role="admin", display_name=display_name)
-    delete_state(conn, SETUP_TOKEN_KEY)
     session = create_session(conn, settings, user.id, ip, ua)
     log.info("auth.setup_complete", username=user.username)
     return user, session

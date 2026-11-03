@@ -10,17 +10,19 @@
   import DevicePicker from "./lib/components/DevicePicker.svelte";
   import { devices } from "./lib/devices.svelte";
   import { startTabs } from "./lib/tabs.svelte";
-  import { player } from "./lib/player.svelte";
-  import { defineRoutes, goBack, href, navigate, router, startRouter } from "./lib/router.svelte";
+  import { localPlayer, player } from "./lib/player.svelte";
+  import { defineRoutes, goBack, href, navigate, recallEntry, rememberEntry, router, startRouter } from "./lib/router.svelte";
   import { disconnectEvents, loadMine, mine, newPlaylistFlow } from "./lib/mine.svelte";
   import { loadRecentSearches, rememberSearch } from "./lib/recentSearches.svelte";
-  import { loadSession, session } from "./lib/session.svelte";
+  import { session, startSession } from "./lib/session.svelte";
   import { ui } from "./lib/ui.svelte";
+  import { headerTitle } from "./lib/headerTitle.svelte";
   import RuleEditor from "./lib/components/RuleEditor.svelte";
   import { post, type Playlist as PlaylistT, type Rule } from "./lib/api";
   import Album from "./routes/Album.svelte";
   import AutoPlaylist from "./routes/AutoPlaylist.svelte";
   import Discover from "./routes/Discover.svelte";
+  import Genres from "./routes/Genres.svelte";
   import Similar from "./routes/Similar.svelte";
   import Radio from "./routes/Radio.svelte";
   import Artist from "./routes/Artist.svelte";
@@ -33,6 +35,7 @@
   import Playlist from "./routes/Playlist.svelte";
   import Search from "./routes/Search.svelte";
   import Settings from "./routes/Settings.svelte";
+  import Setup from "./routes/Setup.svelte";
 
   // Creating smart playlists from the sidebar is switched off for now; existing ones keep working.
   const SMART_PLAYLIST_BUTTON = false;
@@ -47,6 +50,7 @@
     tracks: "/tracks",
     playlist: "/playlists/:id",
     discover: "/discover",
+    genres: "/genres",
     auto: "/discover/:id",
     similar: "/tracks/:id/similar",
     radio: "/radio/:kind/:id",
@@ -82,7 +86,7 @@
     startRouter();
     player.init();
     startTabs(); // several tabs of this browser are one player
-    loadSession();
+    startSession();
   });
 
   // Gatekeeping: unauthenticated users only see login/setup/invite.
@@ -90,7 +94,8 @@
     if (!session.ready) return;
     const name = router.route.name;
     if (!session.user && !PUBLIC.has(name)) navigate(session.needsSetup ? "/setup" : "/login", { replace: true });
-    else if (session.user && (name === "login" || name === "setup")) navigate("/", { replace: true });
+    else if (session.user && (name === "login" || (name === "setup" && session.user.role !== "admin"))) navigate("/", { replace: true });
+    else if (session.user && session.setupPending && name !== "setup") navigate("/setup", { replace: true });
   });
 
   // The former admin page is part of the settings now; keep old links working.
@@ -110,6 +115,8 @@
 
   $effect(() => {
     player.quality = session.settings.stream_quality;
+    localPlayer.setReplayGain(session.settings.replay_gain);
+    localPlayer.crossfade = session.settings.crossfade === "on" ? session.settings.crossfade_s : 0;
   });
 
   // Playlists, favorites and the live-update connection belong to the logged-in user.
@@ -163,8 +170,10 @@
   }
 
   // Phones show the search field only on the search page; opening it empty starts typing there.
+  // Coming back to it with "back" does not (the keyboard would cover the page).
   $effect(() => {
-    if (router.route.name !== "search" || untrack(() => searchValue)) return;
+    if (router.route.name !== "search" || untrack(() => searchValue) || recallEntry("search:opened")) return;
+    rememberEntry("search:opened", true);
     tick().then(() => searchInput?.focus());
   });
 
@@ -204,17 +213,45 @@
     favorites: "/profile",
     favoriteAlbums: "/profile",
     auto: "/discover",
+    genres: "/discover",
     similar: "/library?tab=tracks",
     radio: "/",
     settingsPage: "/settings",
   };
   const backTo = $derived(BACK[router.route.name]);
+
+  // Phones lay the top bar over the page (except on the search page). With just the logo it
+  // scrolls away with the page; with a back button it stays, see-through at first (the button a
+  // bubble), and turns solid with the page's title once the heading has scrolled under it.
+  const phoneQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 860px)") : null;
+  let phone = $state(phoneQuery?.matches ?? false);
+  $effect(() => {
+    if (!phoneQuery) return;
+    const update = () => (phone = phoneQuery.matches);
+    phoneQuery.addEventListener("change", update);
+    return () => phoneQuery.removeEventListener("change", update);
+  });
+  const overlay = $derived(router.route.name !== "search" && router.route.name !== "library");
+  let pageScroll = $state(0);
+  let topHeight = $state(0);
+  $effect(() => {
+    void router.route.name;
+    void router.route.params.id;
+    pageScroll = 0; // a new page starts at the top (a restored position sends its own scroll event)
+  });
+  function onPageScroll(e: Event) {
+    // The page itself, not a row of covers scrolling sideways inside it.
+    if (e.target instanceof HTMLElement && e.target.matches(".page, .scroller")) pageScroll = e.target.scrollTop;
+  }
+  const lift = $derived(phone && overlay && !backTo ? Math.min(pageScroll, topHeight) : 0);
+  // Pages without a watched heading turn solid as soon as anything scrolls under the bar.
+  const solid = $derived(headerTitle.text ? headerTitle.shown : pageScroll > 4);
   const initial = $derived((session.user?.display_name ?? "?").trim().charAt(0).toUpperCase());
 
   const active = (name: string) =>
     router.route.name === name ||
     (name === "library" && (router.route.name === "album" || router.route.name === "artist")) ||
-    (name === "discover" && router.route.name === "auto") ||
+    (name === "discover" && (router.route.name === "auto" || router.route.name === "genres")) ||
     (name === "profile" && (router.route.name === "favorites" || router.route.name === "favoriteAlbums")) ||
     (name === "settings" && router.route.name === "settingsPage");
 </script>
@@ -222,7 +259,14 @@
 <svelte:window onkeydown={onKey} />
 
 {#if !session.ready}
-  <div class="boot" aria-busy="true"></div>
+  <!-- Not a logout: the server is starting (e.g. after an update) or not reachable; startSession tries again. -->
+  <div class="boot" aria-busy="true">
+    {#if session.waiting}
+      <p role="status">{session.waiting === "starting" ? "audium startet …" : "Server nicht erreichbar – neuer Versuch …"}</p>
+    {/if}
+  </div>
+{:else if session.user && router.route.name === "setup"}
+  <Setup />
 {:else if !session.user || PUBLIC.has(router.route.name)}
   {#if router.route.name === "invite"}
     <Auth mode="invite" token={router.route.params.token} />
@@ -230,7 +274,7 @@
     <Auth mode={session.needsSetup ? "setup" : "login"} />
   {/if}
 {:else}
-  <div class="shell" class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"}>
+  <div class="shell" class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
     <nav class="side" aria-label="Navigation">
       <a class="logo" href={href("/")} aria-label="audium Start">
         <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
@@ -266,7 +310,13 @@
       </div>
     </nav>
 
-    <header class="top" class:searching={router.route.name === "search"}>
+    <header
+      class="top"
+      class:searching={router.route.name === "search"}
+      class:solid={backTo && solid}
+      bind:clientHeight={topHeight}
+      style:transform={lift ? `translateY(${-lift}px)` : undefined}
+    >
       {#if backTo}
         <button class="icon-btn back" title="Zurück" aria-label="Zurück" onclick={() => goBack(backTo)}><Icon name="back" /></button>
       {:else}
@@ -292,13 +342,15 @@
           enterkeyhint="search"
         />
       </label>
+      <!-- The page's heading, once it has scrolled away (see headerTitle.svelte.ts). -->
+      <p class="top-title" class:shown={headerTitle.shown} aria-hidden="true">{headerTitle.text}</p>
       <div class="top-end">
         {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label="Einstellungen" title="Einstellungen"><Icon name="settings" /></a>{/if}
         <a class="me" class:active={active("profile")} href={href("/profile")} aria-label="Profil" title={session.user.display_name}>{initial}</a>
       </div>
     </header>
 
-    <main class="content">
+    <main class="content" onscrollcapture={onPageScroll}>
       {#key router.route.name + (router.route.params.kind ?? "") + (router.route.params.id ?? "")}
         {#if router.route.name === "home"}<Home />
         {:else if router.route.name === "library"}<Library />
@@ -311,6 +363,7 @@
         {:else if router.route.name === "favoriteAlbums"}<FavoriteAlbums />
         {:else if router.route.name === "profile"}<Profile />
         {:else if router.route.name === "discover"}<Discover />
+        {:else if router.route.name === "genres"}<Genres />
         {:else if router.route.name === "auto"}<AutoPlaylist id={router.route.params.id} />
         {:else if router.route.name === "similar"}<Similar id={router.route.params.id} />
         {:else if router.route.name === "radio"}<Radio kind={router.route.params.kind} id={router.route.params.id} />
@@ -344,6 +397,9 @@
 <style>
   .boot {
     height: 100dvh;
+    display: grid;
+    place-items: center;
+    color: var(--text-muted);
   }
   .shell {
     display: grid;
@@ -434,10 +490,33 @@
   }
   .top {
     grid-area: top;
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 0 24px;
+    /* Room kept free on each side of the centered title: the search field on the left. */
+    --title-side: 500px;
+  }
+  .top-title {
+    position: absolute;
+    left: 50%;
+    max-width: max(0px, calc(100% - 2 * var(--title-side)));
+    margin: 0;
+    font-weight: 650;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, 8px);
+    transition:
+      opacity 0.3s ease,
+      transform 0.3s ease;
+  }
+  .top-title.shown {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
   .search {
     display: flex;
@@ -529,6 +608,53 @@
     }
     .top {
       padding: 0 16px;
+      /* Logo or back button on the left. */
+      --title-side: 130px;
+    }
+    .top.searching .top-title {
+      display: none;
+    }
+    /* Laid over the page, which keeps the bar's height free at its top (--page-top). */
+    .shell.overlay {
+      grid-template-areas: "main" "main" "player" "tabs";
+    }
+    .overlay .top {
+      grid-area: main;
+      align-self: start;
+      height: var(--top-h);
+      z-index: 3;
+      transition:
+        background-color 0.25s ease,
+        box-shadow 0.25s ease;
+    }
+    .overlay .content {
+      --page-top: var(--top-h);
+    }
+    .overlay .content :global(:is(.page, .scroller)) {
+      padding-top: var(--page-top);
+    }
+    .overlay .top.solid {
+      background: color-mix(in srgb, var(--bg) 96%, transparent);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 1px 0 var(--line);
+    }
+    /* See-through bar: the back button is a bubble that reads on any cover. */
+    .overlay .back {
+      margin-left: -4px;
+      color: #fff;
+      background: rgb(0 0 0 / 0.38);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition:
+        background-color 0.25s ease,
+        color 0.25s ease;
+    }
+    .overlay .top.solid .back {
+      color: var(--text);
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
     /* Phones reach the profile through the tab bar. */
     .me {

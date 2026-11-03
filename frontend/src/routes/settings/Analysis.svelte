@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ApiError, get, post, type AnalysisStatus } from "../../lib/api";
+  import { ApiError, get, patch, post, type AnalysisStatus } from "../../lib/api";
+  import { toast } from "../../lib/ui.svelte";
   import Icon from "../../lib/components/Icon.svelte";
   import { href } from "../../lib/router.svelte";
   import { fmtDate, isBusy, type Job } from "./common";
@@ -61,6 +62,36 @@
   const result = $derived(job?.result as { analyzed?: number; failed?: number; skipped?: string } | null | undefined);
 
   const num = (n: number) => n.toLocaleString("de-DE");
+
+  // --- processes, pause, time window (server settings) ------------------------------------------
+
+  interface Power {
+    analysis_workers: string;
+    analysis_paused: "on" | "off";
+    analysis_schedule: "always" | "window";
+    analysis_from: string;
+    analysis_until: string;
+  }
+  let power = $state<Power | null>(null);
+  $effect(() => {
+    get<Power>("/admin/settings").then((s) => (power = s));
+  });
+  const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
+  const MAX_WORKERS = 16;
+  const workerChoices = $derived(Array.from({ length: Math.min(MAX_WORKERS, Math.max(analysis?.cpus ?? 1, 1)) }, (_, i) => String(i + 1)));
+
+  async function savePower(changes: Partial<Power>) {
+    const before = power;
+    power = power && { ...power, ...changes };
+    try {
+      power = await patch<Power>("/admin/settings", changes);
+      await refresh();
+    } catch (e) {
+      power = before;
+      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+    }
+  }
+  const windowText = $derived(power ? `${Number(power.analysis_from)}–${Number(power.analysis_until)} Uhr` : "");
   const soundOn = $derived(!!analysis?.backend.includes("+effnet"));
 </script>
 
@@ -89,7 +120,7 @@
         <div class="set-label">
           <strong>Klangerkennung (Fingerabdrücke)</strong>
           <small>
-            {#if soundOn}Für Radio und „Ähnliche Titel“; Titel ohne Fingerabdruck nutzen dort noch die Audio-Merkmale.
+            {#if soundOn}Für Radio und „Ähnliche Titel“.
             {:else}Modelle nicht geladen – Radio und „Ähnliche Titel“ nutzen die Audio-Merkmale.{/if}
           </small>
           <div class="set-progress"><div style:width="{pct(analysis.fingerprints, analysis.tracks)}%"></div></div>
@@ -107,6 +138,49 @@
     </div>
   </section>
 
+  {#if power}
+    <section class="set-group">
+      <h2>Rechenleistung</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-label">
+            <strong>Gleichzeitige Analysen</strong>
+            <small>Jede nutzt einen CPU-Kern, mit niedrigster Priorität: Wiedergabe und Bedienung gehen immer vor. Der Server hat {analysis.cpus} {analysis.cpus === 1 ? "Kern" : "Kerne"}.</small>
+          </div>
+          <select aria-label="Gleichzeitige Analysen" value={power.analysis_workers} onchange={(e) => savePower({ analysis_workers: e.currentTarget.value })}>
+            <option value="default">Standard ({analysis.workers_default})</option>
+            {#each workerChoices as n (n)}<option value={n}>{n}</option>{/each}
+          </select>
+        </div>
+        <label class="set-row">
+          <span class="set-label"><strong>Analyse pausieren</strong><small>Ein laufender Durchgang hält nach den gerade bearbeiteten Titeln an.</small></span>
+          <input type="checkbox" class="toggle" checked={power.analysis_paused === "on"} onchange={(e) => savePower({ analysis_paused: e.currentTarget.checked ? "on" : "off" })} />
+        </label>
+        <label class="set-row">
+          <span class="set-label">
+            <strong>Nur in einem Zeitfenster</strong>
+            <small>Zum Beispiel nachts, wenn der Server sonst nichts zu tun hat. Uhrzeit des Servers, gerade {analysis.server_time} Uhr.</small>
+          </span>
+          <input type="checkbox" class="toggle" checked={power.analysis_schedule === "window"} onchange={(e) => savePower({ analysis_schedule: e.currentTarget.checked ? "window" : "always" })} />
+        </label>
+        {#if power.analysis_schedule === "window"}
+          <div class="set-row">
+            <div class="set-label"><strong>Von – bis</strong><small>Bis zur vollen Stunde; über Mitternacht geht auch (z. B. 22–6 Uhr).</small></div>
+            <div class="hours">
+              <select aria-label="Von" value={power.analysis_from} onchange={(e) => savePower({ analysis_from: e.currentTarget.value })}>
+                {#each HOURS as h (h)}<option value={h}>{h}:00</option>{/each}
+              </select>
+              <span>–</span>
+              <select aria-label="Bis" value={power.analysis_until} onchange={(e) => savePower({ analysis_until: e.currentTarget.value })}>
+                {#each HOURS as h (h)}<option value={h}>{h}:00</option>{/each}
+              </select>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </section>
+  {/if}
+
   <section class="set-group">
     <h2>Status</h2>
     <div class="set-card">
@@ -115,9 +189,12 @@
           {#if stuck}
             <strong>Wartet auf den Analyse-Worker</strong>
             <small>Der Job steht seit {fmtDate(job?.created_at ?? null)} in der Warteschlange. Läuft der Worker? Siehe Server-Log.</small>
+          {:else if analysis.waiting && !isBusy(job)}
+            <strong>{analysis.waiting === "paused" ? "Pausiert" : `Wartet auf das Zeitfenster (${windowText})`}</strong>
+            <small>{num(analysis.pending)} Titel ausstehend. {analysis.waiting === "paused" ? "Geht weiter, sobald du die Pause aufhebst." : "Geht von selbst weiter, sobald das Zeitfenster beginnt."}</small>
           {:else if isBusy(job)}
             <strong>{job?.status === "queued" ? "Analyse startet …" : "Analyse läuft"}</strong>
-            <small>Mit niedriger Priorität im Hintergrund. {job?.message ?? ""}</small>
+            {#if job?.message}<small>{job.message}</small>{/if}
             <div class="set-progress job">
               {#if jobPct === null}<div class="indeterminate"></div>{:else}<div style:width="{jobPct}%"></div>{/if}
             </div>
@@ -129,7 +206,7 @@
             <small>Neue Titel werden nach jedem Scan analysiert.</small>
           {/if}
         </div>
-        {#if !isBusy(job) && analysis.pending}
+        {#if !isBusy(job) && analysis.pending && !analysis.waiting}
           <button class="btn primary" onclick={start} disabled={starting}>{starting ? "Startet …" : "Jetzt analysieren"}</button>
         {/if}
       </div>
@@ -165,7 +242,7 @@
     </div>
   </section>
 
-  <p class="set-note"><a href={href("/discover?tab=suggested")}>Auto-Playlist-Vorschläge ansehen →</a></p>
+  <p class="set-note"><a href={href("/settings/autoplaylists")}>Auto-Playlist-Vorschläge ansehen →</a></p>
 {/if}
 
 <style>
@@ -198,6 +275,11 @@
   }
   .failures {
     display: block;
+  }
+  .hours {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .failures summary {
     cursor: pointer;

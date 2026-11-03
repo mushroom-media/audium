@@ -1,6 +1,8 @@
 import pytest
 
+from audium.db.state import bump_library_generation
 from audium.devtools.gen_testlib import generate_db
+from audium.services import library as lib
 from audium.util import norm
 from tests.conftest import cover_bytes, tags
 
@@ -307,3 +309,53 @@ def test_artist_tracks_and_appears_on(library, admin_client):
     assert [a["title"] for a in own["items"]] == ["Aftermath"]
     others = c.get("/api/v1/albums", params={"appears_on": stones["id"]}).json()
     assert sorted(a["title"] for a in others["items"]) == ["Hits 1965", "Rock"] and others["total"] == 2
+
+
+def test_tracks_list_each_artist(library, admin_client):
+    library.add("a/01.mp3", tags("Song (feat. Bushido)", artist="Sido", album="Album", albumartist="Sido"))
+    library.scan()
+    c = admin_client
+    track = c.get("/api/v1/tracks").json()["items"][0]
+    assert track["title"] == "Song" and track["artist"] == "Sido, Bushido"
+    names = [a["name"] for a in track["artists"]]
+    assert names == ["Sido", "Bushido"] and track["artists"][0]["id"] == track["artist_id"]
+    assert c.get(f"/api/v1/tracks/{track['id']}").json()["artists"] == track["artists"]
+    # The guest can be found, and on their page the track shows up
+    assert c.get("/api/v1/search", params={"q": "bushido", "types": "track"}).json()["tracks"][0]["id"] == track["id"]
+    guest = track["artists"][1]["id"]
+    assert [t["id"] for t in c.get("/api/v1/tracks", params={"artist_id": guest}).json()["items"]] == [track["id"]]
+
+
+def test_first_track_of_a_list(big):
+    first = big.get("/api/v1/tracks", params={"sort": "title", "limit": 1}).json()["items"][0]
+    assert big.get("/api/v1/tracks/first", params={"sort": "title"}).json()["id"] == first["id"]
+    ids = big.get("/api/v1/tracks/ids", params={"sort": "title"}).json()
+    picks = {big.get("/api/v1/tracks/first", params={"shuffle": 1}).json()["id"] for _ in range(8)}
+    assert len(picks) > 1 and picks <= set(ids)
+    assert big.get("/api/v1/tracks/first", params={"q": "zzzzzzzz"}).json() is None
+
+
+def test_artist_tracks_do_not_walk_the_library(big, db):
+    """The artist's tracks come from track_artists, not from a scan over the sort index."""
+    artist = big.get("/api/v1/artists", params={"limit": 1}).json()["items"][0]
+    ids = big.get("/api/v1/tracks/ids", params={"artist_id": artist["id"], "sort": "year"}).json()
+    assert len(ids) == artist["track_count"]
+    with db.read() as conn:
+        plan = _plan(conn, lib._track_pool("year", None, artist["id"], None, None))
+    assert "SEARCH tracks USING INTEGER PRIMARY KEY" in plan
+
+
+def test_letters_stay_until_the_library_changes(small, app, db):
+    calls = []
+    original = lib.track_letters
+    lib.track_letters = lambda *a: calls.append(a) or original(*a)
+    try:
+        first = small.get("/api/v1/tracks/letters").json()
+        assert small.get("/api/v1/tracks/letters").json() == first
+        assert len(calls) == 1
+        with db.write() as conn:
+            bump_library_generation(conn)
+        assert small.get("/api/v1/tracks/letters").json() == first
+        assert len(calls) == 2
+    finally:
+        lib.track_letters = original

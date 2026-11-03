@@ -8,10 +8,11 @@
     analyze: "Audioanalyse",
     autoplaylists: "Auto-Playlists",
     genres: "Genres vereinheitlichen",
+    similar_artists: "Ähnliche Künstler (ListenBrainz)",
   };
   const RESULT_LABELS: Record<string, string> = {
     files_seen: "Dateien", added: "neu", updated: "geändert", removed: "entfernt", missing: "fehlend", errors: "Fehler",
-    analyzed: "analysiert", failed: "fehlgeschlagen", created: "erstellt", covers_added: "Cover",
+    analyzed: "analysiert", artists: "Künstler", matched: "Treffer", no_mbid: "ohne MusicBrainz-ID", left: "offen", failed: "fehlgeschlagen", created: "erstellt", covers_added: "Cover",
   };
   const STATUS: Record<string, string> = {
     queued: "wartet", running: "läuft", done: "fertig", failed: "fehlgeschlagen", cancelled: "abgebrochen",

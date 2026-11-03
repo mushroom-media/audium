@@ -243,6 +243,15 @@ def fingerprint(size: int, mtime_ns: int, quick_hash: str) -> str:
     return f"{size}:{mtime_ns}:{quick_hash}"
 
 
+def init_worker() -> None:
+    """Process-pool initializer: one analysis process uses one CPU core. TensorFlow (style
+    detection) otherwise spreads over ~1.6 cores, which the "processes" setting would not show;
+    on one thread it is only ~15% slower per track and needs less CPU time in total. Set before
+    TensorFlow loads (Essentia is imported on the first analysis)."""
+    for var in ("TF_NUM_INTRAOP_THREADS", "TF_NUM_INTEROP_THREADS", "OMP_NUM_THREADS"):
+        os.environ[var] = "1"
+
+
 def analyze_one(args: tuple) -> tuple[int, str, dict | None, str | None]:
     """Process-pool entry point. Never raises: returns (track_id, fingerprint, features, error)."""
     track_id, path, duration_ms, fp, models_dir = args

@@ -7,6 +7,8 @@ export const ui = $state({
   prompt: null as null | { title: string; value: string; confirm: string; resolve: (v: string | null) => void },
   toast: null as null | { text: string; id: number },
   share: null as null | { playlistId: number },
+  /** The "Info" dialog of a track is open. */
+  info: null as null | { trackId: number },
   /** The "new smart playlist" rule editor is open. */
   smartEditor: false,
 });

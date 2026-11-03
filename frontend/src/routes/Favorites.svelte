@@ -1,18 +1,20 @@
 <script lang="ts">
   import { get, type Page, type Track } from "../lib/api";
   import Icon from "../lib/components/Icon.svelte";
+  import PlayToggle from "../lib/components/PlayToggle.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
   import VirtualList from "../lib/components/VirtualList.svelte";
   import { plural } from "../lib/format";
+  import { pageTitle } from "../lib/headerTitle.svelte";
   import { mine } from "../lib/mine.svelte";
-  import { PagedList } from "../lib/paged.svelte";
+  import { keptList } from "../lib/paged.svelte";
   import { player } from "../lib/player.svelte";
 
   const QUEUE_WINDOW = 500;
   // Reload when the set of favorites changes (hearts clicked elsewhere).
   const list = $derived.by(() => {
     void mine.favoriteTracks.size;
-    return new PagedList<Track>((offset, limit, signal) => get<Page<Track>>("/favorites/track", { offset, limit }, signal));
+    return keptList<Track>("favorites", (offset, limit, signal) => get<Page<Track>>("/favorites/track", { offset, limit }, signal));
   });
 
   async function playFrom(index: number, shuffle = false) {
@@ -27,10 +29,10 @@
       <div class="badge" aria-hidden="true"><Icon name="heart" size={56} filled /></div>
       <div>
         <p class="kind">Playlist</p>
-        <h1>Lieblingssongs</h1>
+        <h1 use:pageTitle={"Lieblingssongs"}>Lieblingssongs</h1>
         {#if list.total !== null}<p class="count">{plural(list.total, "Titel", "Titel")}</p>{/if}
         <div class="actions">
-          <button class="btn primary" disabled={!list.total} onclick={() => playFrom(0)}><Icon name="play" size={18} /> Abspielen</button>
+          <PlayToggle ref="favorites" disabled={!list.total} start={() => playFrom(0)} />
           <button class="btn square" disabled={!list.total} onclick={() => playFrom(0, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
         </div>
       </div>

@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ApiError, del, get, patch, post, type AutoItem, type AutoPlaylist, type Playlist, type Rule,
     type UserRef } from "../lib/api";
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import { pageTitle } from "../lib/headerTitle.svelte";
+  import PlayToggle from "../lib/components/PlayToggle.svelte";
   import Modal from "../lib/components/Modal.svelte";
   import RuleEditor from "../lib/components/RuleEditor.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
@@ -11,13 +14,14 @@
   import { ORIGINS, originText } from "../lib/origin";
   import { loadPlaylists } from "../lib/mine.svelte";
   import { player } from "../lib/player.svelte";
-  import { navigate } from "../lib/router.svelte";
+  import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { promptText, toast } from "../lib/ui.svelte";
 
   let { id }: { id: string } = $props();
-  let auto = $state<AutoPlaylist | null>(null);
-  let items = $state<AutoItem[]>([]);
+  const kept = untrack(() => recallEntry<{ auto: AutoPlaylist; items: AutoItem[] }>(`auto:${id}`));
+  let auto = $state<AutoPlaylist | null>(kept?.auto ?? null);
+  let items = $state<AutoItem[]>(kept?.items ?? []);
   let error = $state<string | null>(null);
   let editingRule = $state(false);
   let accessOpen = $state(false);
@@ -36,6 +40,7 @@
         auto = a;
         items = page.items;
         error = null;
+        rememberEntry(`auto:${id}`, { auto: a, items: page.items });
       })
       .catch((e) => {
         if (e.name !== "AbortError") error = e instanceof ApiError && e.status === 404 ? "Diese Playlist ist nicht (mehr) verfügbar." : String(e);
@@ -112,12 +117,12 @@
             <Icon name={ORIGINS[auto!.origin].icon} size={13} /> Automatische Playlist · {ORIGINS[auto!.origin].label}
             {#if isAdmin && auto!.status}· {STATUS[auto!.status]} · {ACCESS[auto!.access ?? "all"]}{/if}
           </p>
-          <h1>{auto!.name}</h1>
+          <h1 use:pageTitle={auto!.name}>{auto!.name}</h1>
           {#if auto!.description}<p class="desc">{auto!.description}</p>{/if}
           <p class="origin">{originText(auto!)}</p>
           <p class="by">{plural(auto!.track_count, "Titel", "Titel")}{#if auto!.duration_ms}, {longDuration(auto!.duration_ms)}{/if}</p>
           <div class="actions">
-            <button class="btn primary" disabled={!items.length} onclick={() => play(0)}><Icon name="play" size={18} /> Abspielen</button>
+            <PlayToggle ref="auto:{id}" disabled={!items.length} start={() => play(0)} />
             <button class="btn square" disabled={!items.length} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
             <button class="btn ghost" disabled={!items.length} onclick={freeze}><Icon name="plus" size={18} /> Als Playlist speichern</button>
           </div>

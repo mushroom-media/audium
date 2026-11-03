@@ -15,6 +15,8 @@ from audium.api.subsonic.envelope import SubsonicError
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.errors import AudiumError
+from audium.services import view_prefs
+from audium.services.server_settings import server_setting
 from audium.services.users import User
 
 _HANDLERS: dict[str, tuple[Callable[["Call"], dict | Response], bool]] = {}
@@ -124,8 +126,13 @@ def make_router() -> APIRouter:
 
 
 def _run(handler, needs_auth: bool, call: Call):
+    with call.db.read() as conn:
+        if server_setting(conn, "subsonic_api") != "on":
+            raise SubsonicError(envelope.GENERIC, "the Subsonic API is turned off on this server")
     if needs_auth:
         call.user = authenticate(call)
+        with call.db.read() as conn:
+            view_prefs.apply(conn, call.user.id)  # same context as the handler: it runs right here
     return handler(call)
 
 

@@ -1,4 +1,4 @@
-"""Small key/value store for process-wide state (setup token hash, worker heartbeats, counters)."""
+"""Small key/value store for process-wide state (first-run dialog, worker heartbeats, counters)."""
 
 from sqlalchemy import Connection, select
 
@@ -7,6 +7,8 @@ from audium.db.schema import app_state
 from audium.util import now_ms
 
 LIBRARY_GENERATION = "library.generation"
+# Set by a reset to factory settings (services/reset.py): the worker schedulers start over.
+RESET_STATE = "server.reset_at"
 
 
 def get_state(conn: Connection, key: str) -> str | None:

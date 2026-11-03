@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { get, type Album, type Page, type Playlist, type Stats } from "../lib/api";
   import AlbumCard from "../lib/components/AlbumCard.svelte";
   import Cover from "../lib/components/Cover.svelte";
@@ -8,7 +9,8 @@
   import { plural } from "../lib/format";
   import { mine, newPlaylistFlow } from "../lib/mine.svelte";
   import { player } from "../lib/player.svelte";
-  import { href, navigate } from "../lib/router.svelte";
+  import { keepScroll } from "../lib/keepScroll";
+  import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
 
   const PERIODS = [
@@ -20,8 +22,8 @@
   const TOP_TRACKS = 10;
   const TOP_CARDS = 6;
 
-  let period = $state<Period>("year");
-  let stats = $state<Stats | null>(null);
+  let period = $state<Period>(recallEntry("profile:period") ?? "year");
+  let stats = $state<Stats | null>(untrack(() => recallEntry(`profile:stats:${period}`)) ?? null);
 
   // The period starts in the viewer's own time zone, so the server gets a timestamp.
   function since(p: Period): number | undefined {
@@ -32,9 +34,14 @@
 
   $effect(() => {
     const ctrl = new AbortController();
-    const s = since(period);
+    const shown = period;
+    const s = since(shown);
+    rememberEntry("profile:period", shown);
     get<Stats>("/stats", { limit: TOP_TRACKS, ...(s === undefined ? {} : { since: s }) }, ctrl.signal)
-      .then((r) => (stats = r))
+      .then((r) => {
+        stats = r;
+        rememberEntry(`profile:stats:${shown}`, r);
+      })
       .catch(() => {});
     return () => ctrl.abort();
   });
@@ -48,8 +55,9 @@
   // The newest favorite albums; all of them are on their own page.
   const ALBUM_LIMIT = 12;
 
-  let albums = $state<Album[] | null>(null);
-  let albumTotal = $state(0);
+  const keptAlbums = recallEntry<Page<Album>>("profile:albums");
+  let albums = $state<Album[] | null>(keptAlbums?.items ?? null);
+  let albumTotal = $state(keptAlbums ? (keptAlbums.total ?? keptAlbums.items.length) : 0);
 
   // Reload when the set of favorite albums changes (hearts clicked on an album page).
   $effect(() => {
@@ -59,6 +67,7 @@
       .then((p) => {
         albums = p.items;
         albumTotal = p.total ?? p.items.length;
+        rememberEntry("profile:albums", p);
       })
       .catch(() => {});
     return () => ctrl.abort();
@@ -84,7 +93,7 @@
   </a>
 {/snippet}
 
-<div class="page">
+<div class="page" use:keepScroll>
   <header class="profile">
     <span class="avatar" aria-hidden="true">{initial}</span>
     <div>

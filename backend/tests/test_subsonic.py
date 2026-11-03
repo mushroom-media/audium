@@ -850,3 +850,14 @@ def test_last_used_is_not_written_on_every_request(lib, db):
     sub.get("ping")
     with db.read() as conn:
         assert conn.execute(select(app_passwords.c.last_used_at)).scalar() == first
+
+
+def test_admin_can_turn_the_api_off(alice, admin_client, alice_web):
+    r = admin_client.patch("/api/v1/admin/settings", json={"subsonic_api": "off"})
+    assert r.status_code == 200 and r.json()["subsonic_api"] == "off"
+    assert alice.code("ping") == 0
+    assert "turned off" in body(alice.raw("ping"))["error"]["message"]
+    # the users see it next to their app passwords
+    assert alice_web.get("/api/v1/auth/me/settings").json()["subsonic_api"] == "off"
+    admin_client.patch("/api/v1/admin/settings", json={"subsonic_api": "on"})
+    assert alice.get("ping")["status"] == "ok"

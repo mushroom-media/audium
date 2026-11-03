@@ -129,6 +129,8 @@ export interface Track {
   title: string;
   artist: string;
   artist_id: number;
+  /** Main artists first, then guests; missing in queues saved before it existed. */
+  artists?: { id: number; name: string }[];
   album: string;
   album_id: number;
   track_no: number | null;
@@ -138,6 +140,55 @@ export interface Track {
   codec: string | null;
   bitrate: number | null;
   cover: string | null;
+  /** From the tags; missing in queues saved before it existed. */
+  replaygain?: ReplayGain | null;
+  /** Admins only, in radio stations and similar tracks: why the track is in there. */
+  reason?: string | null;
+}
+
+/** Everything known about one track (GET /tracks/{id}/info), for the "Info" dialog. */
+export interface TrackInfo {
+  track: Track & {
+    path: string;
+    size: number;
+    container: string | null;
+    sample_rate: number | null;
+    bit_depth: number | null;
+    channels: number | null;
+    date: string | null;
+    genre: string | null;
+    mb_recording_id: string | null;
+    added_at: number;
+    replaygain: ReplayGain;
+  };
+  genres: { name: string; detected: boolean; weight: number }[];
+  styles: { name: string; parent: string; prob: number }[];
+  analysis: null | {
+    status: "ok" | "failed";
+    analyzed_at: number;
+    sound: boolean;
+    bpm: number | null;
+    key: string | null;
+    loudness: number | null;
+    energy: number | null;
+    danceability: number | null;
+    brightness: number | null;
+    dynamics: number | null;
+    mood_happy: number | null;
+    mood_sad: number | null;
+    mood_aggressive: number | null;
+    mood_relaxed: number | null;
+  };
+  plays: number;
+  last_played: number | null;
+  favorite: boolean;
+}
+
+export interface ReplayGain {
+  track_gain: number | null;
+  track_peak: number | null;
+  album_gain: number | null;
+  album_peak: number | null;
 }
 
 export interface Album {
@@ -154,14 +205,19 @@ export interface Album {
 }
 
 export interface AlbumDetail extends Album {
+  /** Main color of the cover ("#rrggbb"), set by the scanner; null without a clear color. */
+  cover_color: string | null;
   tracks: Track[];
+  /** Only for albums with more than one disc; title from the disc's folder ("CD2 - Bonus" -> "Bonus"). */
+  discs: { disc_no: number; title: string | null }[];
 }
 
 /** GET /stats: plays in a period and the most played tracks, albums and artists. */
 export interface Stats {
   since: number | null;
   plays: number;
-  /** Sum of the played tracks' lengths (an estimate: plays count from 30 s on). */
+  /** Time the plays really sounded (no pauses or skipped parts); older plays and those of apps
+   * count with the track's length. Plays count from 30 s on. */
   listening_ms: number;
   tracks: { track: Track; plays: number; listening_ms: number }[];
   albums: { album: Album; plays: number; listening_ms: number }[];
@@ -186,7 +242,10 @@ export interface Artist {
   name: string;
   album_count: number;
   track_count: number;
+  /** As the user wants artists shown (own picture, maybe the newest album cover). */
   cover: string | null;
+  /** Own picture, else the newest album cover, whatever the setting: for radios. */
+  fallback_cover?: string | null;
 }
 
 /** A-Z index entry: where entries with this initial start in an alphabetical list. */
@@ -212,10 +271,33 @@ export interface User {
 export type Theme = "system" | "dark" | "light";
 export type StreamQuality = "auto" | "high" | "medium" | "low";
 
+export type ReplayGainMode = "off" | "track" | "album";
+export type LibraryTab = "tracks" | "albums" | "artists";
+export type TrackSort = "title" | "added" | "year";
+export type AlbumSort = "title" | "artist" | "year" | "added";
+export type ArtistRole = "album" | "all";
+
 export interface UserSettings {
   theme: Theme;
   stream_quality: StreamQuality;
   shortcuts: "on" | "off";
+  replay_gain: ReplayGainMode;
+  /** Crossfade between tracks that follow each other on their own, over crossfade_s seconds (1-12). */
+  crossfade: "off" | "on";
+  crossfade_s: number;
+  /** How lively the cover backdrop in "now playing" moves: 0 still, 25 the slow base pace, 50 twice, 100 four times as fast. */
+  backdrop_motion: number;
+  /** "last": the tab open last time on this device. */
+  library_tab: "last" | LibraryTab;
+  track_sort: TrackSort;
+  album_sort: AlbumSort;
+  artist_role: ArtistRole;
+  /** Artists without their own picture show the newest album cover; "server": the admin's choice. */
+  artist_images: "server" | "on" | "off";
+  /** What "server" means right now (read-only). */
+  artist_images_default: "on" | "off";
+  /** The admin left the Subsonic API on (read-only). */
+  subsonic_api: "on" | "off";
 }
 
 export class ApiError extends Error {
@@ -253,7 +335,8 @@ function query(params?: Params): string {
 export async function request<T>(
   method: string,
   path: string,
-  options: { params?: Params; body?: unknown; signal?: AbortSignal } = {},
+  // keepalive: the request outlives the page (sent while the tab closes).
+  options: { params?: Params; body?: unknown; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<T> {
   // A Blob (an image upload) is sent as it is, everything else as JSON.
   const file = options.body instanceof Blob ? options.body : null;
@@ -262,6 +345,7 @@ export async function request<T>(
     // Apps: the token, never cookies (the server allows the apps' origin only without them).
     credentials: usesToken() ? "omit" : "same-origin",
     signal: options.signal,
+    keepalive: options.keepalive,
     headers: {
       "X-Requested-With": "audium",
       ...(usesToken() ? { Authorization: `Bearer ${connection!.token}` } : {}),
@@ -373,7 +457,7 @@ export interface RuleField {
 export interface AutoPlaylist {
   id: number;
   key: string;
-  generator: "tag" | "rule" | "cluster" | "sound" | "custom";
+  generator: "family" | "tag" | "rule" | "cluster" | "sound" | "custom";
   /** tags: genre/year tags · features: measured tempo, energy … · styles: sound recognition · custom: own rule */
   origin: "tags" | "features" | "styles" | "custom";
   /** Genre playlists: tracks in there by a detected genre (they had no genre tag). */
@@ -390,6 +474,33 @@ export interface AutoPlaylist {
   user_ids?: number[] | null;
 }
 
+/** A broad genre on the Discover page (Rock = Rock, Alternative, Punk, …). */
+export interface GenreFamily {
+  name: string;
+  /** All tracks of the family. */
+  playlist: AutoPlaylist;
+  /** Its genre playlists, biggest first. */
+  genres: AutoPlaylist[];
+  /** Your plays in it over the last 90 days (the order of the tiles). */
+  plays: number;
+}
+
+export interface GenreOverview {
+  families: GenreFamily[];
+  /** Genre playlists that belong to no family. */
+  others: AutoPlaylist[];
+}
+
+/** "Wieder reinhören": an album or artist you have not played for a while. */
+export interface Rediscover {
+  type: "album" | "artist";
+  id: number;
+  name: string;
+  subtitle: string | null;
+  cover: string | null;
+  last_played: number;
+}
+
 export interface AutoItem {
   reason: string | null;
   track: Track;
@@ -397,6 +508,14 @@ export interface AutoItem {
 
 export interface AnalysisStatus {
   backend: string;
+  /** Why it may not run now: paused by the admin, or outside the time window. */
+  waiting: "paused" | "window" | null;
+  /** CPU cores of the server. */
+  cpus: number;
+  /** Processes for the setting "default" (AUDIUM_ANALYSIS_WORKERS). */
+  workers_default: number;
+  /** HH:MM on the server's clock (the time window uses it). */
+  server_time: string;
   tracks: number;
   analyzed: number;
   failed: number;

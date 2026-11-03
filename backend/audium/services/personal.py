@@ -1,6 +1,6 @@
 """Per-user data: favorites and listening history. Always scoped to the requesting user."""
 
-from sqlalchemy import Connection, delete, func, select
+from sqlalchemy import Connection, delete, func, select, update
 
 from audium.db.dialect import insert_for
 from audium.db.pagination import fetch_ordered
@@ -85,15 +85,18 @@ def record_play(
     played_ms: int,
     context: str | None = None,
     *,
+    listened_ms: int | None = None,
     client: str | None = None,
     played_at: int | None = None,
-) -> None:
-    """`client`: the app that reported it (Subsonic); `played_at`: when, for plays an app
-    reports later (offline listening). Never in the future."""
-    if conn.execute(select(tracks.c.id).where(tracks.c.id == track_id)).scalar() is None:
+) -> int:
+    """`listened_ms`: the time it really sounded so far (None: not measured, e.g. Subsonic apps;
+    see set_listened); `client`: the app that reported it (Subsonic); `played_at`: when, for plays
+    an app reports later (offline listening). Never in the future. Returns the play's id."""
+    duration = conn.execute(select(tracks.c.duration_ms).where(tracks.c.id == track_id)).scalar()
+    if duration is None:
         raise NotFound("track not found")
     now = now_ms()
-    conn.execute(
+    play_id = conn.execute(
         play_history.insert().values(
             user_id=user_id,
             track_id=track_id,
@@ -101,8 +104,9 @@ def record_play(
             played_ms=played_ms,
             context=context,
             client=client,
+            listened_ms=None if listened_ms is None else _cap(listened_ms, duration),
         )
-    )
+    ).inserted_primary_key[0]
     # Keep history bounded per user; cheap thanks to the (user_id, played_at) index.
     cutoff = conn.execute(
         select(play_history.c.played_at)
@@ -113,6 +117,26 @@ def record_play(
     ).scalar()
     if cutoff is not None:
         conn.execute(delete(play_history).where(play_history.c.user_id == user_id, play_history.c.played_at <= cutoff))
+    return play_id
+
+
+def _cap(listened_ms: int, duration_ms: int) -> int:
+    """A play never sounds longer than its track (a client clock running wild, say)."""
+    return min(listened_ms, duration_ms) if duration_ms > 0 else listened_ms
+
+
+def set_listened(conn: Connection, user_id: int, play_id: int, listened_ms: int) -> None:
+    """The final listened time of a play, reported when the track stops (next track, skip, closing
+    the tab). Only grows: a late or repeated report never takes time away."""
+    row = conn.execute(
+        select(play_history.c.listened_ms, tracks.c.duration_ms)
+        .join(tracks, tracks.c.id == play_history.c.track_id)
+        .where(play_history.c.id == play_id, play_history.c.user_id == user_id)
+    ).one_or_none()
+    if row is None:
+        raise NotFound("play not found")
+    value = max(row.listened_ms or 0, _cap(listened_ms, row.duration_ms))
+    conn.execute(update(play_history).where(play_history.c.id == play_id).values(listened_ms=value))
 
 
 def list_history(conn: Connection, user_id: int, limit: int, offset: int):
@@ -131,18 +155,20 @@ def list_history(conn: Connection, user_id: int, limit: int, offset: int):
 def listening_stats(conn: Connection, user_id: int, since: int | None, limit: int) -> dict:
     """Plays since `since` (ms; None = all of the history): how many, roughly how long, and the
     most played tracks, albums and artists (artists ranked by listening time, the rest by plays).
-    The time adds up the lengths of the played tracks: the web player reports a play once it
-    counts, not when it stops."""
+    The time is what the plays really sounded (listened_ms, measured by the web player without
+    pauses, buffering or skipped parts); plays without a measurement (from before migration 0013,
+    Subsonic apps) count with the track's length, as all plays did before."""
     cond = [play_history.c.user_id == user_id]
     if since is not None:
         cond.append(play_history.c.played_at >= since)
-    plays = select(play_history.c.played_at, tracks.c.id, tracks.c.album_id, tracks.c.artist_id, tracks.c.duration_ms)
+    listened = func.coalesce(play_history.c.listened_ms, tracks.c.duration_ms).label("listened_ms")
+    plays = select(play_history.c.played_at, tracks.c.id, tracks.c.album_id, tracks.c.artist_id, listened)
     plays = plays.join(tracks, tracks.c.id == play_history.c.track_id).where(*cond).subquery()
-    count, ms = conn.execute(select(func.count(), func.coalesce(func.sum(plays.c.duration_ms), 0))).one()
+    count, ms = conn.execute(select(func.count(), func.coalesce(func.sum(plays.c.listened_ms), 0))).one()
 
     def top(col, detail, id_col, to_item, key, by_time=False):
         n = func.count().label("n")
-        ms = func.coalesce(func.sum(plays.c.duration_ms), 0).label("ms")
+        ms = func.coalesce(func.sum(plays.c.listened_ms), 0).label("ms")
         order = (ms.desc(), n.desc()) if by_time else (n.desc(),)
         ranked = conn.execute(
             select(col, n, ms).group_by(col).order_by(*order, func.max(plays.c.played_at).desc()).limit(limit)
@@ -238,4 +264,6 @@ def _source(conn: Connection, user: User, key: str) -> dict | None:
         name = row and row.name
     else:
         return None
-    return None if row is None else item | {"name": name, "subtitle": "Radio", "cover": row.cover}
+    # A station always gets a picture, whatever the artist setting (tracks have no fallback column).
+    cover = getattr(row, "fallback_cover", None) or (row and row.cover)
+    return None if row is None else item | {"name": name, "subtitle": "Radio", "cover": cover}

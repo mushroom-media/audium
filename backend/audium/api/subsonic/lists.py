@@ -146,14 +146,16 @@ def _similar(call: Call, key: str) -> dict:
             if not catalog.songs(conn, [item_id]):
                 raise SubsonicError(NOT_FOUND, "song not found")
             # Subsonic leaves the seed out: the app already plays it.
-            track_ids = radio(conn, vectors, item_id, count + 1, rng)[1:]
+            track_ids = [t for t, _ in radio(conn, vectors, item_id, count + 1, rng, user_id=call.user.id).picks][1:]
         else:
             members = (
                 catalog.album_track_ids(conn, item_id) if kind == ids.ALBUM else catalog.artist_track_ids(conn, item_id)
             )
             if not members:
                 raise SubsonicError(NOT_FOUND, "not found")
-            track_ids = group_radio(conn, vectors, members, count, rng)
+            station = f"{'album' if kind == ids.ALBUM else 'artist'}:{item_id}"
+            picks = group_radio(conn, vectors, members, count, rng, user_id=call.user.id, station=station).picks
+            track_ids = [t for t, _ in picks]
         songs = mapping.songs(conn, call.user, track_ids)
     return {key: {"song": songs}}
 

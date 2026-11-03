@@ -3,6 +3,7 @@
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
   import { plural } from "../../lib/format";
+  import { href } from "../../lib/router.svelte";
   import { promptText, toast } from "../../lib/ui.svelte";
   import { fmtDate, type Job } from "./common";
 
@@ -170,7 +171,7 @@
         <div class="btns">
           <button class="btn small ghost" onclick={() => addExclude(r)}>Unterordner ausschließen</button>
           <button class="btn small ghost" onclick={() => scan({ root_ids: [r.id] }, "Scan gestartet")}>Scannen</button>
-          <label class="switch"><input type="checkbox" checked={r.enabled} onchange={(e) => guard(() => patch(`/admin/roots/${r.id}`, { enabled: e.currentTarget.checked }))} /> aktiv</label>
+          <label class="switch"><input type="checkbox" class="toggle" checked={r.enabled} onchange={(e) => guard(() => patch(`/admin/roots/${r.id}`, { enabled: e.currentTarget.checked }))} /> aktiv</label>
         </div>
       </div>
     {:else}
@@ -183,6 +184,7 @@
   <p class="set-note">
     audium sieht nur Ordner, die in den Container unter <code>/music</code> eingebunden sind (in <code>docker-compose.yml</code> unter
     <code>volumes</code>). Innerhalb davon wählst du hier, was zur Bibliothek gehört. Musikdateien werden nie verändert.
+    Hilfe dabei gibt die <a href={href("/setup")}>Einrichtung</a>, die du jederzeit erneut öffnen kannst.
   </p>
 </section>
 

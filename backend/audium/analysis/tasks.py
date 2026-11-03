@@ -10,8 +10,10 @@
 
 import multiprocessing
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from datetime import datetime
 
 from sqlalchemy import Connection, Text, cast, func, literal, or_, select
 
@@ -23,11 +25,13 @@ from audium.config import Settings
 from audium.db.dialect import insert_for
 from audium.db.engine import Database
 from audium.db.schema import genres, library_roots, track_embeddings, track_features, track_genres, track_styles, tracks
-from audium.db.state import bump_library_generation, get_state, set_state
+from audium.db.state import RESET_STATE, bump_library_generation, get_state, set_state
 from audium.jobs import queue as jobq
 from audium.jobs.worker import JobContext
 from audium.logging import get_logger
 from audium.scanner.scan import genre_id, refresh_genre_counts
+from audium.services import auth as auth_service
+from audium.services.server_settings import server_setting
 from audium.util import now_ms
 
 log = get_logger(__name__)
@@ -35,7 +39,11 @@ log = get_logger(__name__)
 ANALYSIS_QUEUE = "analysis"
 BACKEND_STATE = "analysis.backend"
 GENRES_DONE_STATE = "genres.backfilled"
-_BATCH = 24
+# Why a stopped analysis waits ("paused" / "window"); empty when it is not waiting.
+WAITING_STATE = "analysis.waiting"
+# Tracks per batch and process: settings (pause, window, processes) apply between batches.
+_BATCH_PER_WORKER = 4
+_RESUME_CHECK_S = 60
 _GENRE_BATCH = 2000
 
 
@@ -105,6 +113,9 @@ def analysis_stats(conn: Connection) -> dict:
         .where(tracks.c.missing_since.is_(None))
     )
     return {
+        "waiting": analysis_blocked(conn),
+        "cpus": os.cpu_count() or 1,
+        "server_time": datetime.now().strftime("%H:%M"),
         "fingerprints": conn.execute(fingerprints).scalar_one(),
         "styles": conn.execute(with_styles).scalar_one(),
         "backend": get_state(conn, BACKEND_STATE) or "unknown",
@@ -113,6 +124,26 @@ def analysis_stats(conn: Connection) -> dict:
         "failed": conn.execute(failed).scalar_one(),
         "pending": conn.execute(pending).scalar_one(),
     }
+
+
+def analysis_workers(conn: Connection, settings: Settings) -> int:
+    """Parallel analysis processes: the admin's setting, else AUDIUM_ANALYSIS_WORKERS."""
+    value = server_setting(conn, "analysis_workers")
+    return max(1, settings.analysis_workers if value == "default" else int(value))
+
+
+def analysis_blocked(conn: Connection, now: datetime | None = None) -> str | None:
+    """Why the analysis must not run now: "paused", "window" (outside the time window, server
+    time), or None."""
+    if server_setting(conn, "analysis_paused") == "on":
+        return "paused"
+    if server_setting(conn, "analysis_schedule") == "window":
+        start, end = int(server_setting(conn, "analysis_from")), int(server_setting(conn, "analysis_until"))
+        hour = (now or datetime.now()).hour
+        inside = start <= hour < end if start <= end else hour >= start or hour < end
+        if start != end and not inside:
+            return "window"
+    return None
 
 
 def _next_batch(conn: Connection, size: int, skip: set[int], effnet: bool):
@@ -179,7 +210,14 @@ def _store_effnet(conn: Connection, track_id: int, model: str, vector, found: li
 
 def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     models_dir = settings.data_dir / "models"
-    if features.effnet_available() and not model_files.present(models_dir) and settings.analysis_download_models:
+    with db.read() as conn:
+        # Not while paused or outside the time window: then the analysis would not run anyway.
+        download = (
+            settings.analysis_download_models
+            and server_setting(conn, "model_download") == "on"
+            and analysis_blocked(conn) is None
+        )
+    if features.effnet_available() and not model_files.present(models_dir) and download:
         ctx.progress(0, 0, "Modelle werden geladen")
         model_files.ensure(models_dir, download=True)
     analyzer = features.backend_name(models_dir)
@@ -191,22 +229,37 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     with db.read() as conn:
         pending = select(func.count()).select_from(_pending_base()).where(_pending_condition(effnet))
         total = conn.execute(pending).scalar_one()
+        workers = analysis_workers(conn, settings)
     done = ok = failed = 0
+    waiting: str | None = None
     attempted: set[int] = set()
     style_cache: dict[str, int] = {}
-    workers = max(1, settings.analysis_workers)
     ctx.progress(0, total, "Analyse startet")
 
     def new_pool():
-        return ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("forkserver"))
+        return ProcessPoolExecutor(
+            max_workers=workers, mp_context=multiprocessing.get_context("forkserver"), initializer=features.init_worker
+        )
 
     pool = new_pool()
     try:
         while not ctx.should_stop():
             with db.read() as conn:
-                batch = _next_batch(conn, _BATCH, attempted, effnet)
+                # The admin may pause, set a time window or change the processes at any time.
+                waiting = analysis_blocked(conn)
+                wanted = analysis_workers(conn, settings)
+                batch = [] if waiting else _next_batch(conn, wanted * _BATCH_PER_WORKER, attempted, effnet)
+            if waiting:
+                ctx.progress(
+                    done, max(total, done), "Pausiert" if waiting == "paused" else "Wartet auf das Zeitfenster"
+                )
+                break
             if not batch:
                 break
+            if wanted != workers:
+                pool.shutdown()
+                workers = wanted
+                pool = new_pool()
             args = [
                 (r.id, os.path.join(r.root, r.rel_path), r.duration_ms,
                  features.fingerprint(r.size, r.mtime_ns, r.quick_hash), str(models_dir))
@@ -239,9 +292,10 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
         pool.shutdown(cancel_futures=True)
     ctx.check()
     with db.write() as conn:
+        set_state(conn, WAITING_STATE, waiting or "")  # the scheduler resumes it once allowed
         if ok:
             enqueue_autoplaylists(conn)
-    return {"analyzed": ok, "failed": failed}
+    return {"analyzed": ok, "failed": failed, **({"waiting": waiting} if waiting else {})}
 
 
 def run_genre_backfill(ctx: JobContext, db: Database) -> dict:
@@ -312,7 +366,7 @@ def make_handlers(db: Database, settings: Settings):
         ctx.progress(0, 1, "Auto-Playlists werden erzeugt")
         with db.write() as conn:
             refresh_detected_genres(conn)
-            return autoplaylists.generate(conn)
+        return autoplaylists.generate_in(db)
 
     def backfill(ctx: JobContext, payload: dict) -> dict:
         return run_genre_backfill(ctx, db)
@@ -321,17 +375,27 @@ def make_handlers(db: Database, settings: Settings):
 
 
 class AnalysisScheduler:
-    """First idle tick of the analysis worker: backfill genres once, resume pending analysis."""
+    """Idle ticks of the analysis worker. The first one backfills genres once and resumes
+    pending analysis; later ones (once a minute) resume an analysis that stopped for the pause
+    or the time window as soon as it may run again."""
 
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
         self._started = False
+        self._last_check = 0.0
+        self._reset_at: str | None = None
 
     def __call__(self) -> None:
         if self._started:
+            self._resume_if_allowed()
             return
+        with self.db.read() as conn:
+            self._reset_at = get_state(conn, RESET_STATE)
+            if auth_service.setup_holds_scan(conn, self.settings):
+                return  # the first-run dialog decides about the analysis and its model download
         self._started = True
+        self._last_check = time.monotonic()
         analyzer = features.backend_name(self.settings.data_dir / "models")
         with self.db.write() as conn:
             set_state(conn, BACKEND_STATE, analyzer)
@@ -341,3 +405,16 @@ class AnalysisScheduler:
                 enqueue_analysis(conn)
             enqueue_autoplaylists(conn)
         log.info("analysis.backend", backend=analyzer)
+
+    def _resume_if_allowed(self) -> None:
+        if time.monotonic() - self._last_check < _RESUME_CHECK_S or not self.settings.analysis_enabled:
+            return
+        self._last_check = time.monotonic()
+        with self.db.write() as conn:
+            if get_state(conn, RESET_STATE) != self._reset_at:
+                self._started = False  # reset to factory settings: wait for the dialog again
+                return
+            if get_state(conn, WAITING_STATE) and analysis_blocked(conn) is None:
+                set_state(conn, WAITING_STATE, "")
+                enqueue_analysis(conn)
+                log.info("analysis.resumed")

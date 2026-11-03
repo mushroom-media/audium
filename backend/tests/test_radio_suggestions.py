@@ -71,3 +71,24 @@ def test_suggestions_are_per_user(library, db, admin, admin_client):
     other = create_user(db, "other", USER_PW, "user")
     _plays(db, other.id, t["Hot"], days_ago=1, times=4)
     assert admin_client.get("/api/v1/radio/suggestions").json() == []
+
+
+def test_full_row_is_kept_and_a_short_one_follows_the_plays(library, db, admin, admin_client):
+    t = _setup(library, db)
+    _plays(db, admin.id, t["Hot"], days_ago=1, times=4)
+    first = admin_client.get("/api/v1/radio/suggestions", params={"limit": 1}).json()
+    assert len(first) == 1
+    calls = []
+    original = rs.suggestions
+    rs.suggestions = lambda *a, **k: calls.append(a) or original(*a, **k)
+    try:
+        _plays(db, admin.id, t["Warm"], days_ago=0, times=4)
+        assert admin_client.get("/api/v1/radio/suggestions", params={"limit": 1}).json() == first
+        assert calls == []  # the row is full: it stays
+        admin_client.get("/api/v1/radio/suggestions", params={"limit": 20})
+        assert len(calls) == 1
+        _plays(db, admin.id, t["Old"], days_ago=0, times=1)
+        admin_client.get("/api/v1/radio/suggestions", params={"limit": 20})
+        assert len(calls) == 2  # not full yet: a new play counts
+    finally:
+        rs.suggestions = original

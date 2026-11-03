@@ -5,21 +5,24 @@ from typing import Literal
 import numpy as np
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 
-from audium.analysis import autoplaylists, rules
-from audium.analysis.similarity import fallback_similar, group_radio, radio
+from audium.analysis import autoplaylists, rules, sources, taste, why
+from audium.analysis.similarity import Blend, blend, group_radio, radio
 from audium.analysis.tasks import analysis_stats, enqueue_analysis, enqueue_autoplaylists
-from audium.api.deps import current_user, get_db, require_admin
+from audium.api.deps import current_user, get_db, get_settings, require_admin, viewer
 from audium.api.library_models import TrackOut
 from audium.api.models import Ok
 from audium.api.playlist_models import PlaylistOut
+from audium.config import Settings
 from audium.db.engine import Database
 from audium.db.pagination import fetch_ordered
-from audium.db.schema import genres, library_roots, styles, track_artists, track_features, tracks
+from audium.db.schema import artist_similar, genres, library_roots, styles, track_artists, track_features, tracks
 from audium.db.state import set_state
 from audium.errors import NotFound
 from audium.services import auto as auto_service
+from audium.services import discover as discover_service
+from audium.services import similar_artists
 from audium.services.library import track_item, track_select
 from audium.services.users import User
 
@@ -53,6 +56,27 @@ class AutoPlaylistOut(BaseModel):
     status: str | None = Field(None, description="Admins only: suggested | published | dismissed")
     access: str | None = Field(None, description="Admins only: all | restricted | admin_only")
     user_ids: list[int] | None = Field(None, description="Admins only: users with access when restricted")
+
+
+class FamilyOut(BaseModel):
+    name: str = Field(description='Broad genre, e.g. "Rock"')
+    playlist: AutoPlaylistOut = Field(description="All tracks of the family")
+    genres: list[AutoPlaylistOut] = Field(description="Its genre playlists, biggest first")
+    plays: int = Field(description="Your plays in it over the last 90 days")
+
+
+class GenreOverviewOut(BaseModel):
+    families: list[FamilyOut] = Field(description="Most played by you first, then the biggest")
+    others: list[AutoPlaylistOut] = Field(description="Genre playlists that belong to no family")
+
+
+class RediscoverOut(BaseModel):
+    type: Literal["album", "artist"]
+    id: int
+    name: str
+    subtitle: str | None
+    cover: str | None
+    last_played: int = Field(description="Your last play of it (ms)")
 
 
 class AutoItemOut(BaseModel):
@@ -104,6 +128,10 @@ class AutoSource(BaseModel):
 
 class AnalysisStatus(BaseModel):
     backend: str = Field(description="essentia[+effnet][+moods] | none | unknown")
+    waiting: str | None = Field(description='Why it may not run now: "paused", "window" (time window), or null')
+    cpus: int = Field(description="CPU cores of the server")
+    workers_default: int = Field(description="Processes for the setting 'default' (AUDIUM_ANALYSIS_WORKERS)")
+    server_time: str = Field(description="HH:MM on the server's clock, which the time window uses")
     tracks: int
     analyzed: int
     failed: int
@@ -118,8 +146,40 @@ class AnalysisFailure(BaseModel):
     error: str | None
 
 
+class StationTrackOut(TrackOut):
+    reason: str | None = Field(
+        None, description='Admins only: why the track is in here, e.g. "Klingt ähnlich 70 % · Genre: Rock 30 %"'
+    )
+
+
+class SourceIn(BaseModel):
+    on: bool | None = None
+    weight: int | None = Field(None, ge=sources.MIN_WEIGHT, le=sources.MAX_WEIGHT)
+
+
+class SourceOut(BaseModel):
+    on: bool
+    weight: int
+
+
+class SourcesOut(BaseModel):
+    sources: dict[str, SourceOut] = Field(description="sound | features | genre | artists | taste")
+    options: dict[str, bool] = Field(description="smooth_tempo: avoid big tempo jumps between tracks")
+    artists_pending: int = Field(description="Artists not yet asked for at ListenBrainz (while 'artists' is on)")
+    artists_known: int = Field(description="Artists with similar artists from ListenBrainz")
+
+
 def _tracks(conn, ids: list[int]) -> list[dict]:
     return [track_item(r) for r in fetch_ordered(conn, track_select(), tracks.c.id, ids)]
+
+
+def _station(conn, station: Blend, user: User, own: str = "Eigener Titel") -> list[dict]:
+    """The station's tracks; admins also get why each one is in there."""
+    items = _tracks(conn, [t for t, _ in station.picks])
+    if user.is_admin:
+        reasons = why.describe(conn, station, own)
+        items = [{**item, "reason": reasons.get(item["id"])} for item in items]
+    return items
 
 
 @router.get("/genres", response_model=list[GenreOut], summary="Normalized genres with track counts")
@@ -164,20 +224,18 @@ def rule_preview(body: RulePreviewIn, _user: User = Depends(current_user), db: D
         return {"count": len(ids), "tracks": _tracks(conn, ids[:20]), "needs_analysis": rules.uses_analysis(rule)}
 
 
-@router.get("/tracks/{track_id}/similar", response_model=list[TrackOut], summary="Similar tracks")
+@router.get("/tracks/{track_id}/similar", response_model=list[StationTrackOut], summary="Similar tracks")
 def similar(
     track_id: int,
     request: Request,
     limit: int = Query(30, ge=1, le=200),
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
     db: Database = Depends(get_db),
 ):
     with db.read() as conn:
         if conn.execute(select(tracks.c.id).where(tracks.c.id == track_id)).first() is None:
             raise NotFound("track not found")
-        near = request.app.state.vectors.nearest(conn, track_id, limit)
-        ids = [t for t, _ in near] if near else fallback_similar(conn, track_id, limit)
-        return _tracks(conn, ids)
+        return _station(conn, blend(conn, request.app.state.vectors, [track_id], limit, user.id), user)
 
 
 # Continuing a station: the tracks it already played (only the latest MAX_EXCLUDE count).
@@ -185,34 +243,40 @@ MAX_EXCLUDE = 500
 EXCLUDE = Query([], description="Track ids the station already played: continue it without them")
 
 
-@router.get("/tracks/{track_id}/radio", response_model=list[TrackOut], summary="A station starting from a track")
+@router.get("/tracks/{track_id}/radio", response_model=list[StationTrackOut], summary="A station starting from a track")
 def track_radio(
     track_id: int,
     request: Request,
     limit: int = Query(50, ge=5, le=300),
     exclude: list[int] = EXCLUDE,
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
     db: Database = Depends(get_db),
 ):
     with db.read() as conn:
         if conn.execute(select(tracks.c.id).where(tracks.c.id == track_id)).first() is None:
             raise NotFound("track not found")
         rng = np.random.default_rng()
-        ids = radio(conn, request.app.state.vectors, track_id, limit, rng, exclude[-MAX_EXCLUDE:])
-        return _tracks(conn, ids)
+        return _station(
+            conn, radio(conn, request.app.state.vectors, track_id, limit, rng, exclude[-MAX_EXCLUDE:], user.id), user
+        )
 
 
-def _group_radio(conn, request: Request, members, limit: int, exclude: list[int], what: str) -> list[dict]:
+def _group_radio(
+    conn, request: Request, user: User, members, limit: int, exclude: list[int], what: str, item_id: int
+) -> list[dict]:
     seeds = list(conn.execute(select(tracks.c.id).where(members, tracks.c.missing_since.is_(None))).scalars())
     if not seeds:
         raise NotFound(f"{what} not found")
     rng = np.random.default_rng()
-    return _tracks(conn, group_radio(conn, request.app.state.vectors, seeds, limit, rng, exclude[-MAX_EXCLUDE:]))
+    station = group_radio(
+        conn, request.app.state.vectors, seeds, limit, rng, exclude[-MAX_EXCLUDE:], user.id, f"{what}:{item_id}"
+    )
+    return _station(conn, station, user, "Vom Album" if what == "album" else "Vom Künstler")
 
 
 @router.get(
     "/albums/{album_id}/radio",
-    response_model=list[TrackOut],
+    response_model=list[StationTrackOut],
     summary="A station from an album: similar music, about a quarter from the album itself",
 )
 def album_radio(
@@ -220,16 +284,16 @@ def album_radio(
     request: Request,
     limit: int = Query(50, ge=5, le=300),
     exclude: list[int] = EXCLUDE,
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
     db: Database = Depends(get_db),
 ):
     with db.read() as conn:
-        return _group_radio(conn, request, tracks.c.album_id == album_id, limit, exclude, "album")
+        return _group_radio(conn, request, user, tracks.c.album_id == album_id, limit, exclude, "album", album_id)
 
 
 @router.get(
     "/artists/{artist_id}/radio",
-    response_model=list[TrackOut],
+    response_model=list[StationTrackOut],
     summary="A station from an artist: similar music, about a quarter by the artist",
 )
 def artist_radio(
@@ -237,12 +301,57 @@ def artist_radio(
     request: Request,
     limit: int = Query(50, ge=5, le=300),
     exclude: list[int] = EXCLUDE,
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
     db: Database = Depends(get_db),
 ):
     by_artist = exists().where(track_artists.c.track_id == tracks.c.id, track_artists.c.artist_id == artist_id)
     with db.read() as conn:
-        return _group_radio(conn, request, by_artist, limit, exclude, "artist")
+        return _group_radio(conn, request, user, by_artist, limit, exclude, "artist", artist_id)
+
+
+class RadioSkipIn(BaseModel):
+    track_id: int
+    station: str = Field(description='The station it was skipped in: "track:3", "album:5" or "artist:2"')
+
+
+@router.post(
+    "/radio/skips",
+    response_model=Ok,
+    summary="A track skipped early in a radio station: it ranks lower in stations like that one",
+)
+def radio_skip(body: RadioSkipIn, user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        taste.record_skip(conn, user.id, body.track_id, body.station)
+    return {"ok": True}
+
+
+@router.post(
+    "/radio/dislikes",
+    response_model=Ok,
+    summary='A track marked "Mag ich nicht" in a radio station: it stays out of that one, ranks lower in those like it',
+)
+def radio_dislike(body: RadioSkipIn, user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        taste.record_skip(conn, user.id, body.track_id, body.station, disliked=True)
+    return {"ok": True}
+
+
+@router.get("/discover/genres", response_model=GenreOverviewOut, summary="Broad genres with their genre playlists")
+def discover_genres(user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        return discover_service.genre_overview(conn, user)
+
+
+@router.get(
+    "/discover/rediscover",
+    response_model=list[RediscoverOut],
+    summary="Albums and artists you have not played for a while",
+)
+def discover_rediscover(
+    limit: int = Query(8, ge=1, le=24), user: User = Depends(viewer), db: Database = Depends(get_db)
+):
+    with db.read() as conn:
+        return discover_service.rediscover(conn, user, limit)
 
 
 @router.get("/autoplaylists", response_model=list[AutoPlaylistOut], summary="Auto-playlists you can see")
@@ -345,10 +454,56 @@ def admin_set_source(body: AutoSource, _admin: User = Depends(require_admin), db
     return body
 
 
-@admin.get("/analysis", response_model=AnalysisStatus, summary="Audio analysis progress")
-def admin_analysis(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+def _sources_out(conn) -> SourcesOut:
+    cfg = sources.load(conn)
+    return SourcesOut(
+        sources={n: SourceOut(on=s.on, weight=s.weight) for n, s in cfg.items()},
+        artists_pending=similar_artists.count_pending(conn) if cfg["artists"].on else 0,
+        artists_known=conn.execute(select(func.count(func.distinct(artist_similar.c.artist_id)))).scalar_one(),
+        options=sources.options(conn),
+    )
+
+
+class RadioOptionsIn(BaseModel):
+    smooth_tempo: bool | None = None
+
+
+@admin.patch("/radio/options", response_model=SourcesOut, summary="Further station options (tempo)")
+def admin_set_radio_options(
+    body: RadioOptionsIn, _admin: User = Depends(require_admin), db: Database = Depends(get_db)
+):
+    with db.write() as conn:
+        sources.save_options(conn, body.model_dump(exclude_none=True))
+        return _sources_out(conn)
+
+
+@admin.get("/radio/sources", response_model=SourcesOut, summary="What stations and mixes are made from")
+def admin_sources(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
     with db.read() as conn:
-        return analysis_stats(conn)
+        return _sources_out(conn)
+
+
+@admin.patch(
+    "/radio/sources",
+    response_model=SourcesOut,
+    summary="Switch sources on/off and weight them; at least one stays on",
+)
+def admin_set_sources(body: dict[str, SourceIn], _admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        _after, switched = sources.save(conn, {n: s.model_dump(exclude_none=True) for n, s in body.items()})
+        if "artists" in switched and similar_artists.enabled(conn):
+            similar_artists.enqueue(conn)
+        if switched & {"sound", "features"}:
+            enqueue_autoplaylists(conn)  # mixes over that space come or go
+        return _sources_out(conn)
+
+
+@admin.get("/analysis", response_model=AnalysisStatus, summary="Audio analysis progress")
+def admin_analysis(
+    _admin: User = Depends(require_admin), db: Database = Depends(get_db), settings: Settings = Depends(get_settings)
+):
+    with db.read() as conn:
+        return {**analysis_stats(conn), "workers_default": max(1, settings.analysis_workers)}
 
 
 @admin.post("/analysis/start", response_model=Ok, status_code=202, summary="Analyse pending tracks now")

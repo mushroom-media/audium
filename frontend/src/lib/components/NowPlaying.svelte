@@ -7,8 +7,11 @@
   import { player } from "../player.svelte";
   import * as Q from "../queue";
   import { href } from "../router.svelte";
+  import { session } from "../session.svelte";
+  import { resist } from "../swipe";
   import { openTrackMenu } from "../ui.svelte";
   import { fade } from "svelte/transition";
+  import ArtistLinks from "./ArtistLinks.svelte";
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
@@ -21,6 +24,8 @@
   const max = $derived(Math.max(1, player.duration));
   const progress = $derived(Math.min(100, (shown / max) * 100));
   const backdrop = $derived(coverUrl(track?.cover ?? null, 256));
+  // The backdrop's pace (a user setting): 0 stands still, 50 twice the base pace, 100 four times.
+  const motion = $derived(session.settings.backdrop_motion / 25);
 
   // A touch first moves this far before it is decided whether it is a horizontal or a vertical gesture.
   const AXIS_LOCK_PX = 8;
@@ -102,9 +107,6 @@
       : Q.prev(player.queue).pos !== player.queue.pos;
 
   const artTransform = (x: number, w: number) => (x ? `translateX(${x}px) rotate(${(x / w) * 5}deg)` : "");
-
-  /** Where nothing comes next, the cover gives a little and less the further it is pulled. */
-  const resist = (dx: number, w: number) => Math.sign(dx) * w * 0.3 * (1 - Math.exp(-Math.abs(dx) / w));
 
   function dragArt(g: Gesture, dx: number, t: number) {
     if (!art) return;
@@ -196,7 +198,7 @@
 >
   {#if backdrop}
     {#key backdrop}
-      <div class="backdrop" class:paused={!player.playing} aria-hidden="true" transition:fade={{ duration: reducedMotion?.matches ? 0 : BACKDROP_FADE_MS }}>
+      <div class="backdrop" class:paused={!player.playing || !motion} style:--speed={motion || 1} aria-hidden="true" transition:fade={{ duration: reducedMotion?.matches ? 0 : BACKDROP_FADE_MS }}>
         <div class="layer a" style:background-image="url({backdrop})" use:keepDrift></div>
         <div class="layer b" style:background-image="url({backdrop})" use:keepDrift></div>
       </div>
@@ -228,7 +230,7 @@
       <div class="info">
         <div class="meta">
           <h2 title={track.title}>{track.title}</h2>
-          <a href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
+          <div class="artist"><ArtistLinks {track} /></div>
           <a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>
         </div>
         <Heart {track} size={22} />
@@ -333,11 +335,11 @@
     background-position: center;
     filter: blur(56px) saturate(1.4);
     will-change: transform;
-    animation: drift-a 30s ease-in-out infinite alternate;
+    animation: drift-a calc(30s / var(--speed, 1)) ease-in-out infinite alternate;
   }
   .layer.b {
     opacity: 0.6;
-    animation: drift-b 39s ease-in-out infinite alternate;
+    animation: drift-b calc(39s / var(--speed, 1)) ease-in-out infinite alternate;
   }
   .paused .layer {
     animation-play-state: paused;
@@ -439,7 +441,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .meta a {
+  .meta a,
+  .artist {
     display: block;
     color: var(--text-muted);
     text-decoration: none;

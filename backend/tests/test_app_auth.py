@@ -98,3 +98,19 @@ def test_cors_only_for_the_apps_and_never_with_cookies(app, admin):
             headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
         )
         assert "access-control-allow-origin" not in evil.headers
+
+
+def test_admin_can_turn_app_access_off(app, admin, admin_client):
+    info = admin_client.get("/api/v1/admin/interfaces").json()
+    assert info["subsonic_available"] and APP in info["app_origins"]
+    assert info["model_download_available"] is False  # conftest switches it off
+    with TestClient(app) as bare:
+        auth = {"Authorization": f"Bearer {_app_login(bare).json()['token']}"}
+        assert admin_client.patch("/api/v1/admin/settings", json={"app_access": "off"}).status_code == 200
+        # tokens already handed out stop working, and no new ones are given
+        assert bare.get("/api/v1/auth/me", headers=auth).status_code == 403
+        assert _app_login(bare).status_code == 403
+        # the web UI (cookie) is not affected
+        assert admin_client.get("/api/v1/auth/me").status_code == 200
+        admin_client.patch("/api/v1/admin/settings", json={"app_access": "on"})
+        assert bare.get("/api/v1/auth/me", headers=auth).status_code == 200

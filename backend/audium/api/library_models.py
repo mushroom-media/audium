@@ -3,11 +3,24 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ReplayGain(BaseModel):
+    track_gain: float | None
+    track_peak: float | None
+    album_gain: float | None
+    album_peak: float | None
+
+
+class ArtistRef(BaseModel):
+    id: int
+    name: str
+
+
 class TrackOut(BaseModel):
     id: int
     title: str
-    artist: str
-    artist_id: int
+    artist: str = Field(description="All artists as one text")
+    artist_id: int = Field(description="The first main artist")
+    artists: list[ArtistRef] = Field(description="Main artists first, then guests")
     album: str
     album_id: int
     track_no: int | None
@@ -17,22 +30,10 @@ class TrackOut(BaseModel):
     codec: str | None
     bitrate: int | None
     cover: str | None = Field(description="Cover hash, see GET /covers/{hash}/{size}")
-
-
-class ArtistRef(BaseModel):
-    id: int
-    name: str
-
-
-class ReplayGain(BaseModel):
-    track_gain: float | None
-    track_peak: float | None
-    album_gain: float | None
-    album_peak: float | None
+    replaygain: ReplayGain | None = Field(None, description="From the tags; null when the file has none")
 
 
 class TrackDetail(TrackOut):
-    artists: list[ArtistRef]
     path: str = Field(description="Path relative to the library folder")
     root_id: int
     size: int
@@ -62,8 +63,17 @@ class AlbumOut(BaseModel):
     cover: str | None
 
 
+class DiscOut(BaseModel):
+    disc_no: int
+    title: str | None = Field(description='From the disc\'s folder: "CD2 - Bonus" -> "Bonus"; null for "CD2"')
+
+
 class AlbumDetail(AlbumOut):
+    cover_color: str | None = Field(
+        description='Main color of the cover ("#rrggbb"); null without a clear color or before the next scan'
+    )
     tracks: list[TrackOut]
+    discs: list[DiscOut] = Field(description="Only for albums with more than one disc")
 
 
 class ArtistOut(BaseModel):
@@ -71,7 +81,10 @@ class ArtistOut(BaseModel):
     name: str
     album_count: int
     track_count: int
-    cover: str | None
+    cover: str | None = Field(description="As the user wants artists shown (own picture, maybe album cover)")
+    fallback_cover: str | None = Field(
+        None, description="Own picture, else the newest album cover, whatever the user chose: for radios"
+    )
 
 
 class SearchOut(BaseModel):
@@ -159,3 +172,42 @@ class LibraryStats(BaseModel):
     missing_tracks: int
     duration_ms: int
     tag_status: dict[str, int]
+
+
+class GenreInfo(BaseModel):
+    name: str
+    detected: bool = Field(description="From the audio analysis, not the tags")
+    weight: float
+
+
+class StyleInfo(BaseModel):
+    name: str
+    parent: str
+    prob: float
+
+
+class AnalysisInfo(BaseModel):
+    status: Literal["ok", "failed"]
+    analyzed_at: int
+    sound: bool = Field(description="Sound fingerprints were computed (Discogs-EffNet)")
+    bpm: float | None
+    key: str | None = Field(description='In German, e.g. "a-Moll"')
+    loudness: float | None
+    energy: float | None
+    danceability: float | None
+    brightness: float | None
+    dynamics: float | None
+    mood_happy: float | None
+    mood_sad: float | None
+    mood_aggressive: float | None
+    mood_relaxed: float | None
+
+
+class TrackInfo(BaseModel):
+    track: TrackDetail
+    genres: list[GenreInfo]
+    styles: list[StyleInfo] = Field(description="Detected styles, most likely first")
+    analysis: AnalysisInfo | None
+    plays: int = Field(description="How often the viewer played it")
+    last_played: int | None
+    favorite: bool

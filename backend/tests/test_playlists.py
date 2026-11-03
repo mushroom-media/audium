@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import select, update
 
 from audium.api import events as events_module
-from audium.db.schema import playlist_items, tracks
+from audium.db.schema import play_history, playlist_items, tracks
 from audium.services import playlists as svc
 from tests.conftest import USER_PW, cover_bytes, create_user, login, tags
 
@@ -307,7 +307,7 @@ def test_cover_preset_upload_and_reset(world, library):
 
     pl = alice.put(url, json={"preset": 3}).json()
     assert (pl["cover_source"], pl["cover_preset"], pl["cover"]) == ("preset", 3, None)
-    assert alice.put(url, json={"preset": 21}).status_code == 422
+    assert alice.put(url, json={"preset": 26}).status_code == 422
     assert bob.put(url, json={"preset": 1}).status_code == 403  # editors may not
 
     r = alice.post(url, content=cover_bytes(), headers=upload)
@@ -438,6 +438,9 @@ def test_favorites_are_private(world):
     album_id = page["items"][0]["album_id"]
     alice.put(f"/api/v1/favorites/album/{album_id}")
     assert alice.get("/api/v1/favorites/album").json()["items"][0]["id"] == album_id
+    album_tracks = {tr["id"] for tr in alice.get(f"/api/v1/albums/{album_id}").json()["tracks"]}
+    assert set(alice.get("/api/v1/tracks/ids", params={"favorite_albums": 1}).json()) == album_tracks
+    assert bob.get("/api/v1/tracks/ids", params={"favorite_albums": 1}).json() == []
     alice.delete(f"/api/v1/favorites/track/{t[0]}")
     assert alice.get("/api/v1/favorites/track/ids").json()["ids"] == [t[2]]
 
@@ -475,6 +478,32 @@ def test_listening_stats(world, db):
     later = alice.get("/api/v1/stats", params={"since": 2**50}).json()
     assert later["plays"] == 0 and later["listening_ms"] == 0 and later["tracks"] == []
     assert bob.get("/api/v1/stats").json()["plays"] == 0
+
+
+def test_listening_time_is_what_really_sounded(world, db):
+    alice, bob = client_of(world, "alice"), client_of(world, "bob")
+    t = world["tracks"]
+    length = alice.get(f"/api/v1/tracks/{t[0]}").json()["duration_ms"]
+    assert length > 600  # the test tracks are about a second long
+    # reported, then skipped a little later: only what played counts, not the whole track
+    r = alice.post("/api/v1/history", json={"track_id": t[0], "played_ms": 300, "listened_ms": 300})
+    play = r.json()["id"]
+    assert alice.post(f"/api/v1/history/{play}/listened", json={"listened_ms": 500}).status_code == 200
+    # a late or repeated report never takes time away; nothing sounds longer than its track
+    alice.post(f"/api/v1/history/{play}/listened", json={"listened_ms": 400})
+    assert alice.get("/api/v1/stats").json()["listening_ms"] == 500
+    other = alice.post("/api/v1/history", json={"track_id": t[0], "played_ms": 1, "listened_ms": 1}).json()["id"]
+    alice.post(f"/api/v1/history/{other}/listened", json={"listened_ms": 86_000_000})
+    s = alice.get("/api/v1/stats").json()
+    assert s["plays"] == 2 and s["listening_ms"] == 500 + length
+    assert s["tracks"][0]["listening_ms"] == s["artists"][0]["listening_ms"] == 500 + length
+    # only your own plays; unknown ones are 404
+    assert bob.post(f"/api/v1/history/{play}/listened", json={"listened_ms": 1}).status_code == 404
+    assert alice.post("/api/v1/history/999999/listened", json={"listened_ms": 1}).status_code == 404
+    # plays without a measurement (older ones, Subsonic apps) count with the track's length
+    with db.write() as conn:
+        conn.execute(update(play_history).where(play_history.c.id == play).values(listened_ms=None))
+    assert alice.get("/api/v1/stats").json()["listening_ms"] == 2 * length
 
 
 def test_recently_played_shows_sources(world):

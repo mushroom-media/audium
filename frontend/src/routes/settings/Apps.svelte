@@ -70,9 +70,12 @@
 
 <p class="intro">
   Mit einer Subsonic-App wie <strong>Symfonium</strong> (Android), <strong>Amperfy</strong> (iPhone) oder <strong>Feishin</strong>
-  (Desktop) hörst du deine Bibliothek auch offline, im Auto (CarPlay, Android Auto) und mit Sperrbildschirm-Steuerung. Lege für
-  jede App ein eigenes Passwort an. Dein Login-Passwort funktioniert in Apps nicht, damit es nie in einer fremden App gespeichert wird.
+  (Desktop) hörst du deine Bibliothek auch offline.
 </p>
+
+{#if session.settings.subsonic_api === "off"}
+  <p class="intro warn">Die Subsonic-API ist auf diesem Server gerade abgeschaltet. Verbundene Apps werden abgewiesen, bis ein Admin sie unter „Schnittstellen“ wieder einschaltet.</p>
+{/if}
 
 <div class="top-actions">
   <button class="btn primary" onclick={() => (naming = true)}><Icon name="plus" size={16} /> App verbinden</button>
@@ -98,10 +101,7 @@
       </div>
     {/each}
   </div>
-  <p class="set-note">
-    Jede App mit Subsonic-Unterstützung funktioniert, Anleitungen für einige stehen in <span class="set-mono">docs/apps.md</span>. Smart
-    Playlists anlegen, Discover und den Rule-Editor gibt es nur hier im Browser.
-  </p>
+  <p class="set-note">Jede App mit Subsonic-Unterstützung funktioniert.</p>
 </section>
 
 {#if naming}
@@ -185,7 +185,8 @@
     font-size: 0.86rem;
     line-height: 1.45;
   }
-  .hint.warn {
+  .hint.warn,
+  .intro.warn {
     color: var(--danger);
   }
   .creds {

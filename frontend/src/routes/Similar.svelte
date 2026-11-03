@@ -1,41 +1,46 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { get, type Track } from "../lib/api";
   import Cover from "../lib/components/Cover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
-  import { startRadio } from "../lib/radio";
+  import { radioPath } from "../lib/radio";
   import { player } from "../lib/player.svelte";
+  import { keepScroll } from "../lib/keepScroll";
+  import { pageTitle } from "../lib/headerTitle.svelte";
+  import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
 
   let { id }: { id: string } = $props();
-  let seed = $state<Track | null>(null);
-  let tracks = $state<Track[] | null>(null);
+  const kept = untrack(() => recallEntry<{ seed: Track; tracks: Track[] }>(`similar:${id}`));
+  let seed = $state<Track | null>(kept?.seed ?? null);
+  let tracks = $state<Track[] | null>(kept?.tracks ?? null);
 
   $effect(() => {
     const ctrl = new AbortController();
-    tracks = null;
     Promise.all([
       get<Track>(`/tracks/${id}`, undefined, ctrl.signal),
       get<Track[]>(`/tracks/${id}/similar`, { limit: 50 }, ctrl.signal),
     ]).then(([t, s]) => {
       seed = t;
       tracks = s;
-    });
+      rememberEntry(`similar:${id}`, { seed: t, tracks: s });
+    }).catch(() => {});
     return () => ctrl.abort();
   });
 
   const similarSource = (t: Track) => ({ kind: "Ähnlich wie", name: t.title, path: `/tracks/${t.id}/similar` });
 </script>
 
-<div class="page">
+<div class="page" use:keepScroll>
   {#if seed}
     <header class="hero">
       <div class="art"><Cover hash={seed.cover} size={256} /></div>
       <div>
         <p class="kind">Ähnlich wie</p>
-        <h1>{seed.title}</h1>
+        <h1 use:pageTitle={seed.title}>{seed.title}</h1>
         <p class="by">{seed.artist}</p>
         <div class="actions">
-          <button class="btn primary" onclick={() => seed && startRadio(seed)}><Icon name="radio" size={18} /> Radio starten</button>
+          <button class="btn primary" onclick={() => seed && navigate(radioPath("track", seed.id))}><Icon name="radio" size={18} /> Zum Radio</button>
           <button class="btn" disabled={!tracks?.length} onclick={() => seed && tracks && player.playTracks([seed, ...tracks], 0, undefined, similarSource(seed))}>
             <Icon name="play" size={18} /> Alle abspielen
           </button>
@@ -48,7 +53,7 @@
   {:else if tracks}
     <div class="list">
       {#each tracks as t, i (t.id)}
-        <div class="row-h"><TrackRow track={t} number={i + 1} onplay={() => tracks && player.playTracks(tracks, i, undefined, seed && similarSource(seed))} /></div>
+        <div class="row-h"><TrackRow track={t} number={i + 1} note={t.reason} onplay={() => tracks && player.playTracks(tracks, i, undefined, seed && similarSource(seed))} /></div>
       {/each}
     </div>
   {/if}

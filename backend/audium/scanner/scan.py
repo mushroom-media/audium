@@ -18,6 +18,7 @@ because their (size, mtime) now match.
 
 import multiprocessing
 import os
+import posixpath
 from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -51,9 +52,17 @@ from audium.scanner.fallback import (
     album_dir_of,
     from_path,
     is_disc_dir,
+    split_disc,
+    split_year,
 )
-from audium.scanner.formats import ARTIST_IMAGE_EXTENSIONS, ARTIST_IMAGE_STEM, FOLDER_COVER_NAMES
-from audium.scanner.tags import TrackMeta, read_track
+from audium.scanner.formats import (
+    ARTIST_FOLDER_IMAGE_STEM,
+    ARTIST_IMAGE_EXTENSIONS,
+    ARTIST_IMAGE_STEM,
+    AUDIO_EXTENSIONS,
+    FOLDER_COVER_NAMES,
+)
+from audium.scanner.tags import TrackMeta, read_track, split_featured, unique_names
 from audium.scanner.walk import iter_dirs
 from audium.services.server_settings import server_setting
 from audium.util import norm, now_ms, sort_key
@@ -104,6 +113,16 @@ class Dir:
     files: list[Work]
     images: list[str]
     folder_cover: tuple[str, int, int] | None = None
+    album_dir: str | None = None  # the album folder: rel_dir itself, or the folder above a disc folder
+    disc_no: int | None = None  # of a disc folder, when its tracks have no disc number
+
+    def __post_init__(self) -> None:
+        if self.album_dir is None:
+            self.album_dir = album_dir_of(self.rel_dir)
+
+    @property
+    def is_disc(self) -> bool:
+        return self.album_dir != self.rel_dir
 
 
 def quick_hash(path: str, size: int) -> str:
@@ -171,9 +190,10 @@ _ARTIST_AGG = """
 
 
 def refresh_artists(conn: Connection, ids: set[int] | None = None) -> None:
-    """Counts and image of the artists (all with `ids` None). The image is the artist's own
-    picture, else, if the server setting allows it, the cover of the newest album."""
-    album_covers = int(server_setting(conn, "artist_album_covers") == "on")
+    """Counts and image of the artists (all with `ids` None). `cover_id` is the artist's own
+    picture, else the cover of the newest album; whether that fallback shows is decided per
+    viewer (services/view_prefs.py)."""
+    album_covers = 1
     if ids is None:
         conn.execute(text(_ARTIST_AGG), {"album_covers": album_covers})
         return
@@ -182,14 +202,38 @@ def refresh_artists(conn: Connection, ids: set[int] | None = None) -> None:
         conn.execute(stmt, {"ids": chunk, "album_covers": album_covers})
 
 
-def _artist_image(names: list[str]) -> str | None:
-    """artist.jpg / artist.png / ... among a folder's images (any case), best format first."""
+def _artist_image(names: list[str], stem_name: str = ARTIST_IMAGE_STEM) -> str | None:
+    """artist.jpg / artist.png / ... (or folder.jpg, ... with `stem_name`) among a folder's images
+    (any case), best format first."""
     by_ext = {}
     for n in names:
         stem, _, ext = n.rpartition(".")
-        if stem.lower() == ARTIST_IMAGE_STEM:
+        if stem.lower() == stem_name:
             by_ext.setdefault(ext.lower(), n)
     return next((by_ext[e] for e in ARTIST_IMAGE_EXTENSIONS if e in by_ext), None)
+
+
+def _album_dirs(title: str, track_dirs: set[str]) -> set[str]:
+    """The album folder(s) of an album's tracks: Album/ for Album/CD1/ and Album/Bonus/ (as
+    Scanner._disc_folder sees disc folders), else each folder on its own (the same album title by
+    one album artist in unrelated folders)."""
+    if len(track_dirs) > 1:
+        top = posixpath.commonpath(sorted(track_dirs))
+        subs = [posixpath.basename(d) for d in track_dirs if d != top]
+        if (
+            top
+            and all(posixpath.dirname(d) == top for d in track_dirs if d != top)
+            and (norm(title) in norm(posixpath.basename(top)) or all(is_disc_dir(s) is not None for s in subs))
+        ):
+            return {top}
+    return {album_dir_of(d) for d in track_dirs}
+
+
+def _has_audio(directory) -> bool:
+    try:
+        return any(e.is_file() and e.name.rpartition(".")[2].lower() in AUDIO_EXTENSIONS for e in os.scandir(directory))
+    except OSError:
+        return False
 
 
 def _chunks(items: list, n: int = _CHUNK) -> Iterable[list]:
@@ -217,6 +261,7 @@ class Scanner:
         self._cover_ids: dict[str, int] = {}
         self._genre_ids: dict[str, int] = {}
         self._root_paths: dict[int, str] = {}
+        self._disc_positions: dict[str, dict[str, int]] = {}  # album folder -> disc folder -> disc number
         self._estimate = 0
         self._pool: ThreadPoolExecutor | None = None
         self._readers: ProcessPoolExecutor | None = None
@@ -279,6 +324,7 @@ class Scanner:
         pending_files = 0
         files_in_root = 0
         artist_images: dict[str, str] = {}  # rel_dir -> artist image file name
+        folder_images: dict[str, str] = {}  # rel_dir -> folder.jpg (an artist image only in an artist folder)
 
         for rel_dir, files, images in iter_dirs(root_path, excludes):
             if self.ctx.should_stop():
@@ -287,6 +333,8 @@ class Scanner:
             self.stats.files_seen += len(files)
             if images and (name := _artist_image(images)):
                 artist_images[rel_dir] = name
+            if images and rel_dir and (name := _artist_image(images, ARTIST_FOLDER_IMAGE_STEM)):
+                folder_images[rel_dir] = name
             if not files:
                 continue
             existing = self._existing(root.id, rel_dir, files)
@@ -332,7 +380,7 @@ class Scanner:
                 .where(library_roots.c.id == root.id)
                 .values(status="online", status_message=None, last_scan_at=now_ms(), track_count=count)
             )
-        self._scan_artist_images(root.id, root_path, artist_images, force)
+        self._scan_artist_images(root.id, root_path, artist_images, folder_images, force)
 
     def _existing(self, root_id: int, rel_dir: str, files) -> dict:
         rels = [f"{rel_dir}/{n}" if rel_dir else n for n, _, _ in files]
@@ -409,8 +457,11 @@ class Scanner:
             if w.meta is not None:
                 w.meta.picture = None  # free memory before the batch is written
 
+        for d in dirs:
+            d.album_dir, d.disc_no = self._disc_folder(root_path, d)
+
         # Folder images (cover.jpg, ...): read in threads (I/O), render as one batch.
-        cover_dirs = [d for d in dirs if d.images or is_disc_dir(PurePosixPath(d.rel_dir).name) is not None]
+        cover_dirs = [d for d in dirs if d.images or d.is_disc]
         images = list(self._pool.map(lambda d: self._folder_image(root_path, d), cover_dirs))
         for d, cover in zip(cover_dirs, self.covers.ingest_many(images, self._map), strict=True):
             d.folder_cover = cover
@@ -418,13 +469,48 @@ class Scanner:
     def _folder_image(self, root_path: Path, d: Dir) -> bytes | None:
         directory = root_path / d.rel_dir if d.rel_dir else root_path
         data = self._read_folder_image(directory, d.images)
-        if data is None and d.rel_dir and is_disc_dir(PurePosixPath(d.rel_dir).name) is not None:
+        if data is None and d.is_disc:
             try:  # CD1/, Disc 2/: the cover usually sits in the album folder above
                 names = [e.name for e in os.scandir(directory.parent) if e.is_file()]
             except OSError:
                 names = []
             data = self._read_folder_image(directory.parent, names)
         return data
+
+    def _disc_folder(self, root_path: Path, d: Dir) -> tuple[str, int | None]:
+        """(album folder, disc number from the folder) of d. A disc folder is named like one
+        (CD1/, Disc 2 - Bonus/, 02/), or sits in a folder named after the album its tags give
+        (Album (2001)/Bonus/ with album "Album"); its album folder is the one above."""
+        p = PurePosixPath(d.rel_dir)
+        if not d.rel_dir or str(p.parent) == ".":
+            return d.rel_dir, None
+        if (n := is_disc_dir(p.name)) is not None:
+            return str(p.parent), n
+        tagged = {norm(split_disc(w.meta.album)[0]) for w in d.files if w.meta is not None and w.meta.album}
+        if len(tagged) != 1:
+            return d.rel_dir, None
+        album = tagged.pop()
+        if not album or norm(split_year(p.name)[0]) == album or album not in norm(p.parent.name):
+            return d.rel_dir, None
+        return str(p.parent), self._disc_position(root_path, str(p.parent), p.name)
+
+    def _disc_position(self, root_path: Path, album_dir: str, name: str) -> int | None:
+        """Disc number of a disc folder without one in its name: after the numbered ones (CD1/,
+        CD2/, then Bonus/), in name order; the album folder's own tracks count as disc 1."""
+        directory = root_path / album_dir
+        cached = self._disc_positions.get(str(directory))
+        if cached is None:
+            try:
+                entries = list(os.scandir(directory))
+            except OSError:
+                return None
+            numbered = [n for e in entries if e.is_dir() and (n := is_disc_dir(e.name)) is not None]
+            # only folders with audio of their own: Scans/ or Artwork/ are no discs
+            unnumbered = [e.name for e in entries if e.is_dir() and is_disc_dir(e.name) is None and _has_audio(e.path)]
+            first = max(numbered, default=1 if _has_audio(directory) else 0) + 1
+            cached = {n: first + i for i, n in enumerate(sorted(unnumbered, key=sort_key))}
+            self._disc_positions[str(directory)] = cached
+        return cached.get(name)
 
     @staticmethod
     def _read_folder_image(directory: Path, names: list[str]) -> bytes | None:
@@ -447,35 +533,60 @@ class Scanner:
 
     # --- artist images -------------------------------------------------------------------
 
-    def _scan_artist_images(self, root_id: int, root_path: Path, found: dict[str, str], force: bool) -> None:
+    def _scan_artist_images(
+        self, root_id: int, root_path: Path, found: dict[str, str], folder_found: dict[str, str], force: bool
+    ) -> None:
         """artist.jpg/.png after a complete walk of a root. It belongs to the album artist of the
         albums in the folders below (Artist/Album/), or, for flat layouts, sits in an album folder.
-        Artist folders hold no audio, so this cannot happen per batch. Files are read only when
-        new or changed; an image this root no longer has is dropped."""
+        Without one, a folder.jpg in the artist folder counts too if the server setting
+        artist_folder_images is on, but only in a folder without audio of its own that holds only
+        this artist's albums (not Rock/Album/). Artist folders hold no audio, so this cannot happen
+        per batch. Files are read only when new or changed; an image this root no longer has is
+        dropped."""
         album_dirs: dict[int, set[str]] = {}
+        # album id -> (album artist, title, folders of its tracks)
+        track_dirs: dict[int, tuple[int, str, set[str]]] = {}
         with self.db.read() as conn:
             for r in conn.execute(
-                select(albums.c.album_artist_id, tracks.c.rel_path)
+                select(tracks.c.album_id, albums.c.album_artist_id, albums.c.title, tracks.c.rel_path)
                 .join(albums, albums.c.id == tracks.c.album_id)
                 .where(tracks.c.root_id == root_id, tracks.c.missing_since.is_(None))
             ):
                 track_dir = str(PurePosixPath(r.rel_path).parent)
-                album_dir = album_dir_of("" if track_dir == "." else track_dir)
-                if album_dir:  # tracks right in the root have no artist folder
-                    album_dirs.setdefault(r.album_artist_id, set()).add(album_dir)
+                track_dirs.setdefault(r.album_id, (r.album_artist_id, r.title, set()))[2].add(
+                    "" if track_dir == "." else track_dir
+                )
+            for artist_id, title, dirs in track_dirs.values():
+                for album_dir in _album_dirs(title, dirs):
+                    if album_dir:  # tracks right in the root have no artist folder
+                        album_dirs.setdefault(artist_id, set()).add(album_dir)
             current = {
                 r.id: r.image_key
                 for r in conn.execute(select(artists.c.id, artists.c.image_key).where(artists.c.image_key.is_not(None)))
             }
+            use_folder_images = server_setting(conn, "artist_folder_images") == "on"
+        all_album_dirs = {d for dirs in album_dirs.values() for d in dirs}
+        owners: dict[str, set[int]] = {}  # artist folder -> album artists of the albums below
+        for artist_id, dirs in album_dirs.items():
+            for d in dirs:
+                owners.setdefault(str(PurePosixPath(d).parent), set()).add(artist_id)
         keys: dict[int, tuple[str, str]] = {}  # artist id -> (rel path, image key)
         for artist_id, dirs in album_dirs.items():
             parents = sorted({p for d in dirs if (p := str(PurePosixPath(d).parent)) != "."})
             folder = next((p for p in parents if p in found), None)
             if folder is None:
                 folder = next((d for d in sorted(dirs) if d in found), None)
-            if folder is None:
+            if folder is not None:
+                rel = f"{folder}/{found[folder]}"
+            elif use_folder_images and (
+                folder := next(
+                    (p for p in parents if p in folder_found and p not in all_album_dirs and owners[p] == {artist_id}),
+                    None,
+                )
+            ):
+                rel = f"{folder}/{folder_found[folder]}"
+            else:
                 continue
-            rel = f"{folder}/{found[folder]}"
             try:
                 st = (root_path / rel).stat()
             except OSError:
@@ -716,9 +827,19 @@ class Scanner:
         """Tags first, then the path for whatever is missing."""
         meta = w.meta
         pi = from_path(w.rel_path)
-        artists_list = meta.artists or ([pi.artist] if pi.artist else []) or [UNKNOWN_ARTIST]
-        title = meta.title or pi.title
-        album = meta.album or pi.album or UNKNOWN_ALBUM
+        featured = list(meta.featured_artists)
+        # Without tags the file and folder names can name guests too
+        artists_list = meta.artists
+        if not artists_list and pi.artist:
+            name, guests = split_featured(pi.artist)
+            artists_list, featured = [name], featured + guests
+        artists_list = artists_list or [UNKNOWN_ARTIST]
+        title = meta.title
+        if not title:
+            title, guests = split_featured(pi.title, title=True)
+            featured += guests
+        # "Album CD02" (tag or folder) is disc 2 of "Album"
+        album, tag_disc = split_disc(meta.album or pi.album or UNKNOWN_ALBUM)
         album_artist = meta.album_artists[0] if meta.album_artists else None
         if album_artist is None and meta.compilation:
             album_artist = VARIOUS_ARTISTS
@@ -727,7 +848,11 @@ class Scanner:
         elif album_artist:
             group_key = f"aa:{norm(album_artist)}\x1f{norm(album)}"
         else:
-            group_key = f"dir:{root_id}:{album_dir_of(d.rel_dir)}\x1f{norm(album)}"
+            # Artist/Album CD01/ and Artist/Album CD02/ are side by side: one album folder for both
+            folder = PurePosixPath(d.album_dir)
+            base, folder_disc = split_disc(folder.name)
+            album_dir = str(folder.with_name(base)) if d.album_dir and folder_disc is not None else d.album_dir
+            group_key = f"dir:{root_id}:{album_dir}\x1f{norm(album)}"
         if meta.error and not meta.has_tags:
             status = "error"
         elif not meta.has_tags:
@@ -739,13 +864,14 @@ class Scanner:
         return {
             "title": title,
             "artists": artists_list,
-            "featured": meta.featured_artists,
-            "artist_display": meta.artist_display or ", ".join(artists_list),
+            "featured": featured,
+            "artist_display": ", ".join(unique_names(artists_list + featured)),
             "album": album,
             "album_artist": album_artist,
             "group_key": group_key,
             "track_no": meta.track_no or pi.track_no,
-            "disc_no": meta.disc_no or pi.disc_no,
+            # a disc in the album name wins: discs ripped as albums of their own are often tagged 1/1
+            "disc_no": tag_disc or meta.disc_no or pi.disc_no or d.disc_no,
             "year": meta.year or pi.album_year,
             "compilation": meta.compilation or album_artist == VARIOUS_ARTISTS,
             "mb_release_id": meta.mb_release_id,
@@ -856,6 +982,21 @@ class Scanner:
 
     # --- end of a complete scan ----------------------------------------------------------
 
+    def _fill_cover_colors(self) -> None:
+        """The main color of every image that has none yet: determined once, from the thumbnail.
+        An interrupted run, or a library from before this existed, continues in the next scan."""
+        with self.db.read() as conn:
+            todo = conn.execute(select(covers.c.id, covers.c.hash).where(covers.c.color.is_(None))).all()
+        for chunk in _chunks(todo):
+            if self.ctx.should_stop():
+                return
+            found = [{"cover": c.id, "found": color} for c in chunk if (color := self.covers.color(c.hash)) is not None]
+            if found:
+                with self.db.write() as conn:
+                    conn.execute(
+                        update(covers).where(covers.c.id == bindparam("cover")).values(color=bindparam("found")), found
+                    )
+
     def finalize(self) -> None:
         """End of a complete scan: purge expired missing tracks, drop orphans, recompute counts."""
         grace_ms = self.settings.missing_grace_days * 86_400_000
@@ -927,6 +1068,7 @@ class Scanner:
         # Files only after the commit: a rolled-back transaction must not lose images.
         for c in orphan_covers:
             self.covers.delete(c.hash)
+        self._fill_cover_colors()
         if self.db.is_sqlite:
             # Refresh planner statistics after large changes (cheap, recommended by SQLite).
             with self.db.engine.connect() as conn:

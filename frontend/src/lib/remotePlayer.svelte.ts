@@ -111,7 +111,7 @@ export class RemotePlayer implements Controls {
   playTracks(tracks: Track[], start: number | null = 0, shuffle = this.queue.shuffle, source: QueueSource | null = null) {
     this.send("play_tracks", { tracks, start, shuffle, source });
   }
-  async playPool(query: TrackPool, startId: number | null = null, shuffle = this.queue.shuffle, source: QueueSource | null = null) {
+  async playPool(query: TrackPool, startId: number | null = null, shuffle = this.queue.shuffle, source: QueueSource | null = null, _first: Track | null = null) {
     this.send("play_pool", { query, start_id: startId, shuffle, source });
   }
   playRadio(tracks: Track[], source: QueueSource | null = null, start = 0) {
@@ -122,6 +122,9 @@ export class RemotePlayer implements Controls {
   }
   append(tracks: Track[]) {
     this.send("append", { tracks });
+  }
+  enqueue(tracks: Track[]) {
+    this.send("enqueue", { tracks });
   }
   jump(orderPos: number) {
     this.send("jump", { pos: this.offset() + orderPos });

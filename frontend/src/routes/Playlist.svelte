@@ -5,20 +5,22 @@
   import CoverPicker from "../lib/components/CoverPicker.svelte";
   import PlaylistCover from "../lib/components/PlaylistCover.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import { pageTitle } from "../lib/headerTitle.svelte";
+  import PlayToggle from "../lib/components/PlayToggle.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
   import VirtualList from "../lib/components/VirtualList.svelte";
   import { longDuration, plural } from "../lib/format";
   import { loadPlaylists, mine } from "../lib/mine.svelte";
-  import { PagedList } from "../lib/paged.svelte";
+  import { keptList } from "../lib/paged.svelte";
   import { player } from "../lib/player.svelte";
-  import { navigate } from "../lib/router.svelte";
+  import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { promptText, toast, ui } from "../lib/ui.svelte";
 
   let { id }: { id: string } = $props();
   const pid = $derived(Number(id));
   const PLAY_LIMIT = 2000;
 
-  let meta = $state<Playlist | null>(null);
+  let meta = $state<Playlist | null>(untrack(() => recallEntry<Playlist>(`playlist:${id}`)) ?? null);
   let error = $state<string | null>(null);
   let loadedVersion = $state(0);
   let reloads = $state(0);
@@ -27,7 +29,8 @@
 
   const list = $derived.by(() => {
     void reloads;
-    return new PagedList<PlaylistItem>(
+    return keptList<PlaylistItem>(
+      `playlist:${pid}:items`,
       (offset, limit, signal) =>
         get<{ items: PlaylistItem[]; total: number; version: number }>(
           `/playlists/${pid}/items`,
@@ -41,6 +44,7 @@
   async function loadMeta() {
     try {
       meta = await get<Playlist>(`/playlists/${pid}`);
+      rememberEntry(`playlist:${id}`, meta);
       loadedVersion = meta.version;
       error = null;
     } catch (e) {
@@ -195,14 +199,14 @@
           <p class="kind">
             {isSmart ? "Smart-Playlist" : "Playlist"}{#if meta!.visibility === "users"} · für alle sichtbar{/if}{#if meta!.role !== "owner"} · von {meta!.owner.display_name}{/if}
           </p>
-          <h1>{meta!.name}</h1>
+          <h1 use:pageTitle={meta!.name}>{meta!.name}</h1>
           {#if meta!.description}<p class="desc">{meta!.description}</p>{/if}
           <p class="by">
             {plural(meta!.item_count, "Titel", "Titel")}{#if meta!.duration_ms}, {longDuration(meta!.duration_ms)}{/if}
             {#if meta!.role === "editor"} · du kannst bearbeiten{:else if meta!.role === "viewer"} · nur ansehen{/if}
           </p>
           <div class="actions">
-            <button class="btn primary" disabled={!meta!.item_count} onclick={() => play(0, false)}><Icon name="play" size={18} /> Abspielen</button>
+            <PlayToggle ref="playlist:{pid}" disabled={!meta!.item_count} start={() => play(0, false)} />
             <button class="btn square" disabled={!meta!.item_count} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
             {#if isOwner}
               <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> Teilen</button>

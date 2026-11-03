@@ -76,6 +76,10 @@ class Settings(BaseSettings):
         return self.data_dir / "covers"
 
     @property
+    def vectors_dir(self) -> Path:
+        return self.data_dir / "vectors"
+
+    @property
     def secret_key_file(self) -> Path:
         return self.data_dir / "secret.key"
 

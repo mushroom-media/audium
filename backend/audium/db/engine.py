@@ -18,11 +18,12 @@ from contextlib import contextmanager
 from sqlalchemy import Connection, create_engine, event
 from sqlalchemy.engine import Engine
 
+_SQLITE_BUSY_TIMEOUT = "PRAGMA busy_timeout=15000"
 _SQLITE_PRAGMAS = (
     "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
     "PRAGMA foreign_keys=ON",
-    "PRAGMA busy_timeout=15000",
+    _SQLITE_BUSY_TIMEOUT,
     "PRAGMA temp_store=MEMORY",
     "PRAGMA cache_size=-32000",
     "PRAGMA mmap_size=268435456",
@@ -57,11 +58,12 @@ class Database:
             conn.exec_driver_sql("BEGIN IMMEDIATE" if conn.info.get("immediate") else "BEGIN")
 
     @contextmanager
-    def read(self) -> Iterator[Connection]:
+    def read(self, urgent: bool = False) -> Iterator[Connection]:
         """Consistent snapshot for reads. Keep it short: open readers delay WAL checkpoints.
-        Re-entrant within a thread, so a nested read never waits for its own gate."""
+        Re-entrant within a thread, so a nested read never waits for its own gate. `urgent` skips
+        the queue, for the few quick reads someone is waiting on (the start of a stream)."""
         depth = getattr(self._local, "depth", 0)
-        gated = self._read_gate is not None and depth == 0
+        gated = self._read_gate is not None and depth == 0 and not urgent
         if gated:
             self._read_gate.acquire()
         self._local.depth = depth + 1
@@ -74,16 +76,23 @@ class Database:
                 self._read_gate.release()
 
     @contextmanager
-    def write(self) -> Iterator[Connection]:
+    def write(self, busy_timeout_ms: int | None = None) -> Iterator[Connection]:
         """Write transaction, committed on success and rolled back on error. Not gated: a write
-        waiting for the database lock must not hold up readers."""
+        waiting for the database lock must not hold up readers. `busy_timeout_ms` (SQLite):
+        wait at most this long for the lock instead of the default 15 s, for writes that may
+        be skipped (they fail with OperationalError "database is locked" then)."""
         with self.engine.connect() as conn:
             conn.info["immediate"] = True
+            raw = conn.connection.dbapi_connection if self.is_sqlite and busy_timeout_ms is not None else None
+            if raw is not None:
+                raw.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
             try:
                 with conn.begin():
                     yield conn
             finally:
                 conn.info.pop("immediate", None)
+                if raw is not None:
+                    raw.execute(_SQLITE_BUSY_TIMEOUT)
 
     def dispose(self) -> None:
         self.engine.dispose()

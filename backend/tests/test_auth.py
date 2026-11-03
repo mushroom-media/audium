@@ -1,49 +1,78 @@
+import sqlite3
+import time
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select, update
 
 from audium.config import Settings
+from audium.db.schema import app_state, sessions
+from audium.db.state import get_state
 from audium.main import create_app
 from audium.services import auth as auth_service
 from tests.conftest import ADMIN_PW, USER_PW, create_user, login
 
-
-def _fresh_setup_token(db, settings) -> str:
-    with db.write() as conn:
-        return auth_service.bootstrap(conn, settings)
-
-
 # --- first-run setup -----------------------------------------------------------------------
 
 
-def test_setup_requires_token_and_creates_admin(client, db, settings):
-    assert client.get("/api/v1/setup").json() == {"needs_setup": True}
-    token = _fresh_setup_token(db, settings)
-    body = {"setup_token": "wrong", "username": "boss", "password": "long-password"}
-    assert client.post("/api/v1/setup", json=body).status_code == 403
+def test_setup_creates_admin_once(client):
+    assert client.get("/api/v1/setup").json() == {"needs_setup": True, "window_open": True, "dialog_pending": True}
+    body = {"username": "boss", "password": "long-password"}
 
-    r = client.post("/api/v1/setup", json={**body, "setup_token": token})
+    r = client.post("/api/v1/setup", json=body)
     assert r.status_code == 200, r.text
     assert r.json()["role"] == "admin"
     assert client.get("/api/v1/auth/me").json()["username"] == "boss"  # logged in via cookie
 
-    assert client.get("/api/v1/setup").json() == {"needs_setup": False}
-    assert client.post("/api/v1/setup", json={**body, "setup_token": token}).status_code == 409
+    # The dialog goes on after the account, the account cannot be created twice.
+    assert client.get("/api/v1/setup").json() == {"needs_setup": False, "window_open": False, "dialog_pending": True}
+    assert client.post("/api/v1/setup", json=body).status_code == 409
 
 
-def test_setup_token_attempts_are_rate_limited(client, db, settings):
-    token = _fresh_setup_token(db, settings)
-    body = {"setup_token": "nope", "username": "boss", "password": "long-password"}
-    for _ in range(settings.login_max_attempts):
-        assert client.post("/api/v1/setup", json=body).status_code == 403
-    r = client.post("/api/v1/setup", json={**body, "setup_token": token})
-    assert r.status_code == 429
-    assert int(r.headers["Retry-After"]) > 0
+def test_setup_closes_after_its_time(client, app):
+    app.state.setup_until = time.monotonic() - 1
+    assert client.get("/api/v1/setup").json()["window_open"] is False
+    r = client.post("/api/v1/setup", json={"username": "boss", "password": "long-password"})
+    assert r.status_code == 403
+    assert client.get("/api/v1/setup").json()["needs_setup"] is True  # nobody got the account
+
+
+def test_setup_wants_a_longer_password_for_the_admin(client):
+    r = client.post("/api/v1/setup", json={"username": "boss", "password": "short"})
+    assert r.status_code == 400
+    assert client.get("/api/v1/setup").json()["needs_setup"] is True
+
+
+def test_apps_are_told_to_set_up_the_server_first(client):
+    r = client.post("/api/v1/auth/app-login", json={"username": "boss", "password": "long-password"})
+    assert r.status_code == 409
+    assert r.json()["error"]["message"] == "this server is not set up yet"
 
 
 def test_admin_from_environment(tmp_path, db, settings):
     s = Settings(**{**settings.model_dump(), "admin_user": "envadmin", "admin_password": "env-password-1"})
     with TestClient(create_app(s, db), headers={"X-Requested-With": "t"}) as c:
-        assert c.get("/api/v1/setup").json() == {"needs_setup": False}
+        status = c.get("/api/v1/setup").json()
+        assert status["needs_setup"] is False
+        assert status["dialog_pending"] is True  # the dialog comes after the first login
         assert login(c, "envadmin", "env-password-1")["role"] == "admin"
+
+
+def test_installation_from_before_the_dialog_never_sees_it(db, settings):
+    create_user(db, "old", USER_PW, "admin")
+    with db.write() as conn:
+        conn.execute(app_state.insert().values(key="setup.token_hash", value="x", updated_at=0))
+        assert auth_service.bootstrap(conn, settings) is False
+        assert auth_service.setup_pending(conn) is False
+        assert get_state(conn, "setup.token_hash") is None
+
+
+def test_restart_in_the_middle_of_the_dialog_continues_it(db, settings):
+    with db.write() as conn:
+        assert auth_service.bootstrap(conn, settings) is True
+    create_user(db, "boss", USER_PW, "admin")
+    with db.write() as conn:
+        assert auth_service.bootstrap(conn, settings) is False  # the restart for a new music folder
+        assert auth_service.setup_pending(conn) is True
 
 
 # --- login, sessions, CSRF -----------------------------------------------------------------
@@ -59,6 +88,26 @@ def test_login_logout_and_me(client, admin):
     assert client.post("/api/v1/auth/logout").status_code == 200
     client.cookies.set("audium_session", cookie)  # replaying the old cookie must not work
     assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_session_renewal_is_skipped_while_the_database_is_busy(client, admin, db, settings):
+    # A long write elsewhere (scan, analysis) must not make requests wait 15 s and fail: the
+    # frontend took that for a logout.
+    login(client, "admin", ADMIN_PW)
+    with db.write() as conn:
+        conn.execute(update(sessions).values(last_seen_at=0))  # renewal due
+    lock = sqlite3.connect(settings.data_dir / "audium.db", isolation_level=None)
+    lock.execute("BEGIN IMMEDIATE")
+    try:
+        start = time.monotonic()
+        assert client.get("/api/v1/auth/me").status_code == 200
+        assert time.monotonic() - start < 5
+    finally:
+        lock.execute("ROLLBACK")
+        lock.close()
+    assert client.get("/api/v1/auth/me").status_code == 200  # renewed now
+    with db.read() as conn:
+        assert conn.execute(select(sessions.c.last_seen_at)).scalar_one() > 0
 
 
 def test_session_cookie_flags(client, admin):
@@ -269,11 +318,41 @@ def test_user_settings_are_per_user(make_client, admin, db):
     a, b = make_client(), make_client()
     login(a, "admin", ADMIN_PW)
     login(b, "bob", USER_PW)
-    defaults = {"theme": "system", "stream_quality": "auto", "shortcuts": "on"}
+    defaults = {
+        "theme": "system",
+        "stream_quality": "auto",
+        "shortcuts": "on",
+        "replay_gain": "off",
+        "crossfade": "off",
+        "crossfade_s": 5,
+        "backdrop_motion": 50,
+        "library_tab": "last",
+        "track_sort": "title",
+        "album_sort": "title",
+        "artist_role": "album",
+        "artist_images": "server",
+        "artist_images_default": "on",
+        "subsonic_api": "on",
+    }
     assert a.get("/api/v1/auth/me/settings").json() == defaults
     r = a.patch("/api/v1/auth/me/settings", json={"theme": "light"})
     assert r.json() == {**defaults, "theme": "light"}
-    a.patch("/api/v1/auth/me/settings", json={"stream_quality": "low", "shortcuts": "off"})
-    assert a.get("/api/v1/auth/me/settings").json() == {"theme": "light", "stream_quality": "low", "shortcuts": "off"}
+    changes = {
+        "stream_quality": "low",
+        "shortcuts": "off",
+        "replay_gain": "album",
+        "library_tab": "artists",
+        "album_sort": "year",
+        "crossfade": "on",
+        "crossfade_s": 8,
+        "backdrop_motion": 0,
+    }
+    a.patch("/api/v1/auth/me/settings", json=changes)
+    assert a.get("/api/v1/auth/me/settings").json() == {**defaults, "theme": "light", **changes}
     assert b.get("/api/v1/auth/me/settings").json()["theme"] == "system"
     assert a.patch("/api/v1/auth/me/settings", json={"theme": "pink"}).status_code == 422
+    assert a.patch("/api/v1/auth/me/settings", json={"crossfade_s": 13}).status_code == 422
+    assert (
+        a.patch("/api/v1/auth/me/settings", json={"artist_images_default": "off"}).json()["artist_images_default"]
+        == "on"
+    )

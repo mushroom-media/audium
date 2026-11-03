@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from audium.logging import get_logger
@@ -10,12 +11,22 @@ log = get_logger(__name__)
 FileEntry = tuple[str, int, int]  # name, size, mtime_ns
 
 
+@dataclass
+class WalkReport:
+    """What a walk passes over, for those who ask (the trial scan of the first-run dialog)."""
+
+    other_files: int = 0
+    unreadable: list[str] = field(default_factory=list)  # relative paths; "" is the root itself
+
+
 def _ext(name: str) -> str:
     _, _, ext = name.rpartition(".")
     return ext.lower()
 
 
-def iter_dirs(root: Path, excludes: set[str]) -> Iterator[tuple[str, list[FileEntry], list[str]]]:
+def iter_dirs(
+    root: Path, excludes: set[str], report: WalkReport | None = None
+) -> Iterator[tuple[str, list[FileEntry], list[str]]]:
     """Yield (rel_dir, audio files, image names) per directory, depth-first in name order.
 
     Follows symlinks but never visits the same directory twice (loops, bind mounts).
@@ -36,6 +47,8 @@ def iter_dirs(root: Path, excludes: set[str]) -> Iterator[tuple[str, list[FileEn
                 entries = list(it)
         except OSError as exc:
             log.warning("scan.dir_unreadable", path=str(path), error=str(exc))
+            if report is not None:
+                report.unreadable.append(rel)
             continue
         files: list[FileEntry] = []
         images: list[str] = []
@@ -62,6 +75,8 @@ def iter_dirs(root: Path, excludes: set[str]) -> Iterator[tuple[str, list[FileEn
                         files.append((name, st.st_size, st.st_mtime_ns))
                     elif ext in IMAGE_EXTENSIONS:
                         images.append(name)
+                    elif report is not None:
+                        report.other_files += 1
             except OSError:
                 continue
         subdirs.sort(reverse=True)  # stack pops the alphabetically first one next

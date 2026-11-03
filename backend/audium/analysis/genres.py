@@ -7,6 +7,7 @@ resolved by mutagen), "Electronica", "Drum & Bass", "Indie Rock". Rules:
 - known aliases map to a canonical name; unknown genres keep their own name, title-cased
 """
 
+import functools
 import re
 import unicodedata
 
@@ -105,3 +106,89 @@ def normalize(raw_values: list[str] | str | None) -> list[str]:
 
 def slug(name: str) -> str:
     return fold(name)
+
+
+# --- families: the broad genres on the Discover page -------------------------------------------
+#
+# A second level above the genres: "Rock" there covers Rock, Alternative, Indie, Punk, ... Genres
+# not listed are placed by words in their name ("Post-Punk" -> Rock, "Folk Metal" -> Metal),
+# checked in order, so the more telling word wins ("Folk Metal" is Metal, "Folk Rock" is Rock).
+
+FAMILIES = (
+    "Rock",
+    "Metal",
+    "Pop",
+    "Hip-Hop",
+    "Electronic",
+    "R&B & Soul",
+    "Jazz",
+    "Blues",
+    "Folk & Country",
+    "Reggae",
+    "Latin & World",
+    "Klassik",
+    "Soundtrack",
+    "Schlager",
+)
+
+_FAMILY_OF: dict[str, str | None] = {
+    **dict.fromkeys(("Rock", "Alternative", "Indie", "Hard Rock", "Punk", "Deutschrock"), "Rock"),
+    "Metal": "Metal",
+    **dict.fromkeys(("Pop", "Disco"), "Pop"),
+    **dict.fromkeys(("Hip-Hop", "Deutschrap"), "Hip-Hop"),
+    **dict.fromkeys(("Electronic", "House", "Techno", "Trance", "Drum & Bass", "Dubstep", "Ambient"), "Electronic"),
+    **dict.fromkeys(("R&B", "Soul", "Funk", "Gospel"), "R&B & Soul"),
+    "Jazz": "Jazz",
+    "Blues": "Blues",
+    **dict.fromkeys(("Folk", "Country"), "Folk & Country"),
+    "Reggae": "Reggae",
+    **dict.fromkeys(("Latin", "World"), "Latin & World"),
+    "Classical": "Klassik",
+    "Soundtrack": "Soundtrack",
+    "Schlager": "Schlager",
+    **dict.fromkeys(("Children's", "Audiobook", "Podcast"), None),
+}
+
+# (words, family): the first entry with a word in the genre name decides.
+_FAMILY_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("metal", "metalcore", "deathcore", "grindcore", "doom", "sludge", "djent"), "Metal"),
+    (("trip hop", "triphop", "synthwave", "electropop", "idm", "breakbeat", "garage", "jungle"), "Electronic"),
+    (("rock", "punk", "grunge", "shoegaze", "emo", "post hardcore", "stoner", "britpop", "new wave"), "Rock"),
+    (("hip hop", "hiphop", "rap", "trap", "grime", "drill"), "Hip-Hop"),
+    (("reggae", "ska", "dub", "dancehall", "rocksteady"), "Reggae"),
+    (
+        ("house", "techno", "trance", "electro", "edm", "dubstep", "drum", "bass", "ambient", "downtempo", "dance"),
+        "Electronic",
+    ),
+    (("jazz", "swing", "bebop", "bop", "big band"), "Jazz"),
+    (("blues",), "Blues"),
+    (("soul", "funk", "r&b", "rnb", "gospel", "motown"), "R&B & Soul"),
+    (
+        ("latin", "salsa", "bossa", "samba", "tango", "cumbia", "reggaeton", "flamenco", "world", "afro", "fado"),
+        "Latin & World",
+    ),
+    (("folk", "country", "bluegrass", "americana", "singer", "acoustic"), "Folk & Country"),
+    (("classical", "baroque", "opera", "symphon", "orchestr", "chamber", "romantic era", "choral"), "Klassik"),
+    (("soundtrack", "score", "film", "musical"), "Soundtrack"),
+    (("schlager", "volksmusik"), "Schlager"),
+    (("pop", "synthpop", "disco", "chanson", "schlager pop"), "Pop"),
+)
+
+
+@functools.lru_cache(maxsize=8192)  # pure, and the Discover page asks for every genre each time
+def family(genre: str) -> str | None:
+    """The broad genre ("Rock") a genre ("Post-Punk") belongs to, or None (spoken word, unknown)."""
+    if genre in _FAMILY_OF:
+        return _FAMILY_OF[genre]
+    name = " ".join(re.split(r"[\s/,\-]+", genre.casefold()))
+    words = set(re.split(r"[\s&]+", name))
+    for keys, fam in _FAMILY_WORDS:
+        for key in keys:
+            # Phrases ("hip hop", "r&b") anywhere; words whole, longer ones also as a prefix
+            # ("symphonic", "electronica"); short ones not ("dub" is no "dubstep").
+            if not key.isalnum():
+                if key in name:
+                    return fam
+            elif key in words or (len(key) > 4 and any(w.startswith(key) for w in words)):
+                return fam
+    return None

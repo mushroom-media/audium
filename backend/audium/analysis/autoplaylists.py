@@ -1,6 +1,8 @@
 """Generates auto-playlist suggestions and re-evaluates smart playlists.
 
 Kinds (`generator`):
+- family:  per broad genre ("Rock" = Rock, Alternative, Punk, ...; see genres.family), the
+           genre tiles of the Discover page
 - tag:     per genre, per decade, the biggest genre x decade combinations ("Rock der 90er") and
            per detected style with enough tracks ("Deep House")
 - rule:    built-in rules over audio features ("Workout", "Zum Entspannen", ...)
@@ -11,7 +13,8 @@ Kinds (`generator`):
 The admin picks the source (state key SOURCE_STATE): "all" makes tag, rule, style and cluster
 playlists; "sound" only what the sound recognition found (detected styles and sound mixes).
 
-New playlists start as "suggested" (only the admin sees them) until the admin publishes them.
+New playlists start as "suggested" (only the admin sees them) until the admin publishes them;
+genre and family playlists are published at once (Discover lists them under "Alle Genres").
 Existing ones keep status, access and an admin-given name; only their tracks are refreshed.
 A "dismissed" playlist is never recreated.
 """
@@ -23,9 +26,11 @@ from collections import Counter
 import numpy as np
 from sqlalchemy import Connection, delete, func, insert, select, update
 
-from audium.analysis import explain, rules
+from audium.analysis import explain, rules, sources
+from audium.analysis import genres as genre_norm
 from audium.analysis.similarity import embedding_matrix, feature_matrix
 from audium.analysis.styles import MIN_STYLE_PROB
+from audium.db.engine import Database
 from audium.db.schema import (
     auto_playlist_items,
     auto_playlists,
@@ -46,6 +51,7 @@ from audium.util import now_ms
 log = get_logger(__name__)
 
 MAX_ITEMS = 300
+STORE_BATCH = 20  # playlists per write transaction in generate_in
 MIN_GENRE_TRACKS = 30
 MIN_DECADE_TRACKS = 30
 MIN_COMBO_TRACKS = 25
@@ -168,6 +174,51 @@ def _with_reasons(conn: Connection, ids: list[int], fields: tuple[str, ...] | No
     return [(t, explain.describe(rows[t], fields) if t in rows else fixed) for t in ids]
 
 
+def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
+    """One playlist per broad genre with enough tracks; each track's reason is its own genre.
+    `detected_only`: only genres the sound recognition found (source "sound")."""
+    members: dict[str, dict[int, str]] = {}
+    for g in conn.execute(select(genres.c.id, genres.c.name)):
+        fam = genre_norm.family(g.name)
+        if fam:
+            members.setdefault(fam, {})[g.id] = g.name
+    specs = []
+    for fam in genre_norm.FAMILIES:
+        ids = members.get(fam)
+        if not ids:
+            continue
+        key = f"family:{genre_norm.slug(fam)}"
+        where = [track_genres.c.genre_id.in_(list(ids)), _present()]
+        if detected_only:
+            where.append(track_genres.c.source == "detected")
+        base = select(tracks.c.id, track_genres.c.genre_id).join(track_genres, track_genres.c.track_id == tracks.c.id)
+        total = conn.execute(
+            select(func.count(func.distinct(tracks.c.id)))
+            .select_from(tracks.join(track_genres, track_genres.c.track_id == tracks.c.id))
+            .where(*where)
+        ).scalar_one()
+        if total < MIN_GENRE_TRACKS:
+            continue
+        picked: dict[int, str] = {}  # a track with two genres of the family counts once
+        for track_id, genre_id in conn.execute(base.where(*where).order_by(rules.shuffle_key(seed_of(key)))):
+            picked.setdefault(track_id, ids[genre_id])
+            if len(picked) >= MAX_ITEMS:
+                break
+        names = sorted(set(ids.values()), key=lambda n: (n != fam, n))
+        more = "" if len(names) <= 5 else " und mehr"
+        specs.append(
+            {
+                "key": key,
+                "generator": "sound" if detected_only else "family",
+                "name": fam,
+                "description": f"{', '.join(names[:5])}{more}.",
+                "items": list(picked.items()),
+                "status": "published",
+            }
+        )
+    return specs
+
+
 def _tag_specs(conn: Connection) -> list[dict]:
     specs = []
     genre_rows = conn.execute(
@@ -190,6 +241,7 @@ def _tag_specs(conn: Connection) -> list[dict]:
                 "name": g.name,
                 "description": f"Alles aus dem Genre {g.name}.",
                 "items": [(t, g.name) for t in ids],
+                "status": "published",
             }
         )
 
@@ -491,15 +543,16 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
     existing = conn.execute(select(auto_playlists).where(auto_playlists.c.key == spec["key"])).first()
     if existing is not None and existing.status == "dismissed":
         return "skipped"
+    status = spec.get("status", "suggested")
     items = spec["items"][:MAX_ITEMS]
+    durations = {
+        r.id: r.duration_ms
+        for r in conn.execute(select(tracks.c.id, tracks.c.duration_ms).where(tracks.c.id.in_([t for t, _ in items])))
+    }
+    # generate_in computes the specs before it writes: a track may have been deleted meanwhile.
+    items = [(t, reason) for t, reason in items if t in durations]
     track_ids = [t for t, _ in items]
-    stats = (
-        conn.execute(
-            select(func.count(), func.coalesce(func.sum(tracks.c.duration_ms), 0)).where(tracks.c.id.in_(track_ids))
-        ).one()
-        if track_ids
-        else (0, 0)
-    )
+    stats = (len(track_ids), sum(durations[t] or 0 for t in track_ids))
     cover = (
         conn.execute(
             select(covers.c.hash).join(tracks, tracks.c.cover_id == covers.c.id).where(tracks.c.id == track_ids[0])
@@ -507,8 +560,18 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
         if track_ids
         else None
     )
+    detected = (
+        conn.execute(
+            select(func.count(func.distinct(track_genres.c.track_id))).where(
+                track_genres.c.track_id.in_(track_ids), track_genres.c.source == "detected"
+            )
+        ).scalar_one()
+        if spec["key"].startswith(("genre:", "genre-decade:"))
+        else None
+    )
     values = {
         "generator": spec["generator"],
+        "detected_tracks": detected,
         "description": spec.get("description"),
         "rule_json": json.dumps(spec["rule"]) if spec.get("rule") else None,
         "track_count": stats[0],
@@ -520,7 +583,7 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
     if existing is None:
         playlist_id = conn.execute(
             insert(auto_playlists).values(
-                key=spec["key"], name=spec["name"], status="suggested", access="all", created_at=ts, **values
+                key=spec["key"], name=spec["name"], status=status, access="all", created_at=ts, **values
             )
         ).inserted_primary_key[0]
         outcome = "created"
@@ -528,6 +591,8 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
         playlist_id = existing.id
         if not existing.name_locked:
             values["name"] = spec["name"]
+        if status == "published" and existing.status == "suggested":
+            values["status"] = "published"  # genre playlists from before they were published at once
         conn.execute(update(auto_playlists).where(auto_playlists.c.id == playlist_id).values(**values))
         conn.execute(delete(auto_playlist_items).where(auto_playlist_items.c.auto_playlist_id == playlist_id))
         outcome = "updated"
@@ -542,9 +607,8 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
     return outcome
 
 
-def generate(conn: Connection) -> dict:
-    """Recompute all auto-playlists. Runs in the analysis worker after scans and analysis."""
-    ts = now_ms()
+def _specs(conn: Connection) -> tuple[str, int, list[dict]]:
+    """What the auto-playlists should contain now (only reads): (source, analyzed tracks, specs)."""
     analyzed = conn.execute(
         select(func.count()).select_from(track_features).where(track_features.c.status == "ok")
     ).scalar_one()
@@ -555,31 +619,85 @@ def generate(conn: Connection) -> dict:
         > 0
     )
     src = source(conn)
+    # The radio sources' switches (analysis/sources.py) also decide which mixes there are.
+    radio_sources = sources.load(conn)
+    analyzed_for_mixes = analyzed if radio_sources["features"].on else 0  # 0: no mixes, see _cluster_specs
     if src == "sound":
         # Without genre playlists a style may share a genre's name ("House"), so none is left out.
-        specs = [*_style_specs(conn, set()), *_sound_cluster_specs(conn), *_custom_specs(conn)]
-    else:
         specs = [
-            *_tag_specs(conn),
-            *_rule_specs(conn, analyzed, mood_columns),
-            *_cluster_specs(conn, analyzed),
+            *_family_specs(conn, detected_only=True),
+            *_style_specs(conn, set()),
+            *(_sound_cluster_specs(conn) if radio_sources["sound"].on else []),
             *_custom_specs(conn),
         ]
-    produced = {s["key"] for s in specs}
-    stats = {"created": 0, "updated": 0, "skipped": 0, "removed": 0}
-    for spec in specs:
-        stats[_store(conn, spec, ts)] += 1
-    # Suggestions that no longer qualify disappear; published ones stay (with their last tracks).
+    else:
+        specs = [
+            *_family_specs(conn, detected_only=False),
+            *_tag_specs(conn),
+            *_rule_specs(conn, analyzed, mood_columns),
+            *_cluster_specs(conn, analyzed_for_mixes),
+            *_custom_specs(conn),
+        ]
+    return src, analyzed, specs
+
+
+def _remove_gone(conn: Connection, produced: set[str]) -> int:
+    """Suggestions that no longer qualify disappear; published ones stay (with their last tracks),
+    except genre playlists: nobody chose to publish them, so they come and go with their genre."""
+    automatic = auto_playlists.c.key.startswith("genre:") | auto_playlists.c.key.startswith("family:")
     gone = conn.execute(
         select(auto_playlists.c.id, auto_playlists.c.key).where(
-            auto_playlists.c.status == "suggested", auto_playlists.c.generator != "custom"
+            (auto_playlists.c.status == "suggested") | ((auto_playlists.c.status == "published") & automatic),
+            auto_playlists.c.generator != "custom",
         )
     ).all()
+    removed = 0
     for row in gone:
         if row.key not in produced:
             conn.execute(delete(auto_playlists).where(auto_playlists.c.id == row.id))
-            stats["removed"] += 1
+            removed += 1
+    return removed
+
+
+def generate(conn: Connection) -> dict:
+    """Recompute all auto-playlists in one transaction (the worker uses generate_in)."""
+    ts = now_ms()
+    src, analyzed, specs = _specs(conn)
+    stats = {"created": 0, "updated": 0, "skipped": 0}
+    for spec in specs:
+        stats[_store(conn, spec, ts)] += 1
+    stats["removed"] = _remove_gone(conn, {s["key"] for s in specs})
     stats["smart"] = refresh_smart_playlists(conn)
+    log.info("autoplaylists.generated", source=src, analyzed=analyzed, **stats)
+    return stats
+
+
+def generate_in(db: Database) -> dict:
+    """Recompute all auto-playlists. Runs in the analysis worker after scans and analysis.
+    Computes in a read snapshot and writes in short transactions: with a big library the
+    computation takes a while, and holding the write lock that long made requests that write
+    (session renewal, play history, ...) wait and then fail with "database is locked"."""
+    with db.read() as conn:
+        src, analyzed, specs = _specs(conn)
+        smart = []
+        for row in conn.execute(select(playlists.c.id, playlists.c.rule_json).where(playlists.c.kind == "smart")):
+            try:
+                smart.append((row.id, evaluate_smart(conn, row.id, row.rule_json)))
+            except Exception:
+                log.exception("autoplaylists.smart_failed", playlist_id=row.id)
+    ts = now_ms()
+    stats = {"created": 0, "updated": 0, "skipped": 0, "smart": 0}
+    for i in range(0, len(specs), STORE_BATCH):
+        with db.write() as conn:
+            for spec in specs[i : i + STORE_BATCH]:
+                stats[_store(conn, spec, ts)] += 1
+    with db.write() as conn:
+        stats["removed"] = _remove_gone(conn, {s["key"] for s in specs})
+    for playlist_id, track_ids in smart:
+        with db.write() as conn:
+            present = set(conn.execute(select(tracks.c.id).where(tracks.c.id.in_(track_ids))).scalars())
+            if store_smart_items(conn, playlist_id, [t for t in track_ids if t in present]):
+                stats["smart"] += 1
     log.info("autoplaylists.generated", source=src, analyzed=analyzed, **stats)
     return stats
 

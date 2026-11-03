@@ -1,8 +1,13 @@
 <script lang="ts">
+  import { tick } from "svelte";
+  import type { Track } from "../api";
   import { devices, others } from "../devices.svelte";
   import { duration } from "../format";
   import { player } from "../player.svelte";
+  import * as Q from "../queue";
   import { href } from "../router.svelte";
+  import { resist, swipe } from "../swipe";
+  import ArtistLinks from "./ArtistLinks.svelte";
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
@@ -17,10 +22,81 @@
   // Phones: the whole left part of the bar opens "Jetzt läuft", not just cover and title (the
   // heart keeps working). On wider screens the cover links to the album and the artist to the artist.
   const phone = typeof matchMedia === "function" ? matchMedia("(max-width: 720px)") : null;
+  const reducedMotion = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  let isPhone = $state(!!phone?.matches);
+  $effect(() => {
+    const update = () => (isPhone = !!phone?.matches);
+    phone?.addEventListener("change", update);
+    return () => phone?.removeEventListener("change", update);
+  });
   function tapNow(e: MouseEvent) {
-    if (!track || !phone?.matches || (e.target as Element).closest(".heart")) return;
+    if (!track || !phone?.matches) return;
     e.preventDefault();
     openNowPlaying();
+  }
+
+  // --- swiping cover and title: the next or previous track comes in, the buttons stay ---------
+
+  // Skips once dragged this share of the width, or flicked this fast (px/ms) over at least FLICK_MIN_PX.
+  const SKIP_SHARE = 0.3;
+  const SKIP_VELOCITY = 0.45;
+  const FLICK_MIN_PX = 20;
+  const SLIDE_GAP_PX = 16;
+
+  /** Current track and, on phones, its neighbours lying ready left and right. Keyed by place in
+   * the queue, so after a swipe the track that came in stays the same element, cover included. */
+  const slides = $derived.by(() => {
+    if (!track) return [];
+    const q = player.queue;
+    const out: { track: Track; key: string; offset: number }[] = [{ track, key: `${q.pos}`, offset: 0 }];
+    if (!isPhone) return out;
+    const n = Q.next(q, false);
+    const nextTrack = n && n.pos !== q.pos ? Q.current(n) : null;
+    if (nextTrack) out.push({ track: nextTrack, key: `${n!.pos}`, offset: 1 });
+    const p = Q.prev(q);
+    const prevTrack = p.pos !== q.pos ? Q.current(p) : null;
+    if (prevTrack) out.push({ track: prevTrack, key: nextTrack && n!.pos === p.pos ? `prev${p.pos}` : `${p.pos}`, offset: -1 });
+    return out;
+  });
+  let strip = $state<HTMLElement>();
+  let busy = false; // the swipe's animation is running
+  const canSkip = (dx: number) => slides.some((s) => s.offset === (dx < 0 ? 1 : -1));
+
+  const slideSwipe = {
+    enabled: () => !!phone?.matches && !busy && !!track,
+    onmove(dx: number) {
+      if (strip) strip.style.transform = `translateX(${canSkip(dx) ? dx : resist(dx, strip.offsetWidth, 0.15)}px)`;
+    },
+    onend: release,
+  };
+
+  async function release(dx: number, velocity: number, cancelled: boolean) {
+    if (!strip) return;
+    const w = strip.offsetWidth;
+    const shown = canSkip(dx) ? dx : resist(dx, w, 0.15);
+    const flicked = Math.abs(velocity) > SKIP_VELOCITY && Math.sign(velocity) === Math.sign(dx) && Math.abs(dx) > FLICK_MIN_PX;
+    const reduced = !!reducedMotion?.matches;
+    const from = `translateX(${shown}px)`;
+    busy = true;
+    if (!cancelled && canSkip(dx) && (Math.abs(dx) > w * SKIP_SHARE || flicked)) {
+      const out = Math.sign(dx) * (w + SLIDE_GAP_PX);
+      const to = `translateX(${out}px)`;
+      strip.style.transform = to;
+      if (!reduced) {
+        const duration = Math.min(240, Math.max(110, Math.abs(out - dx) / Math.max(Math.abs(velocity), 1.2)));
+        await strip.animate([{ transform: from }, { transform: to }], { duration, easing: "cubic-bezier(0.25, 0.6, 0.35, 1)" }).finished.catch(() => {});
+      }
+      if (dx < 0) player.next();
+      else player.prev({ restart: false });
+      await tick();
+      strip.style.transform = "";
+    } else {
+      strip.style.transform = "";
+      await strip
+        .animate([{ transform: from }, { transform: "none" }], { duration: reduced ? 80 : 240, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" })
+        .finished.catch(() => {});
+    }
+    busy = false;
   }
 </script>
 
@@ -43,13 +119,21 @@
       dragging = null;
     }}
   />
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (cover and title are the keyboard targets) -->
-  <div class="now" onclickcapture={tapNow}>
+  <div class="now">
     {#if track}
-      <a class="art" href={href(`/albums/${track.album_id}`)} title={track.album} aria-label="Album {track.album} öffnen"><Cover hash={track.cover} size={64} /></a>
-      <div class="meta">
-        <button class="title" title={track.title} onclick={openNowPlaying}>{track.title}</button>
-        <a class="artist" href={href(`/artists/${track.artist_id}`)}>{track.artist}</a>
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (cover and title are the keyboard targets) -->
+      <div class="slides" use:swipe={slideSwipe} onclickcapture={tapNow}>
+        <div class="strip" bind:this={strip}>
+          {#each slides as s (s.key)}
+            <div class="slide" style:--offset={s.offset} inert={s.offset !== 0}>
+              <a class="art" href={href(`/albums/${s.track.album_id}`)} title={s.track.album} aria-label="Album {s.track.album} öffnen"><Cover hash={s.track.cover} size={64} /></a>
+              <div class="meta">
+                <button class="title" title={s.track.title} onclick={openNowPlaying}>{s.track.title}</button>
+                <div class="artist"><ArtistLinks track={s.track} /></div>
+              </div>
+            </div>
+          {/each}
+        </div>
       </div>
       <Heart {track} />
     {:else}
@@ -134,6 +218,14 @@
     gap: 12px;
     min-width: 0;
   }
+  .slides,
+  .strip,
+  .slide {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
   .art {
     display: block;
     width: 52px;
@@ -170,9 +262,6 @@
     display: block;
     width: fit-content;
     max-width: 100%;
-  }
-  .artist:hover {
-    color: var(--text);
   }
   .controls {
     display: flex;
@@ -265,7 +354,24 @@
       width: 44px;
     }
     .now {
+      align-self: stretch;
       cursor: pointer;
+    }
+    .slides {
+      position: relative;
+      flex: 1;
+      align-self: stretch;
+      overflow: hidden;
+      touch-action: pan-y;
+    }
+    .strip {
+      position: absolute;
+      inset: 0;
+    }
+    .slide {
+      position: absolute;
+      inset: 0;
+      transform: translateX(calc(var(--offset) * (100% + 16px)));
     }
     .meta {
       flex: 1;

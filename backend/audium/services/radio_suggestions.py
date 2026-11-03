@@ -9,18 +9,21 @@ short reason. The picks:
 - recently favorited tracks.
 
 Which of the strong candidates make it changes once a day (seeded per user and day), so the
-row does not look the same every visit, but stays put within a day.
+row does not look the same every visit, but stays put within a day. That makes it safe to keep the
+result (SuggestionCache): working it out reads 10,000 history entries on every visit of the home page.
 """
 
 import math
 import random
+import threading
 import time
 from collections import defaultdict
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, func, select
 
 from audium.db.pagination import fetch_ordered
 from audium.db.schema import albums, artists, favorites, play_history, tracks
+from audium.db.state import LIBRARY_GENERATION, get_state
 from audium.services.library import album_select, artist_select, track_select
 from audium.services.users import User
 from audium.util import now_ms
@@ -33,6 +36,9 @@ MIN_RECENT_PLAYS = 2
 SCAN = 10_000  # history entries looked at (the history keeps this many per user)
 # Slots per kind; leftovers go to more artists played lately.
 SLOTS = {"recent": 3, "album": 1, "rediscover": 2, "favorite": 2}
+_CACHE_FULL_S = 3600
+_CACHE_SHORT_S = 60
+_CACHE_ENTRIES = 256
 
 
 def _weighted_pick(rng: random.Random, scored: list[tuple[int, float]], k: int) -> list[int]:
@@ -128,6 +134,35 @@ def suggestions(conn: Connection, user: User, limit: int = 8, now: int | None = 
     return _describe(conn, picked[:limit])
 
 
+class SuggestionCache:
+    """Keeps a user's suggestions for the day, at most an hour. A row that is not full yet (someone
+    who just started listening) follows every new play, so it fills up while they listen. A library
+    change starts over, because the picks may be gone."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: dict[tuple, tuple[float, int | None, list[dict]]] = {}
+
+    def get(self, conn: Connection, user: User, limit: int) -> list[dict]:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        key = (user.id, limit, day, get_state(conn, LIBRARY_GENERATION))
+        last_play = conn.execute(
+            select(func.max(play_history.c.played_at)).where(play_history.c.user_id == user.id)
+        ).scalar()
+        now = time.monotonic()
+        with self._lock:
+            hit = self._data.get(key)
+        if hit and now < hit[0] and (len(hit[2]) >= limit or hit[1] == last_play):
+            return hit[2]
+        result = suggestions(conn, user, limit)
+        ttl = _CACHE_FULL_S if len(result) >= limit else _CACHE_SHORT_S
+        with self._lock:
+            if len(self._data) >= _CACHE_ENTRIES:
+                self._data.clear()
+            self._data[key] = (now + ttl, last_play, result)
+        return result
+
+
 def _describe(conn: Connection, picked: list[tuple[str, int, str]]) -> list[dict]:
     """The picks as "recently played" style entries (RecentOut), dropping ones that are gone."""
     by_kind: dict[str, list[int]] = defaultdict(list)
@@ -135,7 +170,8 @@ def _describe(conn: Connection, picked: list[tuple[str, int, str]]) -> list[dict
         by_kind[kind].append(item_id)
     found = {
         "artist": {
-            r.id: (r.name, r.cover) for r in fetch_ordered(conn, artist_select(), artists.c.id, by_kind["artist"])
+            r.id: (r.name, r.fallback_cover)  # a station always gets a picture, whatever the artist setting
+            for r in fetch_ordered(conn, artist_select(), artists.c.id, by_kind["artist"])
         },
         "album": {r.id: (r.title, r.cover) for r in fetch_ordered(conn, album_select(), albums.c.id, by_kind["album"])},
         "track": {r.id: (r.title, r.cover) for r in fetch_ordered(conn, track_select(), tracks.c.id, by_kind["track"])},

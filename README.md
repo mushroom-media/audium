@@ -8,14 +8,13 @@ Self-hosted music streaming for your own library: one Docker container, built fo
 
 ```bash
 git clone <repository-url> audium && cd audium
-cp .env.example .env    # set AUDIUM_MUSIC_PATH (port: AUDIUM_HOST_PORT, default 8091)
+cp .env.example .env    # optional: AUDIUM_MUSIC_PATH (default: ./music), AUDIUM_HOST_PORT (default: 8091)
 docker compose up -d --build
-docker compose logs audium | grep setup_token
 ```
 
-Open `http://<server>:8091`, enter the setup token from the log and create your admin account. audium scans your music in the background; you can browse and listen while it runs.
+Open `http://<server>:8091` within 30 minutes. A short dialog creates your admin account, checks that audium sees your music and shows what it found, and asks what audium may do. It then scans your music in the background; you can browse and listen while it runs.
 
-Prefer to skip the token? Set `AUDIUM_ADMIN_USER` and `AUDIUM_ADMIN_PASSWORD` for the first start.
+**Reachable from the internet right away?** Whoever opens a new instance first becomes its admin. Switch on port forwarding only after the setup, or set `AUDIUM_ADMIN_USER` and `AUDIUM_ADMIN_PASSWORD` for the first start.
 
 ## Your music, read-only
 
@@ -35,7 +34,7 @@ Each folder directly below `/music` becomes a library folder. If a network share
 - **Formats:** MP3, FLAC, Ogg Vorbis, Opus, AAC/M4A, ALAC, WMA, WAV, AIFF, APE, WavPack, Musepack, DSD and more. Broken or untagged files never stop a scan; missing tags are filled from the folder structure (`Artist/Album (Year)/01 - Title.ext`).
 - **Incremental scanner:** unchanged files cost one `stat()`; moved files keep their identity; scans run in the background, show progress, and can be cancelled and resumed.
 - **Covers:** extracted once (embedded or `cover.jpg`/`folder.jpg`), cached as WebP in 64/256/600 px.
-- **Artist images:** `artist.jpg` or `artist.png` in the artist folder (`Artist/artist.jpg` next to `Artist/Album/`), or in the album folder for flat layouts; otherwise the newest album's cover.
+- **Artist images:** `artist.jpg` or `artist.png` in the artist folder (`Artist/artist.jpg` next to `Artist/Album/`), or in the album folder for flat layouts; without one, a `folder.jpg` in the artist folder (can be turned off by admins); otherwise the newest album's cover.
 - **Fast API at scale:** paginated lists, full-text prefix search, OpenAPI docs at `/api/docs`.
 - **Accounts:** first user is admin, invites, argon2id passwords, login rate limiting, API tokens.
 - **Streaming:** original files with HTTP Range (instant seeking, little RAM); formats the browser cannot play (WMA, APE, ...) are transcoded on the fly with ffmpeg to Opus/AAC/MP3. Lower streaming quality per user for slow connections.

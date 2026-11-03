@@ -117,5 +117,6 @@ export function runCommand({ action, args }: { action: string; args: Args }) {
     case "play_radio": return p.playRadio(tracksOf(args.tracks), sourceOf(args.source), num(args.start));
     case "play_next": return p.playNext(tracksOf(args.tracks));
     case "append": return p.append(tracksOf(args.tracks));
+    case "enqueue": return p.enqueue(tracksOf(args.tracks));
   }
 }

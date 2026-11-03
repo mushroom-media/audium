@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Depends, Request, Response
 
 from audium.api.deps import (
@@ -36,11 +38,12 @@ from audium.api.models import (
 from audium.auth.media import MEDIA_TTL_MS, make_media_token
 from audium.config import Settings
 from audium.db.engine import Database
-from audium.errors import Forbidden, Unauthorized
+from audium.errors import Conflict, Forbidden, Unauthorized
 from audium.services import app_passwords
 from audium.services import auth as auth_service
 from audium.services import settings as settings_service
 from audium.services import users as user_service
+from audium.services.server_settings import server_setting
 from audium.services.users import User
 from audium.util import now_ms
 
@@ -51,13 +54,22 @@ def _user_out(u: User) -> UserOut:
     return UserOut(**u.__dict__)
 
 
+def _setup_window_open(request: Request) -> bool:
+    return time.monotonic() < request.app.state.setup_until
+
+
 @router.get("/setup", response_model=SetupStatus)
-def setup_status(db: Database = Depends(get_db)):
+def setup_status(request: Request, db: Database = Depends(get_db)):
     with db.read() as conn:
-        return SetupStatus(needs_setup=auth_service.needs_setup(conn))
+        needs = auth_service.needs_setup(conn)
+        return SetupStatus(
+            needs_setup=needs,
+            window_open=needs and _setup_window_open(request),
+            dialog_pending=auth_service.setup_pending(conn),
+        )
 
 
-@router.post("/setup", response_model=UserOut, summary="Create the first admin (needs the setup token)")
+@router.post("/setup", response_model=UserOut, summary="Create the first admin (for a while after the server started)")
 def setup(
     body: SetupIn,
     request: Request,
@@ -66,19 +78,16 @@ def setup(
     settings: Settings = Depends(get_settings),
 ):
     with db.write() as conn:
-        result = auth_service.complete_setup(
+        user, session = auth_service.complete_setup(
             conn,
             settings,
-            body.setup_token,
             body.username,
             body.password,
             body.display_name,
             client_ip(request),
             request.headers.get("user-agent"),
+            _setup_window_open(request),
         )
-    if result is None:
-        raise Forbidden("invalid setup token")
-    user, session = result
     set_session_cookie(response, request, settings, session.token)
     return _user_out(user)
 
@@ -116,6 +125,10 @@ def app_login(
     body: AppLoginIn, request: Request, db: Database = Depends(get_db), settings: Settings = Depends(get_settings)
 ):
     with db.write() as conn:
+        if auth_service.needs_setup(conn):
+            raise Conflict("this server is not set up yet")
+        if server_setting(conn, "app_access") != "on":
+            raise Forbidden("app access is turned off on this server")
         result = auth_service.app_login(conn, settings, body.username, body.password, client_ip(request), body.device)
     if result is None:
         raise Unauthorized("invalid username or password")
@@ -267,13 +280,21 @@ def register(
     return _user_out(user)
 
 
+def _settings_out(conn, settings: dict) -> dict:
+    return {
+        **settings,
+        "artist_images_default": server_setting(conn, "artist_album_covers"),
+        "subsonic_api": server_setting(conn, "subsonic_api"),
+    }
+
+
 @router.get("/auth/me/settings", response_model=UserSettings)
 def my_settings(user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.read() as conn:
-        return settings_service.get_settings(conn, user.id)
+        return _settings_out(conn, settings_service.get_settings(conn, user.id))
 
 
 @router.patch("/auth/me/settings", response_model=UserSettings)
 def update_my_settings(body: UserSettingsUpdate, user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.write() as conn:
-        return settings_service.update_settings(conn, user.id, body.model_dump(exclude_none=True))
+        return _settings_out(conn, settings_service.update_settings(conn, user.id, body.model_dump(exclude_none=True)))

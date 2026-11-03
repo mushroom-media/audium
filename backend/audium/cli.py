@@ -46,6 +46,11 @@ def cmd_serve(_args) -> int:
     """Migrate, then run API and workers under the supervisor (the container's main command)."""
     settings = _setup("supervisor")
     _check_data_dir(settings)
+    from audium.startup import StartupPage
+
+    # Answer on the port right away ("audium is starting"), before the slow imports and migrations.
+    startup = StartupPage(settings.host, settings.port, settings.base_path) if os.name == "posix" else None
+
     from audium.db.engine import Database
     from audium.db.migrate import migrate
     from audium.jobs.queue import reset_running
@@ -56,13 +61,29 @@ def cmd_serve(_args) -> int:
     with db.write() as conn:
         reset_running(conn)
     db.dispose()
-    return Supervisor(default_children()).run()
+    return Supervisor(default_children(), startup).run()
 
 
 def cmd_api(_args) -> int:
+    import socket
+
     import uvicorn
 
     from audium.main import create_app
+    from audium.startup import LISTEN_FD_ENV, READY_FD_ENV
+
+    # Started by `serve`: the listening socket belongs to the supervisor (see audium.startup).
+    listen_fd = os.environ.pop(LISTEN_FD_ENV, None)
+    ready_fd = os.environ.pop(READY_FD_ENV, None)
+    sockets = [socket.socket(fileno=int(listen_fd))] if listen_fd else None
+
+    class Server(uvicorn.Server):
+        async def startup(self, sockets=None) -> None:
+            await super().startup(sockets=sockets)
+            if ready_fd is not None:  # tell the startup page that the API serves now
+                if not self.should_exit:
+                    os.write(int(ready_fd), b"1")
+                os.close(int(ready_fd))
 
     settings = _setup("api")
     config = uvicorn.Config(
@@ -76,7 +97,7 @@ def cmd_api(_args) -> int:
         timeout_graceful_shutdown=5,
         server_header=False,
     )
-    uvicorn.Server(config).run()
+    Server(config).run(sockets=sockets)
     return 0
 
 
@@ -89,6 +110,9 @@ def cmd_worker(args) -> int:
     if args.queue == "scan":
         from audium.scanner.tasks import ScanScheduler, make_handlers
 
+        # A full scan takes every core: playback goes first, but it should still finish soon.
+        if hasattr(os, "nice"):
+            os.nice(10)
         worker = Worker(db, "scan", make_handlers(db, settings), on_idle=ScanScheduler(db, settings))
     elif args.queue == "analysis":
         from audium.analysis.tasks import AnalysisScheduler

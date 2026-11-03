@@ -20,7 +20,7 @@
   <div class="set-card">
     <label class="set-row">
       <span class="set-label"><strong>Tastenkürzel verwenden</strong><small>Gelten nicht, während du in ein Textfeld tippst.</small></span>
-      <input type="checkbox" checked={on} onchange={(e) => saveSettings({ shortcuts: e.currentTarget.checked ? "on" : "off" })} />
+      <input type="checkbox" class="toggle" checked={on} onchange={(e) => saveSettings({ shortcuts: e.currentTarget.checked ? "on" : "off" })} />
     </label>
   </div>
 </section>

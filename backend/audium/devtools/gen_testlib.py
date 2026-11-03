@@ -284,7 +284,6 @@ def generate_db(settings, n_tracks: int, seed: int = 42) -> None:
         for t in a.tracks:
             meta = TrackMeta(
                 title=t.title,
-                artist_display=t.artist,
                 artists=[t.artist],
                 album_artists=[a.album_artist],
                 album=a.title,

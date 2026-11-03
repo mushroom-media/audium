@@ -5,6 +5,7 @@
   import { toast, ui } from "../ui.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
+  import TrackInfo from "./TrackInfo.svelte";
   import TrackMenu from "./TrackMenu.svelte";
 
   let promptValue = $state("");
@@ -65,6 +66,7 @@
 </script>
 
 <TrackMenu />
+{#if ui.info}<TrackInfo trackId={ui.info.trackId} onclose={() => (ui.info = null)} />{/if}
 
 {#if ui.prompt}
   <Modal title={ui.prompt.title} onclose={() => answer(null)}>

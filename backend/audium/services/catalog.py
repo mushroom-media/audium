@@ -25,6 +25,7 @@ from audium.db.schema import (
     track_genres,
     tracks,
 )
+from audium.services.library import artist_cover_column
 from audium.util import norm
 
 _album_artist = artists.alias("album_artist")
@@ -139,7 +140,7 @@ def artist_select():
             artists.c.track_count,
             _artist_cover.c.hash.label("cover"),
         )
-        .outerjoin(_artist_cover, _artist_cover.c.id == artists.c.cover_id)
+        .outerjoin(_artist_cover, _artist_cover.c.id == artist_cover_column())
         .where((artists.c.track_count > 0) | (artists.c.album_count > 0))
     )
 

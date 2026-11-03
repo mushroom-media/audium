@@ -21,6 +21,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
 )
 
 metadata = MetaData(
@@ -72,6 +73,7 @@ covers = Table(
     Column("source", Text, nullable=False),  # embedded | folder | artist | upload (playlist covers)
     Column("width", Integer),
     Column("height", Integer),
+    Column("color", Text),  # main color "#rrggbb", "" = none (black and white), NULL = not determined yet
     Column("created_at", BigInteger, nullable=False),
 )
 
@@ -134,7 +136,7 @@ tracks = Table(
     Column("duration_ms", Integer, nullable=False, default=0),
     Column("title", Text, nullable=False),
     Column("title_sort", Text, nullable=False),
-    Column("artist_name", Text, nullable=False),  # display string as tagged
+    Column("artist_name", Text, nullable=False),  # display string: "Main, Guest"
     Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),  # primary artist
     Column("album_id", Integer, ForeignKey("albums.id"), nullable=False),
     Column("track_no", Integer),
@@ -387,6 +389,9 @@ play_history = Table(
     Column("context", Text),
     # The app that played it, for plays reported through the Subsonic API (migration 0007).
     Column("client", Text),
+    # The time it really sounded: no pauses, buffering or skipped parts (migration 0013). NULL:
+    # not measured (older plays, Subsonic apps); the statistics count the track's length then.
+    Column("listened_ms", Integer),
     Index(None, "user_id", "played_at"),
     Index(None, "track_id"),
 )
@@ -493,6 +498,7 @@ auto_playlists = Table(
     Column("generated_at", BigInteger),
     Column("created_at", BigInteger, nullable=False),
     Column("updated_at", BigInteger, nullable=False),
+    Column("detected_tracks", Integer),  # genre playlists: tracks in there by a detected genre
     Index(None, "status"),
 )
 
@@ -543,4 +549,41 @@ play_queue = Table(
     Column("position_ms", BigInteger, nullable=False, default=0),
     Column("changed_by", Text),
     Column("updated_at", BigInteger, nullable=False),
+)
+
+# Artists whose fans also listen to an artist, from ListenBrainz (services/similar_artists.py),
+# only pairs where both are in the library. `score`: 0..1, 1 = the closest one of that artist.
+artist_similar = Table(
+    "artist_similar",
+    metadata,
+    Column("artist_id", Integer, ForeignKey("artists.id", ondelete="CASCADE"), nullable=False),
+    Column("similar_id", Integer, ForeignKey("artists.id", ondelete="CASCADE"), nullable=False),
+    Column("score", Float, nullable=False),
+    PrimaryKeyConstraint("artist_id", "similar_id"),
+)
+
+# When an artist was last asked for; `mbid` as used (from the tags or looked up by name).
+artist_similar_status = Table(
+    "artist_similar_status",
+    metadata,
+    Column("artist_id", Integer, ForeignKey("artists.id", ondelete="CASCADE"), primary_key=True),
+    Column("mbid", Text),
+    Column("status", Text, nullable=False),  # ok | no_mbid | error
+    Column("fetched_at", BigInteger, nullable=False),
+)
+
+# Tracks a user skipped early in a radio station (analysis/taste.py): they rank lower in later
+# stations like that one. `station`: "track:3", "album:5" or "artist:2". Kept 180 days.
+# `disliked`: marked "Mag ich nicht", which also keeps it out of that station altogether.
+radio_skips = Table(
+    "radio_skips",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("track_id", Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False),
+    Column("station", Text, nullable=False),
+    Column("skipped_at", BigInteger, nullable=False),
+    Column("disliked", Boolean, nullable=False, default=False, server_default=false()),
+    Index(None, "user_id", "track_id"),
+    Index(None, "skipped_at"),
 )

@@ -3,16 +3,23 @@
   // Phones: /settings is the list, /settings/<page> the page with a back button.
   import type { Component } from "svelte";
   import Icon, { type IconName } from "../lib/components/Icon.svelte";
+  import { keepScroll } from "../lib/keepScroll";
+  import { pageTitle } from "../lib/headerTitle.svelte";
   import { href } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import Account from "./settings/Account.svelte";
   import Analysis from "./settings/Analysis.svelte";
   import Appearance from "./settings/Appearance.svelte";
   import Apps from "./settings/Apps.svelte";
+  import AutoPlaylists from "./settings/AutoPlaylists.svelte";
+  import Devices from "./settings/Devices.svelte";
+  import Interfaces from "./settings/Interfaces.svelte";
   import Jobs from "./settings/Jobs.svelte";
   import Library from "./settings/Library.svelte";
   import LibraryOptions from "./settings/LibraryOptions.svelte";
   import Playback from "./settings/Playback.svelte";
+  import RadioSources from "./settings/RadioSources.svelte";
+  import Reset from "./settings/Reset.svelte";
   import Shortcuts from "./settings/Shortcuts.svelte";
   import Users from "./settings/Users.svelte";
 
@@ -27,16 +34,21 @@
     component: Component;
   }
   const PAGES: PageDef[] = [
-    { id: "playback", title: "Wiedergabe", short: "Streaming-Qualität", icon: "play", component: Playback },
-    { id: "appearance", title: "Darstellung", short: "Farbschema", icon: "palette", component: Appearance },
+    { id: "playback", title: "Wiedergabe", short: "Qualität, Überblenden, Lautstärke", icon: "play", component: Playback },
+    { id: "library-options", title: "Bibliothek", short: "Sortierung, Künstlerbilder", icon: "album", component: LibraryOptions },
+    { id: "appearance", title: "Darstellung", short: "Farbschema, Hintergrund", icon: "palette", component: Appearance },
     { id: "shortcuts", title: "Tastenkürzel", short: "Steuerung per Tastatur", icon: "keyboard", component: Shortcuts },
+    { id: "devices", title: "Geräte", short: "Name dieses Geräts", icon: "devices", component: Devices },
     { id: "account", title: "Konto", short: "Profil, Abmelden", icon: "user", component: Account },
     { id: "apps", title: "Apps verbinden", short: "Symfonium, Amperfy & Co.", icon: "phone", component: Apps },
-    { id: "library-options", title: "Bibliothek", short: "Künstlerbilder", icon: "album", admin: true, component: LibraryOptions },
     { id: "library", title: "Musikordner", short: "Ordner, Scan, Statistik", icon: "folder", admin: true, component: Library },
     { id: "analysis", title: "Audioanalyse", short: "Fortschritt, Klangerkennung", icon: "wave", admin: true, component: Analysis },
+    { id: "autoplaylists", title: "Auto-Playlists", short: "Vorschläge für Entdecken", icon: "compass", admin: true, component: AutoPlaylists },
+    { id: "radio", title: "Radio & Mixe", short: "Quellen und Gewichtung", icon: "radio", admin: true, component: RadioSources },
+    { id: "interfaces", title: "Schnittstellen", short: "Subsonic, Apps, ListenBrainz", icon: "plug", admin: true, component: Interfaces },
     { id: "users", title: "Nutzer", short: "Konten, Einladungen", icon: "users", admin: true, component: Users },
     { id: "jobs", title: "Hintergrundjobs", short: "Scans, Analysen, Playlists", icon: "jobs", admin: true, component: Jobs },
+    { id: "reset", title: "Zurücksetzen", short: "Werkseinstellungen, neu einrichten", icon: "trash", admin: true, component: Reset },
   ];
 
   const isAdmin = $derived(session.user?.role === "admin");
@@ -48,7 +60,7 @@
   const page = $derived(visible.find((p) => p.id === section) ?? visible[0]);
 </script>
 
-<div class="page settings" class:has-section={!!section}>
+<div class="page settings" class:has-section={!!section} use:keepScroll>
   <nav class="index" aria-label="Einstellungen">
     <div class="toolbar"><h1>Einstellungen</h1></div>
     {#each groups as g (g.title)}
@@ -70,7 +82,7 @@
   </nav>
 
   <div class="body">
-    <div class="toolbar"><h1>{page.title}</h1></div>
+    <div class="toolbar"><h1 use:pageTitle={page.title}>{page.title}</h1></div>
     <div class="content">
       {#key page.id}<page.component />{/key}
     </div>

@@ -5,15 +5,20 @@ import time
 
 import numpy as np
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
-from audium.analysis import autoplaylists, explain, features, models, rules, similarity, styles
+from audium.analysis import autoplaylists, explain, features, models, rules, similarity, sources, styles, taste
 from audium.analysis import tasks as analysis_tasks
 from audium.analysis.genres import normalize
 from audium.analysis.tasks import analysis_stats, make_handlers
 from audium.db.schema import (
+    artist_similar,
+    artists,
     auto_playlists,
+    favorites,
     genres,
+    play_history,
+    radio_skips,
     track_artists,
     track_embeddings,
     track_features,
@@ -27,6 +32,8 @@ from audium.devtools.gen_testlib import generate_db
 from audium.errors import BadRequest
 from audium.jobs import queue as jobq
 from audium.jobs.worker import Worker
+from audium.services import auth as auth_service
+from audium.services import similar_artists
 from audium.util import now_ms
 from tests.conftest import ADMIN_PW, USER_PW, create_user, login, tags
 
@@ -207,8 +214,9 @@ def test_analysis_can_be_interrupted_and_resumed(audio_library, db, settings):
 
     from audium.analysis import tasks as analysis_tasks
 
-    monkey_batch = analysis_tasks._BATCH
-    analysis_tasks._BATCH = 1
+    monkey_batch = analysis_tasks._BATCH_PER_WORKER
+    analysis_tasks._BATCH_PER_WORKER = 1
+    settings.analysis_workers = 1
     try:
         analysis_tasks.run_analysis(Stop(), db, settings)
         with db.read() as conn:
@@ -222,7 +230,7 @@ def test_analysis_can_be_interrupted_and_resumed(audio_library, db, settings):
         with db.read() as conn:
             assert analysis_stats(conn)["pending"] == 0
     finally:
-        analysis_tasks._BATCH = monkey_batch
+        analysis_tasks._BATCH_PER_WORKER = monkey_batch
 
 
 def test_analysis_without_essentia_is_a_clean_no_op(audio_library, db, settings, monkeypatch):
@@ -279,9 +287,10 @@ def test_generation_creates_all_kinds_as_suggestions(analysed, db):
         stats = autoplaylists.generate(conn)
         rows = conn.execute(select(auto_playlists)).all()
     kinds = {r.generator for r in rows}
-    assert {"tag", "rule", "cluster"} <= kinds
+    assert {"family", "tag", "rule", "cluster"} <= kinds
     assert stats["created"] == len(rows)
-    assert all(r.status == "suggested" for r in rows)
+    # Genre and broad-genre playlists are published at once, everything else waits for the admin.
+    assert all(r.status == ("published" if r.key.startswith(("genre:", "family:")) else "suggested") for r in rows)
     names = {r.name for r in rows}
     assert {"Workout", "Zum Entspannen", "Party"} <= names
     assert any(n.startswith("Die ") and n.endswith("er") for n in names)  # decades
@@ -299,6 +308,39 @@ def test_generation_creates_all_kinds_as_suggestions(analysed, db):
         ).all()
     assert items and all(118 <= i.bpm <= 160 and i.energy >= 0.65 for i in items)
     assert all("BPM" in i.reason for i in items)
+
+
+def test_worker_generation_writes_in_short_transactions(analysed, db, monkeypatch):
+    # The worker computes everything first and then stores in small batches, so other writers
+    # (session renewal, play history) never wait behind it for long. A track deleted between
+    # both is left out instead of failing the run.
+    gone = analysed[0]
+    compute = autoplaylists._specs
+
+    def specs_then_delete(conn):
+        out = compute(conn)
+        with db.write() as w:
+            w.execute(delete(tracks).where(tracks.c.id == gone))
+        return out
+
+    monkeypatch.setattr(autoplaylists, "_specs", specs_then_delete)
+    writes = 0
+    write = db.write
+
+    def counting_write(*args, **kwargs):
+        nonlocal writes
+        writes += 1
+        return write(*args, **kwargs)
+
+    monkeypatch.setattr(db, "write", counting_write)
+    stats = autoplaylists.generate_in(db)
+    with db.read() as conn:
+        rows = conn.execute(select(auto_playlists)).all()
+        items = set(conn.execute(select(autoplaylists.auto_playlist_items.c.track_id)).scalars())
+    assert stats["created"] == len(rows) > autoplaylists.STORE_BATCH
+    assert writes >= 1 + len(rows) // autoplaylists.STORE_BATCH  # the delete above, then batches
+    assert items and gone not in items
+    assert {"family", "tag", "rule", "cluster"} <= {r.generator for r in rows}
 
 
 def test_regeneration_keeps_admin_decisions(analysed, db):
@@ -344,19 +386,23 @@ def test_visibility_of_auto_playlists(analysed, db, users):
     admin_c, bob_c, carol_c = users["admin"][1], users["bob"][1], users["carol"][1]
     with db.write() as conn:
         autoplaylists.generate(conn)
-    suggestions = admin_c.get("/api/v1/autoplaylists").json()
+    genre_kinds = ("genre:", "family:")
+    suggestions = [a for a in admin_c.get("/api/v1/autoplaylists").json() if not a["key"].startswith(genre_kinds)]
     assert suggestions and all(a["status"] == "suggested" for a in suggestions)
-    assert bob_c.get("/api/v1/autoplaylists").json() == []  # nothing published yet
+    # Only the genre playlists are published yet.
+    assert all(a["key"].startswith(genre_kinds) for a in bob_c.get("/api/v1/autoplaylists").json())
     workout = next(a for a in suggestions if a["key"] == "rule:workout")
     assert bob_c.get(f"/api/v1/autoplaylists/{workout['id']}").status_code == 404
     assert bob_c.patch(f"/api/v1/admin/autoplaylists/{workout['id']}", json={"status": "published"}).status_code == 403
 
     admin_c.patch(f"/api/v1/admin/autoplaylists/{workout['id']}", json={"status": "published"})
-    listed = bob_c.get("/api/v1/autoplaylists").json()
+    listed = [a for a in bob_c.get("/api/v1/autoplaylists").json() if not a["key"].startswith(genre_kinds)]
     assert [a["name"] for a in listed] == ["Workout"]
     assert "status" not in listed[0] or listed[0]["status"] is None  # users do not see admin fields
     items = bob_c.get(f"/api/v1/autoplaylists/{workout['id']}/items").json()
-    assert items["total"] > 0 and "BPM" in items["items"][0]["reason"]
+    assert items["total"] > 0 and items["items"][0]["reason"] is None  # the "why" is for the admin only
+    admin_items = admin_c.get(f"/api/v1/autoplaylists/{workout['id']}/items").json()
+    assert "BPM" in admin_items["items"][0]["reason"]
 
     bob_id = users["bob"][0].id
     admin_c.patch(f"/api/v1/admin/autoplaylists/{workout['id']}", json={"access": "restricted", "user_ids": [bob_id]})
@@ -531,6 +577,39 @@ def test_vector_index_refreshes_in_background(analysed, db):
     assert index._features is not before and index._generation == "changed"
 
 
+def _wait(condition, seconds=60):
+    for _ in range(seconds * 20):
+        if condition():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_vector_index_builds_files_in_its_own_process(analysed, db, settings):
+    """The server never builds in a request or in its own process, and comes back from the files."""
+    directory = settings.data_dir / "vectors"
+    seed = analysed[10]
+    index = similarity.VectorIndex(db, directory=directory)
+    index.warm()
+    with db.read() as conn:
+        assert index.nearest(conn, seed, 5) is None or index._features.ids.size  # answers while it builds
+    assert _wait(lambda: index._features.ids.size)
+    assert (directory / "features.npz").exists()
+
+    again = similarity.VectorIndex(db, directory=directory)
+    again.warm()
+    assert _wait(lambda: again._features.ids.size)
+    assert again._generation == index._generation
+    with db.read() as conn:
+        assert again.nearest(conn, seed, 5)
+
+    with db.write() as conn:
+        set_state(conn, similarity.ANALYSIS_GENERATION, "changed")
+    with db.read() as conn:
+        assert again.nearest(conn, seed, 5)  # from the old file meanwhile
+    assert _wait(lambda: again._generation == "changed")
+
+
 def test_album_radio_falls_back_without_analysis(library, db, users):
     library.add("J/1.mp3", tags("J1", artist="A", album="Blue", genre="Jazz", date="1960"))
     library.add("J/2.mp3", tags("J2", artist="A", album="Blue", genre="Jazz", date="1960"))
@@ -543,8 +622,8 @@ def test_album_radio_falls_back_without_analysis(library, db, users):
         album_id = conn.execute(select(tracks.c.album_id).where(tracks.c.title == "J1")).scalar()
     station = [t["title"] for t in bob_c.get(f"/api/v1/albums/{album_id}/radio", params={"limit": 8}).json()]
     assert station[0] in {"J1", "J2"}
-    # Same genre and the same decade qualify; the Rock album from the 90s matches neither.
-    assert sorted(t for t in station if t not in {"J1", "J2"}) == ["K1", "S1"]
+    # The same genre qualifies; the same decade alone (Surf, 1963) does not, nor the 90s Rock.
+    assert sorted(t for t in station if t not in {"J1", "J2"}) == ["K1"]
 
 
 def test_health_reports_analysis_backend(client, db):
@@ -560,6 +639,8 @@ def test_admin_analysis_endpoints(audio_library, users):
     status = admin_c.get("/api/v1/admin/analysis").json()
     assert status["tracks"] == 3 and status["pending"] == 3
     assert status["fingerprints"] == 0 and status["styles"] == 0
+    assert status["waiting"] is None and status["cpus"] >= 1 and status["workers_default"] == 1
+    assert len(status["server_time"]) == 5
     assert admin_c.post("/api/v1/admin/analysis/start").status_code == 202
     assert bob_c.get("/api/v1/admin/analysis").status_code == 403
     assert admin_c.get("/api/v1/admin/analysis/failures").json() == []
@@ -737,7 +818,7 @@ def test_sound_only_source(analysed, db, users):
     keys = {r.key for r in rows}
     assert {r.generator for r in rows} == {"tag", "sound"}  # the old suggestions are gone
     assert {"style:rockshoegaze", "style:electronicdeephouse", "style:jazzcooljazz"} <= keys
-    assert all(k.startswith(("style:", "sound:")) for k in keys)
+    assert all(k.startswith(("style:", "sound:", "family:")) for k in keys)  # families from detected genres
     for slug in ("rockshoegaze", "electronicdeephouse", "jazzcooljazz"):
         assert any(k.startswith(f"sound:{slug}") for k in keys)
     # Every mix holds one sound only, named after its style, and mixes do not overlap.
@@ -798,3 +879,437 @@ def test_model_download_checks_the_checksum(tmp_path, monkeypatch):
     assert (tmp_path / "a.pb").read_bytes() == good
     assert not (tmp_path / "b.json").exists() and not list(tmp_path.glob("*.part"))
     assert not models.ensure(tmp_path / "other", download=False)
+
+
+# --- processes, pause, time window -----------------------------------------------------------
+
+
+def _set(db, **values):
+    from audium.services import server_settings
+
+    with db.write() as conn:
+        server_settings.update_server_settings(conn, values)
+
+
+def test_analysis_blocked_by_pause_and_time_window(db, settings):
+    from datetime import datetime
+
+    from audium.analysis.tasks import analysis_blocked, analysis_workers
+
+    at = lambda h: datetime(2026, 10, 26, h, 30)  # noqa: E731
+    with db.read() as conn:
+        assert analysis_blocked(conn, at(14)) is None
+        assert analysis_workers(conn, settings) == settings.analysis_workers
+    _set(db, analysis_schedule="window")  # default 01-07, across no midnight
+    with db.read() as conn:
+        assert [h for h in range(24) if analysis_blocked(conn, at(h)) is None] == [1, 2, 3, 4, 5, 6]
+    _set(db, analysis_from="22", analysis_until="02", analysis_workers="3")
+    with db.read() as conn:
+        assert [h for h in range(24) if analysis_blocked(conn, at(h)) is None] == [0, 1, 22, 23]
+        assert analysis_blocked(conn, at(12)) == "window"
+        assert analysis_workers(conn, settings) == 3
+    _set(db, analysis_from="05", analysis_until="05")  # an empty window would never run: means always
+    _set(db, analysis_paused="on")
+    with db.read() as conn:
+        assert analysis_blocked(conn, at(12)) == "paused"
+    with pytest.raises(BadRequest):
+        _set(db, analysis_workers="99")
+
+
+@needs_essentia
+def test_paused_analysis_waits_and_resumes(audio_library, db, settings, monkeypatch):
+    from audium.analysis.tasks import WAITING_STATE, AnalysisScheduler, run_analysis
+    from audium.db.state import get_state
+
+    ctx = type("C", (), {"progress": lambda *a, **k: None, "should_stop": lambda s: False, "check": lambda s: None})()
+    _set(db, analysis_paused="on")
+    result = run_analysis(ctx, db, settings)
+    assert result["waiting"] == "paused" and result["analyzed"] == 0
+    with db.read() as conn:
+        assert get_state(conn, WAITING_STATE) == "paused" and analysis_stats(conn)["pending"] == 3
+        assert analysis_stats(conn)["waiting"] == "paused"
+
+    with db.write() as conn:
+        auth_service.finish_setup(conn)  # the scheduler waits for the first-run dialog
+    scheduler = AnalysisScheduler(db, settings)
+    scheduler()  # first tick: the usual start-up work
+    with db.write() as conn:
+        conn.execute(jobq.jobs.delete())
+    monkeypatch.setattr(analysis_tasks, "_RESUME_CHECK_S", 0)
+    scheduler()  # still paused: nothing
+    with db.read() as conn:
+        assert conn.execute(select(func.count()).select_from(jobq.jobs)).scalar_one() == 0
+    _set(db, analysis_paused="off")
+    scheduler()
+    with db.read() as conn:
+        assert [j.type for j in conn.execute(select(jobq.jobs.c.type))] == ["analyze"]
+        assert get_state(conn, WAITING_STATE) == ""
+    assert run_analysis(ctx, db, settings)["analyzed"] == 2
+
+
+def test_changing_analysis_settings_resumes_at_once(audio_library, users, db):
+    admin_c = users["admin"][1]
+    r = admin_c.patch("/api/v1/admin/settings", json={"analysis_paused": "on", "analysis_workers": "2"})
+    assert r.status_code == 200 and r.json()["analysis_workers"] == "2" and r.json()["analysis_schedule"] == "always"
+    assert admin_c.get("/api/v1/admin/analysis").json()["waiting"] == "paused"
+    with db.write() as conn:
+        conn.execute(jobq.jobs.delete())
+    admin_c.patch("/api/v1/admin/settings", json={"analysis_paused": "off"})
+    with db.read() as conn:
+        assert [j.type for j in conn.execute(select(jobq.jobs.c.type))] == ["analyze"]
+    assert admin_c.patch("/api/v1/admin/settings", json={"analysis_from": "25"}).status_code in (400, 422)
+    assert users["bob"][1].patch("/api/v1/admin/settings", json={"analysis_paused": "on"}).status_code == 403
+
+
+# --- Discover: broad genres, rediscover ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("genre", "family"),
+    [
+        ("Rock", "Rock"),
+        ("Alternative", "Rock"),
+        ("Punk", "Rock"),
+        ("Post-Punk", "Rock"),
+        ("Metal", "Metal"),
+        ("Folk Metal", "Metal"),
+        ("Folk Rock", "Rock"),
+        ("Deutschrap", "Hip-Hop"),
+        ("Trip Hop", "Electronic"),
+        ("Dancehall", "Reggae"),
+        ("Dubstep", "Electronic"),
+        ("Neo-Soul", "R&B & Soul"),
+        ("Classical", "Klassik"),
+        ("Symphonic", "Klassik"),
+        ("K-Pop", "Pop"),
+        ("Audiobook", None),
+        ("Lo-Fi", None),
+    ],
+)
+def test_genre_families(genre, family):
+    from audium.analysis.genres import family as family_of
+
+    assert family_of(genre) == family
+
+
+def test_family_playlists_cover_their_genres(analysed, db):
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+        rows = {r.key: r for r in conn.execute(select(auto_playlists)).all()}
+    rock = rows["family:rock"]
+    assert rock.generator == "family" and rock.status == "published" and rock.name == "Rock"
+    with db.read() as conn:
+        reasons = set(
+            conn.execute(
+                select(autoplaylists.auto_playlist_items.c.reason).where(
+                    autoplaylists.auto_playlist_items.c.auto_playlist_id == rock.id
+                )
+            ).scalars()
+        )
+        rock_genres = {n for n in conn.execute(select(genres.c.name)).scalars() if normalize_family(n) == "Rock"}
+    assert reasons and reasons <= rock_genres  # every track is there by one of the family's genres
+    assert "family:metal" in rows  # Metal is a family of its own
+    assert all(not k.startswith("family:") or rows[k].track_count >= autoplaylists.MIN_GENRE_TRACKS for k in rows)
+
+    # Hidden by the admin: stays hidden, also when generated again.
+    from audium.services import auto
+
+    with db.write() as conn:
+        auto.admin_delete(conn, rock.id)
+        autoplaylists.generate(conn)
+        assert (
+            conn.execute(select(auto_playlists.c.status).where(auto_playlists.c.id == rock.id)).scalar() == "dismissed"
+        )
+
+
+def normalize_family(name):
+    from audium.analysis.genres import family
+
+    return family(name)
+
+
+def test_discover_genres_puts_your_genres_first(analysed, db, users):
+    bob_c, bob = users["bob"][1], users["bob"][0]
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+        jazz_track = conn.execute(
+            select(tracks.c.id)
+            .join(track_genres, track_genres.c.track_id == tracks.c.id)
+            .join(genres, genres.c.id == track_genres.c.genre_id)
+            .where(genres.c.name == "Jazz")
+            .limit(1)
+        ).scalar_one()
+    for _ in range(3):
+        bob_c.post("/api/v1/history", json={"track_id": jazz_track, "played_ms": 60_000})
+    overview = bob_c.get("/api/v1/discover/genres").json()
+    families = overview["families"]
+    assert families[0]["name"] == "Jazz" and families[0]["plays"] == 3
+    rest = [f["playlist"]["track_count"] for f in families[1:]]
+    assert rest == sorted(rest, reverse=True)  # unplayed ones by size
+    rock = next(f for f in families if f["name"] == "Rock")
+    assert any(g["name"] == "Rock" for g in rock["genres"])
+    assert all(g["key"].startswith("genre:") for f in families for g in f["genres"])
+    # Another user without plays: by size only.
+    carol = users["carol"][1].get("/api/v1/discover/genres").json()["families"]
+    assert [f["playlist"]["track_count"] for f in carol] == sorted(
+        (f["playlist"]["track_count"] for f in carol), reverse=True
+    )
+    assert bob.id
+
+
+def test_rediscover_finds_what_you_stopped_playing(analysed, db, users):
+    from audium.services import discover
+
+    bob = users["bob"][0]
+    now = now_ms()
+    day = 86_400_000
+    with db.write() as conn:
+        rows = conn.execute(select(tracks.c.id, tracks.c.album_id, tracks.c.artist_id).order_by(tracks.c.id)).all()
+        by_album = {}
+        for r in rows:
+            by_album.setdefault(r.album_id, []).append(r)
+        old_album, busy_album, few_album = list(by_album)[:3]
+
+        def play(album_id, days_ago, times):
+            track = by_album[album_id][0]
+            conn.execute(
+                play_history.insert(),
+                [
+                    {"user_id": bob.id, "track_id": track.id, "played_at": now - days_ago * day, "played_ms": 1}
+                    for _ in range(times)
+                ],
+            )
+
+        play(old_album, 120, 6)  # used to play a lot, not since: rediscover
+        play(busy_album, 120, 6)
+        play(busy_album, 3, 1)  # played again lately: not
+        play(few_album, 200, 2)  # never played much: not
+        found = discover.rediscover(conn, bob, limit=8, now=now)
+    album_ids = {f["id"] for f in found if f["type"] == "album"}
+    artist_ids = {f["id"] for f in found if f["type"] == "artist"}
+    old_artist = by_album[old_album][0].artist_id
+    assert busy_album not in album_ids and few_album not in album_ids
+    assert (old_album in album_ids) != (old_artist in artist_ids)  # album or its artist, not both
+    assert all(f["last_played"] < now - 60 * day and f["cover"] for f in found)
+    assert users["bob"][1].get("/api/v1/discover/rediscover").status_code == 200
+    assert users["carol"][1].get("/api/v1/discover/rediscover").json() == []
+
+
+# --- radio sources (analysis/sources.py) and similar artists --------------------------------
+
+
+def test_radio_sources_settings(db, users):
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    got = admin_c.get("/api/v1/admin/radio/sources").json()["sources"]
+    assert got["sound"] == {"on": True, "weight": 100} and got["artists"]["on"] is False  # ListenBrainz off
+    assert bob_c.get("/api/v1/admin/radio/sources").status_code == 403
+    r = admin_c.patch("/api/v1/admin/radio/sources", json={"genre": {"weight": 60}, "features": {"on": False}})
+    assert r.json()["sources"]["genre"] == {"on": True, "weight": 60} and not r.json()["sources"]["features"]["on"]
+    assert admin_c.patch("/api/v1/admin/radio/sources", json={"genre": {"weight": 0}}).status_code == 422
+    assert admin_c.patch("/api/v1/admin/radio/sources", json={"sound": {"on": False}}).status_code == 200
+    assert admin_c.patch("/api/v1/admin/radio/sources", json={"taste": {"on": False}}).status_code == 200
+    # The last switched-on source stays on.
+    assert admin_c.patch("/api/v1/admin/radio/sources", json={"genre": {"on": False}}).status_code == 400
+    assert admin_c.get("/api/v1/admin/radio/sources").json()["sources"]["genre"]["on"] is True
+
+
+def test_station_reasons_for_admins_only(analysed, db, users):
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    seed = analysed[10]
+    assert all(t["reason"] is None for t in bob_c.get(f"/api/v1/tracks/{seed}/radio", params={"limit": 10}).json())
+    station = admin_c.get(f"/api/v1/tracks/{seed}/radio", params={"limit": 10}).json()
+    assert station[0]["reason"] == "Startpunkt" and all(t["reason"] for t in station)
+    with db.read() as conn:
+        album_id = conn.execute(select(tracks.c.album_id).where(tracks.c.id == seed)).scalar()
+    album = admin_c.get(f"/api/v1/albums/{album_id}/radio", params={"limit": 10}).json()
+    assert album[0]["reason"] == "Vom Album"
+    # Only genre & year on: that is what every reason says.
+    admin_c.patch("/api/v1/admin/radio/sources", json={"sound": {"on": False}, "features": {"on": False}})
+    near = admin_c.get(f"/api/v1/tracks/{seed}/similar", params={"limit": 10}).json()
+    assert near and all(t["reason"].startswith("Genre") for t in near)
+
+
+def test_switched_off_sources_drop_their_mixes(analysed, db):
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+        assert conn.execute(select(func.count()).where(auto_playlists.c.generator == "cluster")).scalar() > 0
+        sources.save(conn, {"features": {"on": False}})
+        autoplaylists.generate(conn)
+        assert conn.execute(select(func.count()).where(auto_playlists.c.generator == "cluster")).scalar() == 0
+
+
+def test_similar_artists_from_listenbrainz(library, db, users):
+    for artist, genre in (("Alpha", "Jazz"), ("Beta", "Rock"), ("Gamma", "Pop"), ("Nobody", "Folk")):
+        for i in range(3):
+            library.add(f"{artist}/{i}.mp3", tags(f"{artist} {i}", artist=artist, genre=genre, date="2000"))
+    library.scan()
+    mbids = {"Alpha": "a" * 8 + "-1111-1111-1111-" + "1" * 12, "Beta": "b" * 8 + "-2222-2222-2222-" + "2" * 12}
+    with db.write() as conn:
+        for name, mbid in mbids.items():
+            conn.execute(update(artists).where(artists.c.name == name).values(mb_artist_id=mbid))
+        sources.save(conn, {"artists": {"on": True}})
+
+    asked: list[str] = []
+
+    def fetch(mbid):
+        asked.append(mbid)
+        if mbid == mbids["Alpha"]:  # Beta by id, Gamma by name, one not in the library at all
+            return [(mbids["Beta"], "Beta", 200.0), ("c" * 36, "gamma", 100.0), ("d" * 36, "Elsewhere", 50.0)]
+        return []
+
+    stats = similar_artists.run_batch(db, fetch=fetch, lookup=lambda name: None, pause=lambda s: None)
+    assert stats["artists"] == 4 and stats["no_mbid"] == 2 and stats["left"] == 0
+    assert sorted(asked) == sorted(mbids.values())  # artists without an id are only looked up
+    with db.read() as conn:
+        ids = dict(conn.execute(select(artists.c.name, artists.c.id)).tuples().all())
+        got = similar_artists.similar_to(conn, [ids["Alpha"]])
+    assert [(a, round(s, 2)) for a, s, _ in got] == [(ids["Beta"], 1.0), (ids["Gamma"], 0.5)]
+
+    # Only this source on: Alpha's radio is Alpha plus their fans' artists, and says so.
+    admin_c = users["admin"][1]
+    admin_c.patch("/api/v1/admin/radio/sources", json={"sound": {"on": False}, "features": {"on": False}})
+    admin_c.patch("/api/v1/admin/radio/sources", json={"genre": {"on": False}})
+    station = admin_c.get(f"/api/v1/artists/{ids['Alpha']}/radio", params={"limit": 9}).json()
+    others = [t for t in station if t["artist"] != "Alpha"]
+    assert others and {t["artist"] for t in others} <= {"Beta", "Gamma"}
+    assert all(t["reason"] == f"Fans von Alpha hören auch {t['artist']}" for t in others)
+    # Nobody has no similar artists: genre & year stand in rather than an empty station.
+    station = admin_c.get(f"/api/v1/artists/{ids['Nobody']}/radio", params={"limit": 6}).json()
+    assert all(t["reason"] == "Vom Künstler" or t["reason"].startswith("Ersatz") for t in station)
+
+
+def test_mbid_of_tag_values():
+    one = "5b11f4ce-a62d-471e-81fc-a69a8278c7da"
+    assert similar_artists.mbid_of(f"{one.upper()}; 8bfac288-ccc5-448d-9573-c33ea2aa5c30") == one
+    assert similar_artists.mbid_of("not an id") is None and similar_artists.mbid_of(None) is None
+
+
+def _rank(found: similarity.Blend, track_id: int) -> int:
+    return [t for t, _ in found.picks].index(track_id)
+
+
+def test_taste_moves_liked_tracks_up(analysed, db, users):
+    bob, carol = users["bob"][0], users["carol"][0]
+    index = similarity.VectorIndex(db)
+    seed = analysed[10]
+    with db.read() as conn:
+        plain = similarity.blend(conn, index, [seed], 100)
+    liked = plain.picks[80][0]
+    with db.write() as conn:
+        conn.execute(favorites.insert().values(user_id=bob.id, item_type="track", item_id=liked, created_at=now_ms()))
+        conn.execute(
+            play_history.insert(),
+            [{"user_id": bob.id, "track_id": liked, "played_at": now_ms(), "played_ms": 1000}] * 4,
+        )
+    with db.read() as conn:
+        mine = similarity.blend(conn, index, [seed], 100, bob.id)
+        theirs = similarity.blend(conn, index, [seed], 100, carol.id)
+        assert _rank(mine, liked) < 80 and "taste" in dict(mine.picks)[liked]
+        assert _rank(theirs, liked) == 80  # nobody else's taste
+        # Taste only reorders: it brings in nothing the other sources did not find.
+        assert {t for t, _ in mine.picks} <= {t for t, _ in similarity.blend(conn, index, [seed], 300).picks}
+    with db.write() as conn:
+        sources.save(conn, {"taste": {"on": False}})
+    with db.read() as conn:
+        assert _rank(similarity.blend(conn, index, [seed], 100, bob.id), liked) == 80
+
+
+def test_radio_skips_count_in_similar_stations_only(analysed, db, users):
+    (bob, bob_c), carol = users["bob"], users["carol"][0]
+    index = similarity.VectorIndex(db)
+    seed = analysed[10]
+    with db.write() as conn:
+        sources.save(conn, {"taste": {"on": False}})
+    with db.read() as conn:
+        top = similarity.blend(conn, index, [seed], 50).picks[0][0]
+        seed_artist = conn.execute(select(tracks.c.artist_id).where(tracks.c.id == seed)).scalar()
+        same_artist = conn.execute(
+            select(tracks.c.id).where(tracks.c.artist_id == seed_artist, tracks.c.id != seed)
+        ).scalar()
+        other = conn.execute(select(tracks.c.id).where(tracks.c.artist_id != seed_artist)).scalar()
+    assert bob_c.post("/api/v1/radio/skips", json={"track_id": top, "station": f"track:{seed}"}).json() == {"ok": True}
+    # Not counted: the station's own seed, or no station at all.
+    bob_c.post("/api/v1/radio/skips", json={"track_id": seed, "station": f"track:{seed}"})
+    bob_c.post("/api/v1/radio/skips", json={"track_id": top, "station": "playlist:3"})
+    with db.read() as conn:
+        assert conn.execute(select(func.count()).select_from(radio_skips)).scalar() == 1
+        same = similarity.blend(conn, index, [seed], 300, bob.id, f"track:{seed}")
+        assert _rank(same, top) > 0 and same.skipped[top] == pytest.approx(1 / 3, abs=0.01)
+        # The same artist's station: less; an unrelated one, someone else, or no radio: not at all.
+        assert taste.skip_penalties(conn, bob.id, f"track:{same_artist}", [top])[top] == pytest.approx(
+            1 / 2.2, abs=0.01
+        )
+        assert taste.skip_penalties(conn, bob.id, f"artist:{seed_artist}", [top])[top] < 1
+        assert taste.skip_penalties(conn, bob.id, f"track:{other}", [top]) == {}
+        assert taste.skip_penalties(conn, carol.id, f"track:{seed}", [top]) == {}
+        assert similarity.blend(conn, index, [seed], 50, bob.id).picks[0][0] == top  # "similar tracks"
+        # ListenBrainz says the other artist is like the seed's: a skip counts a little there.
+        other_artist = conn.execute(select(tracks.c.artist_id).where(tracks.c.id == other)).scalar()
+    with db.write() as conn:
+        conn.execute(artist_similar.insert().values(artist_id=seed_artist, similar_id=other_artist, score=1.0))
+    with db.read() as conn:
+        assert taste.skip_penalties(conn, bob.id, f"track:{other}", [top])[top] == pytest.approx(1 / 1.8, abs=0.01)
+    # Old skips fade and are forgotten.
+    with db.write() as conn:
+        conn.execute(update(radio_skips).values(skipped_at=now_ms() - 200 * 86_400_000))
+        taste.prune_skips(conn)
+        assert conn.execute(select(func.count()).select_from(radio_skips)).scalar() == 0
+
+
+def test_radio_dislikes_stay_out_of_that_station(analysed, db, users):
+    (bob, bob_c), carol = users["bob"], users["carol"][0]
+    index = similarity.VectorIndex(db)
+    seed, other_seed = analysed[10], analysed[40]
+    with db.write() as conn:
+        sources.save(conn, {"taste": {"on": False}})
+    with db.read() as conn:
+        top = similarity.blend(conn, index, [seed], 300, bob.id, f"track:{seed}").picks[0][0]
+        album = conn.execute(select(tracks.c.album_id).where(tracks.c.id == seed)).scalar()
+        own = list(conn.execute(select(tracks.c.id).where(tracks.c.album_id == album)).scalars())
+    body = {"track_id": top, "station": f"track:{seed}"}
+    assert bob_c.post("/api/v1/radio/dislikes", json=body).json() == {"ok": True}
+    # The seed can't be disliked: a track's station always starts with it.
+    bob_c.post("/api/v1/radio/dislikes", json={"track_id": seed, "station": f"track:{seed}"})
+    with db.read() as conn:
+        assert taste.dislikes(conn, bob.id, f"track:{seed}") == {top}
+        assert top not in dict(similarity.blend(conn, index, [seed], 300, bob.id, f"track:{seed}").picks)
+        # Only that station, only that user.
+        assert taste.dislikes(conn, bob.id, f"track:{other_seed}") == set()
+        assert top in dict(similarity.blend(conn, index, [seed], 300, carol.id, f"track:{seed}").picks)
+    # A group station leaves out its own tracks too, even when none of them is left.
+    for t in own:
+        bob_c.post("/api/v1/radio/dislikes", json={"track_id": t, "station": f"album:{album}"})
+    rng = np.random.default_rng(1)
+    with db.read() as conn:
+        station = similarity.group_radio(conn, index, own, 20, rng, (), bob.id, f"album:{album}")
+        assert station.picks and not {t for t, _ in station.picks} & set(own)
+
+
+def test_track_info(analysed, db, users):
+    bob_c = users["bob"][1]
+    seed = analysed[10]
+    info = bob_c.get(f"/api/v1/tracks/{seed}/info").json()
+    assert info["track"]["id"] == seed and info["analysis"]["status"] == "ok" and info["analysis"]["bpm"] > 0
+    assert info["genres"] and info["plays"] == 0 and info["last_played"] is None and info["favorite"] is False
+    bob_c.post("/api/v1/history", json={"track_id": seed, "played_ms": 60_000})
+    assert bob_c.get(f"/api/v1/tracks/{seed}/info").json()["plays"] == 1
+    assert bob_c.get("/api/v1/tracks/999999/info").status_code == 404
+
+
+def test_radio_avoids_tempo_jumps(analysed, db, users):
+    admin_c = users["admin"][1]
+    seed = analysed[10]
+    with db.read() as conn:
+        bpm = dict(conn.execute(select(track_features.c.track_id, track_features.c.bpm)).all())
+        picks = [(t, {}) for t in analysed[10:60]]
+        smooth = similarity.smooth_tempo(conn, picks)
+    steps = lambda ids: sum(similarity._tempo_step(bpm[a], bpm[b]) for a, b in zip(ids, ids[1:], strict=False))  # noqa: E731
+    assert smooth[0][0] == seed and sorted(t for t, _ in smooth) == sorted(t for t, _ in picks)
+    assert steps([t for t, _ in smooth]) < steps([t for t, _ in picks]) * 0.7
+    assert similarity._tempo_step(70, 140) == 0 and similarity._tempo_step(100, 125) > 0.3
+    # A switch on the radio settings page.
+    assert admin_c.get("/api/v1/admin/radio/sources").json()["options"] == {"smooth_tempo": True}
+    r = admin_c.patch("/api/v1/admin/radio/options", json={"smooth_tempo": False})
+    assert r.json()["options"]["smooth_tempo"] is False
+    with db.read() as conn:
+        assert sources.options(conn)["smooth_tempo"] is False

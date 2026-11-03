@@ -41,6 +41,9 @@ FOLDER_COVER_NAMES = ("cover", "folder", "front", "album", "albumart", "albumart
 # Artist images (artist.jpg, ...) in the artist folder, best format first. Never an album cover.
 ARTIST_IMAGE_STEM = "artist"
 ARTIST_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png", "webp")
+# folder.jpg in the artist folder (Jellyfin/Kodi style), used when there is no artist.jpg and the
+# server setting artist_folder_images is on. In an album folder it stays the album cover.
+ARTIST_FOLDER_IMAGE_STEM = "folder"
 
 # Directory names that are never music: NAS metadata, recycle bins, macOS resource forks.
 IGNORED_DIRS = frozenset(

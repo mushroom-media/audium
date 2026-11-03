@@ -5,18 +5,25 @@
 // on "ended" the elements swap and the already-buffered next track starts at once. That removes
 // the loading gap (typically 100-500 ms over a network). Sample-exact gapless playback (live
 // albums) would need Web Audio/MSE with encoder-delay trimming; see docs/decisions.md D26.
+//
+// Crossfade (a user setting) uses the same two elements: the spare one starts that many seconds
+// before the end and both volumes cross over. Only for tracks that follow on their own, not skips.
+// iOS ignores element volume, so there the tracks only overlap.
 
-import { coverUrl, get, post, streamUrl, type StreamQuality, type Track } from "./api";
-import { browserCanPlay, chooseSource, type Format } from "./playback";
+import { coverUrl, get, post, request, streamUrl, type ReplayGainMode, type StreamQuality, type Track } from "./api";
+import { browserCanPlay, chooseSource, listenedStep, replayGainFactor, type Format } from "./playback";
 import * as Q from "./queue";
 import { closeOverlay, openOverlay, router } from "./router.svelte";
 
 const STORAGE_KEY = "audium.player";
 const MAX_STORED_TRACKS = 1000;
 export const RESTART_THRESHOLD_S = 3;
-// A play counts (history) after 30 s, or half of a shorter track.
+// A play counts (history) after 30 s really played, or half of a shorter track.
 const SCROBBLE_AFTER_S = 30;
-const PRELOAD_BEFORE_END_S = 20;
+// A radio track skipped before this ranks lower in stations like this one (backend analysis/taste.py).
+const RADIO_SKIP_BEFORE_S = 30;
+const PRELOAD_BEFORE_END_S = 20; // plus the crossfade length
+const FADE_STEP_MS = 50;
 /** A radio station starts with this many tracks and grows by as many while it plays. */
 export const RADIO_BATCH = 20;
 const RADIO_REFILL_AT = 5; // tracks left when the station fetches more
@@ -26,18 +33,22 @@ const phoneLayout = typeof matchMedia === "function" ? matchMedia("(max-width: 8
 const POOL_BATCH = 100; // tracks a pool adds to the queue at a time (≤ the server's by-ids limit)
 const POOL_REFILL_AT = 10;
 const POOL_HISTORY = 500; // played tracks a pool queue keeps for "back"
+const POOL_FILL_DELAY_MS = 500; // the first refill waits for the stream: on the server it would queue behind the ids
 
 /** A whole track list played without holding it all: the query for /tracks/ids, e.g.
  * { sort: "title", q: "abba" }. The queue gets its tracks in batches while it plays, so shuffle
- * mixes the whole list, not just what was loaded. */
+ * mixes the whole list, not just what was loaded. The first track starts before any of that is
+ * there: the ids of a big library take a second to arrive. */
 export type TrackPool = Record<string, string | number | undefined>;
+
+type Pool = { query: TrackPool; ids: number[] | null; rest: number[] | null };
 
 /** Everything another tab needs to carry on playing exactly here (see tabs.svelte.ts). */
 export interface Snapshot {
   queue: Q.Queue;
   radio: boolean;
   source: QueueSource | null;
-  pool: { query: TrackPool; ids: number[] | null; rest: number[] | null } | null;
+  pool: Pool | null;
   position: number;
   volume: number;
   muted: boolean;
@@ -92,12 +103,17 @@ class Player {
   radio = $state(false);
   source = $state<QueueSource | null>(null);
   quality: StreamQuality = "auto";
+  /** Crossfade length in seconds; 0: off (a user setting). */
+  crossfade = 0;
+  /** Volume levelling with the tracks' ReplayGain tags (a user setting). */
+  #replayGain: ReplayGainMode = "off";
 
   current = $derived(Q.current(this.queue));
 
   #audio: HTMLAudioElement | null = null; // the element that is playing
   #spare: HTMLAudioElement | null = null; // preloads the next track
   #spareId: number | null = null;
+  #spareTrack: Track | null = null;
   #spareFormat: Format = "raw";
   #canPlay = browserCanPlay();
   #format: Format = "raw";
@@ -106,13 +122,22 @@ class Player {
   #fallbackTried = false;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #reported = false;
+  /** Seconds the current play really sounded: only while the position moves on its own, so
+   * pauses, buffering and skipped parts (seeks) do not count. */
+  #listened = 0;
+  #lastPos: number | null = null; // position and clock at the last timeupdate; null after a seek
+  #lastClock = 0;
+  /** The reported play's id (from POST /history), for sending its final listened time. */
+  #playId: Promise<number | null> | null = null;
   #station = 0; // counts queues started, so a late radio refill can tell it is out of date
   #refilling = false;
   #stationEnded = -1; // a station that had nothing more to add
   /** The queue walks a pool: its ids (null until fetched, e.g. after a reload) and those not
    * queued yet, in play order (null: work out from the queue once the ids are there). */
-  #pool: { query: TrackPool; ids: number[] | null; rest: number[] | null } | null = null;
-  #poolBusy = false;
+  #pool: Pool | null = null;
+  #poolFill: { pool: Pool; done: Promise<void> } | null = null;
+  /** The track fading out under the current one during a crossfade; `t` runs from 0 to 1. */
+  #fade: { el: HTMLAudioElement; track: Track | null; start: number; ms: number; t: number; timer: ReturnType<typeof setInterval> } | null = null;
 
   init() {
     if (this.#audio) return;
@@ -120,6 +145,11 @@ class Player {
     this.#spare = this.#wire(new Audio());
     this.#restore();
     phoneLayout?.addEventListener("change", () => (this.#phone = phoneLayout.matches));
+    // A tab may be closed or frozen without warning: send what has sounded so far (it only grows).
+    addEventListener("pagehide", () => this.#sendListened());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") this.#sendListened();
+    });
     this.#applyVolume();
     this.#setupMediaSession();
   }
@@ -133,12 +163,15 @@ class Player {
       });
     on("timeupdate", () => {
       this.position = this.#offset + a.currentTime;
+      this.#measure();
       this.#maybeReport();
       this.#maybePreload();
+      this.#maybeCrossfade();
       this.#updatePositionState();
       this.#scheduleSave();
     });
     on("durationchange", () => this.#updateDuration());
+    on("seeking", () => (this.#lastPos = null));
     on("play", () => (this.playing = true));
     on("pause", () => (this.playing = false));
     on("waiting", () => (this.buffering = true));
@@ -156,11 +189,27 @@ class Player {
   }
 
   #applyVolume() {
-    for (const el of [this.#audio, this.#spare]) {
+    const f = this.#fade;
+    // Equal power: the sum stays about as loud as one track all the way through.
+    const pairs: [HTMLAudioElement | null, Track | null, number][] = f
+      ? [
+          [this.#audio, this.current, Math.sin((f.t * Math.PI) / 2)],
+          [f.el, f.track, Math.cos((f.t * Math.PI) / 2)],
+        ]
+      : [
+          [this.#audio, this.current, 1],
+          [this.#spare, this.#spareTrack, 1],
+        ];
+    for (const [el, track, gain] of pairs) {
       if (!el) continue;
-      el.volume = this.volume;
+      el.volume = Math.min(1, this.volume * replayGainFactor(track?.replaygain, this.#replayGain) * gain);
       el.muted = this.muted;
     }
+  }
+
+  setReplayGain(mode: ReplayGainMode) {
+    this.#replayGain = mode;
+    this.#applyVolume();
   }
 
   // --- starting playback -------------------------------------------------------------------
@@ -176,25 +225,25 @@ class Player {
   }
 
   /** Play a whole track list (see TrackPool) from the track `startId`; null: from a random one
-   * with shuffle, else from the top. */
-  async playPool(query: TrackPool, startId: number | null = null, shuffle = this.queue.shuffle, source: QueueSource | null = null) {
+   * with shuffle, else from the top. `first`: that track, when the caller has it at hand. */
+  async playPool(
+    query: TrackPool,
+    startId: number | null = null,
+    shuffle = this.queue.shuffle,
+    source: QueueSource | null = null,
+    first: Track | null = null,
+  ) {
     const station = ++this.#station;
-    const ids = await get<number[]>("/tracks/ids", query);
-    if (station !== this.#station || !ids.length) return;
-    const start = startId === null ? -1 : ids.indexOf(startId);
-    let rest: number[];
-    if (shuffle) {
-      const first = start < 0 ? [] : [ids[start]];
-      rest = [...first, ...Q.shuffled(ids.filter((id) => id !== first[0]))];
-    } else {
-      rest = ids.slice(Math.max(0, start));
-    }
-    const tracks = await this.#fetchTracks(rest.splice(0, POOL_BATCH));
-    if (station !== this.#station || !tracks.length) return;
-    // Already in play order: no second shuffle, but the shuffle button shows the mode.
-    this.playTracks(tracks, 0, false, source);
+    let track = first;
+    if (!track && startId !== null) [track = null] = await this.#fetchTracks([startId]);
+    if (!track) track = await get<Track | null>("/tracks/first", { ...query, shuffle: shuffle ? 1 : undefined });
+    if (station !== this.#station || !track) return;
+    // The queue is just this track for a moment; the first refill brings the rest of the pool.
+    // No second shuffle, but the shuffle button shows the mode.
+    this.playTracks([track], 0, false, source);
     this.queue = { ...this.queue, shuffle };
-    this.#pool = { query, ids, rest };
+    this.#pool = { query, ids: null, rest: null };
+    setTimeout(() => void this.#refillPool(), POOL_FILL_DELAY_MS);
     this.#scheduleSave();
   }
 
@@ -220,6 +269,15 @@ class Player {
     this.#scheduleSave();
   }
 
+  /** Next after the current track and what was queued before it (swiping a track in a list). */
+  enqueue(tracks: Track[]) {
+    const wasEmpty = !this.current;
+    this.#clearSpare(); // what comes next may have changed
+    this.queue = Q.enqueue(this.queue, tracks);
+    if (wasEmpty) this.#load(true);
+    this.#scheduleSave();
+  }
+
   jump(orderPos: number) {
     this.queue = Q.jump(this.queue, orderPos);
     this.#load(true);
@@ -227,6 +285,7 @@ class Player {
 
   remove(orderPos: number) {
     this.queue = Q.remove(this.queue, orderPos);
+    this.#refillRadio();
     this.#scheduleSave();
   }
 
@@ -237,7 +296,7 @@ class Player {
     if (!a || !this.current) return;
     if (this.#loadedId !== this.current.id) this.#load(true, this.position);
     else if (a.paused) a.play().catch((e) => this.#playFailed(e));
-    else a.pause();
+    else this.pause();
   }
 
   play() {
@@ -245,10 +304,12 @@ class Player {
   }
 
   pause() {
+    this.#endFade();
     this.#audio?.pause();
   }
 
   next() {
+    this.#reportSkip();
     this.#advance(false);
   }
 
@@ -266,12 +327,14 @@ class Player {
     const a = this.#audio;
     if (!a || !this.current) return;
     const s = Math.max(0, Math.min(seconds, this.duration || seconds));
+    this.#endFade();
     if (this.#format !== "raw") {
       // A transcoded stream has no byte ranges to seek in: restart ffmpeg at the new offset.
       this.#load(!a.paused, s);
     } else {
       a.currentTime = s;
     }
+    this.#lastPos = null;
     this.position = s;
     this.seeks++;
   }
@@ -308,11 +371,13 @@ class Player {
   // --- handing over between tabs (tabs.svelte.ts) -------------------------------------------
 
   snapshot(): Snapshot {
+    // Without the pool's ids: copying them as a tab closes held it up for seconds. The next tab
+    // fetches them again and works out what is left from the queue, as after a reload.
     return $state.snapshot({
       queue: this.queue,
       radio: this.radio,
       source: this.source,
-      pool: this.#pool,
+      pool: this.#pool && { query: this.#pool.query, ids: null, rest: null },
       position: this.position,
       volume: this.volume,
       muted: this.muted,
@@ -346,6 +411,8 @@ class Player {
 
   /** Stop and let go of the stream, so the browser's media controls no longer point at this tab. */
   release() {
+    this.#endFade();
+    this.#finishPlay();
     const a = this.#audio;
     if (a) {
       a.pause();
@@ -366,17 +433,34 @@ class Player {
 
   // --- internals ---------------------------------------------------------------------------
 
-  #advance(auto: boolean) {
+  #advance(auto: boolean, fadeMs = 0) {
+    const pool = this.#pool;
+    const atEnd = this.queue.pos + 1 >= this.queue.order.length;
+    // More of the pool is on its way (e.g. a skip right after starting): wait for it.
+    if (atEnd && pool && (pool.rest === null || pool.rest.length) && !(auto && this.queue.repeat === "one")) {
+      const station = this.#station;
+      const id = this.current?.id;
+      void this.#refillPool(true).then(() => {
+        if (station !== this.#station || id !== this.current?.id) return;
+        this.#moveOn(auto, fadeMs);
+      });
+      return;
+    }
+    this.#moveOn(auto, fadeMs);
+  }
+
+  #moveOn(auto: boolean, fadeMs: number) {
     const nextQ = Q.next(this.queue, auto);
     if (!nextQ) {
       this.#audio?.pause();
+      this.#finishPlay();
       this.position = 0;
       this.queue = { ...this.queue, pos: 0 };
       this.#loadedId = null;
       return;
     }
     this.queue = nextQ;
-    this.#load(auto || this.playing);
+    this.#load(auto || this.playing, 0, false, fadeMs);
   }
 
   async #fetchTracks(ids: number[]): Promise<Track[]> {
@@ -404,7 +488,9 @@ class Player {
       const skip = new Set(queued);
       return Q.shuffled(ids.filter((id) => !skip.has(id)));
     }
-    const last = queued.length ? ids.indexOf(queued[queued.length - 1]) : -1;
+    // The last track that belongs to the pool: anything queued by hand may not.
+    let last = -1;
+    for (let i = queued.length - 1; i >= 0 && last < 0; i--) last = ids.indexOf(queued[i]);
     return ids.slice(last + 1);
   }
 
@@ -431,28 +517,34 @@ class Player {
   }
 
   /** Shortly before the queue runs out, add the pool's next tracks; with repeat all, start over. */
-  async #refillPool() {
+  #refillPool(now = false): Promise<void> {
     const pool = this.#pool;
-    if (!pool || this.#poolBusy) return;
-    if (this.queue.order.length - this.queue.pos - 1 > POOL_REFILL_AT) return;
-    this.#poolBusy = true;
+    if (!pool) return Promise.resolve();
+    if (this.#poolFill?.pool === pool) return this.#poolFill.done;
+    if (!now && this.queue.order.length - this.queue.pos - 1 > POOL_REFILL_AT) return Promise.resolve();
+    const done = this.#fillFrom(pool).finally(() => {
+      if (this.#poolFill?.pool === pool) this.#poolFill = null;
+    });
+    this.#poolFill = { pool, done };
+    return done;
+  }
+
+  async #fillFrom(pool: Pool) {
     let rest: number[] | null = null;
     let batch: number[] = [];
     try {
       const ids = await this.#poolIds();
       if (!ids || pool !== this.#pool) return;
-      if (!pool.rest) pool.rest = this.#poolRest(ids, this.queue.order.length);
-      if (!pool.rest.length && this.queue.repeat === "all") pool.rest = this.queue.shuffle ? Q.shuffled(ids) : ids.slice();
-      rest = pool.rest;
-      batch = rest.splice(0, POOL_BATCH);
+      let left = pool.rest ?? this.#poolRest(ids, this.queue.order.length);
+      if (!left.length && this.queue.repeat === "all") left = this.queue.shuffle ? Q.shuffled(ids) : ids.slice();
+      pool.rest = rest = left;
+      batch = left.splice(0, POOL_BATCH);
       const tracks = await this.#fetchTracks(batch);
       if (pool !== this.#pool || rest !== pool.rest) return; // reordered meanwhile
       this.queue = Q.trimHistory(Q.append(this.queue, tracks), POOL_HISTORY);
       this.#scheduleSave();
     } catch {
       rest?.unshift(...batch); // offline: the next track change tries again
-    } finally {
-      this.#poolBusy = false;
     }
   }
 
@@ -482,20 +574,22 @@ class Player {
     }
   }
 
-  #load(autoplay: boolean, startAt = 0, forceTranscode = false) {
+  #load(autoplay: boolean, startAt = 0, forceTranscode = false, fadeMs = 0) {
     const track = this.current;
     if (!this.#audio || !track) return;
+    this.#endFade();
     this.#refillRadio();
     this.#refillPool();
-    if (startAt === 0 && !forceTranscode && this.#swapIn(track, autoplay)) return;
+    if (startAt === 0 && !forceTranscode && this.#swapIn(track, autoplay, fadeMs)) return;
     this.#clearSpare();
     const a = this.#audio;
     if (this.#loadedId !== track.id) {
       this.#fallbackTried = false;
-      this.#reported = false;
+      this.#finishPlay();
     } else if (startAt === 0) {
-      this.#reported = false; // replaying the same track (repeat one) counts again
+      this.#finishPlay(); // replaying the same track (repeat one) counts again
     }
+    this.#lastPos = null;
     const choice = forceTranscode
       ? chooseSource({ codec: null, bitrate: null }, "auto", this.#canPlay)
       : chooseSource(track, this.quality, this.#canPlay);
@@ -514,22 +608,51 @@ class Player {
     this.position = startAt;
     this.duration = track.duration_ms / 1000;
     this.#updateMetadata(track);
+    this.#applyVolume();
     if (autoplay) a.play().catch((e) => this.#playFailed(e));
     this.#scheduleSave();
   }
 
   /** Start loading the next track into the spare element, shortly before this one ends. */
   #maybePreload() {
-    if (this.#spareId !== null || !this.#spare || !this.duration || !this.playing) return;
-    if (this.duration - this.position > PRELOAD_BEFORE_END_S) return;
+    if (this.#spareId !== null || this.#fade || !this.#spare || !this.duration || !this.playing) return;
+    if (this.duration - this.position > PRELOAD_BEFORE_END_S + this.crossfade) return;
     const nextQ = Q.next(this.queue, true);
     const next = nextQ ? Q.current(nextQ) : null;
+    if (!next) void this.#refillPool(); // an earlier refill failed: try again before the track ends
     if (!next || next.id === this.current?.id) return; // repeat-one restarts the same element
     const choice = chooseSource(next, this.quality, this.#canPlay);
     this.#spare.src = choice.format === "raw" ? streamUrl(next.id, "raw") : streamUrl(next.id, choice.format, choice.kbps);
     this.#spare.load();
     this.#spareId = next.id;
+    this.#spareTrack = next;
     this.#spareFormat = choice.format;
+    this.#applyVolume();
+  }
+
+  /** With crossfade on, start the preloaded next track that many seconds before this one ends. */
+  #maybeCrossfade() {
+    if (!this.crossfade || this.#fade || this.#spareId === null || !this.playing || !this.duration) return;
+    const left = this.duration - this.position;
+    if (left > this.crossfade || left <= 0.3) return;
+    const next = this.#spareTrack;
+    // A very short track never fades for more than half its length.
+    const ms = Math.min(left, this.crossfade, (next?.duration_ms ?? 0) / 2000) * 1000;
+    if (ms < 300) return;
+    this.#maybeReport(true);
+    this.#advance(true, ms);
+  }
+
+  /** Stop the track fading out, e.g. on pause, skip or seek. */
+  #endFade() {
+    const f = this.#fade;
+    if (!f) return;
+    clearInterval(f.timer);
+    this.#fade = null;
+    f.el.pause();
+    f.el.removeAttribute("src");
+    f.el.load();
+    this.#applyVolume();
   }
 
   #clearSpare() {
@@ -538,25 +661,41 @@ class Player {
       this.#spare.load();
     }
     this.#spareId = null;
+    this.#spareTrack = null;
   }
 
   /** If `track` is already buffered in the spare element, make that the playing one. */
-  #swapIn(track: Track, autoplay: boolean): boolean {
+  #swapIn(track: Track, autoplay: boolean, fadeMs = 0): boolean {
     const next = this.#spare;
     const old = this.#audio;
     if (!next || !old || this.#spareId !== track.id) return false;
+    const oldTrack = this.#loadedId !== null ? (this.queue.tracks.find((t) => t.id === this.#loadedId) ?? null) : null;
     this.#audio = next;
     this.#spare = old;
     this.#spareId = null;
+    this.#spareTrack = null;
     this.#format = this.#spareFormat;
     this.#offset = 0;
     this.#loadedId = track.id;
     this.#fallbackTried = false;
-    this.#reported = false;
+    this.#finishPlay();
     this.error = null;
-    old.pause();
-    old.removeAttribute("src");
-    old.load();
+    if (fadeMs > 0 && autoplay) {
+      // The old track plays on (its events are ignored now) while the volumes cross over.
+      const start = performance.now();
+      const timer = setInterval(() => {
+        const f = this.#fade;
+        if (!f) return;
+        f.t = Math.min(1, (performance.now() - f.start) / f.ms);
+        if (f.t >= 1) this.#endFade();
+        else this.#applyVolume();
+      }, FADE_STEP_MS);
+      this.#fade = { el: old, track: oldTrack, start, ms: fadeMs, t: 0, timer };
+    } else {
+      old.pause();
+      old.removeAttribute("src");
+      old.load();
+    }
     this.#applyVolume();
     this.position = 0;
     this.duration = track.duration_ms / 1000;
@@ -567,17 +706,63 @@ class Player {
     return true;
   }
 
+  /** Skipping a radio track early tells the server it does not fit stations like this one. */
+  #reportSkip() {
+    const station = this.radio ? this.source?.ref?.match(/^radio:((?:track|album|artist):\d+)$/)?.[1] : null;
+    const t = this.current;
+    if (!station || !t || this.position >= RADIO_SKIP_BEFORE_S) return;
+    post("/radio/skips", { track_id: t.id, station }).catch(() => {
+      /* offline: best effort */
+    });
+  }
+
+  /** Add the time since the last timeupdate, if it really sounded (see listenedStep). */
+  #measure() {
+    const now = performance.now();
+    if (this.#lastPos !== null && this.playing) this.#listened += listenedStep(this.#lastPos, this.position, this.#lastClock, now);
+    this.#lastPos = this.position;
+    this.#lastClock = now;
+  }
+
   #maybeReport(finished = false) {
     const t = this.current;
     if (this.#reported || !t) return;
     if (!finished) {
       const half = t.duration_ms > 0 ? (t.duration_ms / 1000) * 0.5 : SCROBBLE_AFTER_S;
-      if (!this.playing || this.position < Math.min(SCROBBLE_AFTER_S, half)) return;
+      if (!this.playing || this.#listened < Math.min(SCROBBLE_AFTER_S, half)) return;
     }
     this.#reported = true;
-    post("/history", { track_id: t.id, played_ms: Math.round(this.position * 1000), context: this.source?.ref ?? null }).catch(() => {
-      /* offline or logged out: history is best effort */
+    this.#playId = post<{ id: number }>("/history", {
+      track_id: t.id,
+      played_ms: Math.round(this.position * 1000),
+      listened_ms: Math.round(this.#listened * 1000),
+      context: this.source?.ref ?? null,
+    })
+      .then((r) => r.id)
+      .catch(() => null); // offline or logged out: history is best effort
+  }
+
+  /** Tell the server how long the reported play really sounded so far (keepalive: also while
+   * the tab closes). The server keeps the largest value, so sending it again does no harm. */
+  #sendListened() {
+    const req = this.#playId;
+    if (!req) return;
+    const listened_ms = Math.round(this.#listened * 1000);
+    void req.then((id) => {
+      if (id === null) return;
+      request("POST", `/history/${id}/listened`, { body: { listened_ms }, keepalive: true }).catch(() => {
+        /* best effort */
+      });
     });
+  }
+
+  /** The current play is over (next track, skip, stop): send its final time and start afresh. */
+  #finishPlay() {
+    this.#sendListened();
+    this.#playId = null;
+    this.#reported = false;
+    this.#listened = 0;
+    this.#lastPos = null;
   }
 
   #updateDuration() {
@@ -616,13 +801,13 @@ class Player {
     const ms = navigator.mediaSession;
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ["play", () => this.toggle()],
-      ["pause", () => this.#audio?.pause()],
+      ["pause", () => this.pause()],
       ["previoustrack", () => this.prev()],
       ["nexttrack", () => this.next()],
       ["seekbackward", (d) => this.seek(this.position - (d.seekOffset ?? 10))],
       ["seekforward", (d) => this.seek(this.position + (d.seekOffset ?? 10))],
       ["seekto", (d) => d.seekTime !== undefined && this.seek(d.seekTime)],
-      ["stop", () => this.#audio?.pause()],
+      ["stop", () => this.pause()],
     ];
     for (const [action, handler] of handlers) {
       try {
@@ -680,6 +865,7 @@ class Player {
       const data = {
         tracks,
         pos: q.pos - from,
+        queuedUntil: Math.max(0, (q.queuedUntil ?? 0) - from),
         shuffle: q.shuffle,
         repeat: q.repeat,
         radio: this.radio,
@@ -709,6 +895,7 @@ class Player {
           pos: Math.min(Math.max(0, d.pos | 0), d.tracks.length - 1),
           shuffle: !!d.shuffle,
           repeat: ["off", "all", "one"].includes(d.repeat) ? d.repeat : "off",
+          queuedUntil: d.queuedUntil | 0,
         };
         this.radio = !!d.radio;
         this.source = d.source && typeof d.source.name === "string" ? d.source : null;
@@ -729,7 +916,7 @@ export const localPlayer = new Player();
 /** What the remote control can steer on another device (see devices.svelte.ts). */
 const REMOTE_KEYS = [
   "queue", "playing", "buffering", "position", "duration", "volume", "muted", "error", "radio", "source", "current",
-  "playTracks", "playPool", "playRadio", "playNext", "append", "jump", "remove",
+  "playTracks", "playPool", "playRadio", "playNext", "append", "enqueue", "jump", "remove",
   "toggle", "next", "prev", "seek", "setVolume", "setMuted", "toggleShuffle", "cycleRepeat",
 ] as const;
 export type Controls = Pick<Player, (typeof REMOTE_KEYS)[number]>;

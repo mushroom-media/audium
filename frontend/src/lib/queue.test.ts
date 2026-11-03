@@ -88,6 +88,68 @@ describe("queue", () => {
     expect(Q.upcoming(q).map((u) => u.track.id)).toEqual([8]);
   });
 
+  it("queued tracks wait right after the current one, first in, first out", () => {
+    let q = Q.create(tracks, 0);
+    q = Q.enqueue(q, [t(8)]);
+    q = Q.enqueue(q, [t(9)]);
+    expect(ids(q)).toEqual([1, 8, 9, 2, 3, 4, 5]);
+    // Playing on: the next one still comes before the rest of the list
+    q = Q.next(q, false)!;
+    q = Q.enqueue(q, [t(7)]);
+    expect(ids(q)).toEqual([1, 8, 9, 7, 2, 3, 4, 5]);
+    // Past all of them, a new one is next again
+    q = Q.jump(q, 4);
+    q = Q.enqueue(q, [t(6)]);
+    expect(ids(q)).toEqual([1, 8, 9, 7, 2, 6, 3, 4, 5]);
+    // Stepping back does not put the new one in front of what is queued
+    q = Q.prev(q);
+    q = Q.enqueue(q, [t(10)]);
+    expect(ids(q)).toEqual([1, 8, 9, 7, 2, 6, 10, 3, 4, 5]);
+    expect(Q.enqueue(Q.empty, [t(1)]).pos).toBe(0);
+  });
+
+  it("removing, playing next and jumping back keep the queued block right", () => {
+    let q = Q.enqueue(Q.enqueue(Q.create(tracks, 0), [t(8)]), [t(9)]);
+    q = Q.remove(q, 1);
+    q = Q.enqueue(q, [t(7)]);
+    expect(ids(q)).toEqual([1, 9, 7, 2, 3, 4, 5]);
+    q = Q.playNext(q, [t(6)]);
+    q = Q.enqueue(q, [t(10)]);
+    expect(ids(q)).toEqual([1, 6, 9, 7, 10, 2, 3, 4, 5]);
+    q = Q.jump(q, 7);
+    q = Q.jump(q, 0); // from here on nothing counts as queued any more
+    q = Q.enqueue(q, [t(11)]);
+    expect(ids(q)).toEqual([1, 11, 6, 9, 7, 10, 2, 3, 4, 5]);
+  });
+
+  it("repeat all starting over forgets the queued block", () => {
+    let q: Q.Queue = { ...Q.enqueue(Q.create(tracks.slice(0, 2), 1), [t(8)]), repeat: "all" };
+    q = Q.next(Q.next(q, false)!, false)!;
+    expect(Q.current(q)!.id).toBe(1);
+    expect(ids(Q.enqueue(q, [t(9)]))).toEqual([1, 9, 2, 8]);
+  });
+
+  it("shuffle and the pool's reorder keep queued tracks next", () => {
+    let q = Q.enqueue(Q.enqueue(Q.create(tracks, 1), [t(8)]), [t(9)]);
+    q = Q.setShuffle(q, true, rng);
+    expect(ids(q).slice(0, 3)).toEqual([2, 8, 9]);
+    q = Q.enqueue(q, [t(7)]);
+    expect(ids(q).slice(0, 4)).toEqual([2, 8, 9, 7]);
+    q = Q.setShuffle(q, false);
+    expect(ids(q)).toEqual([1, 2, 8, 9, 7, 3, 4, 5]);
+    expect(Q.current(q)!.id).toBe(2);
+    expect(ids(Q.replaceUpcoming(q, [t(6)]))).toEqual([1, 2, 8, 9, 7, 6]);
+    expect(Q.replaceUpcoming(q, [t(6)]).pos).toBe(1);
+    expect(ids(Q.enqueue(Q.replaceUpcoming(q, [t(6)]), [t(5)]))).toEqual([1, 2, 8, 9, 7, 5, 6]);
+  });
+
+  it("forgetting history moves the queued block along", () => {
+    let q = Q.enqueue(Q.create(tracks, 3), [t(8)]);
+    q = Q.trimHistory(q, 1);
+    q = Q.enqueue(q, [t(9)]);
+    expect(ids(q)).toEqual([3, 4, 8, 9, 5]);
+  });
+
   it("prev at the start stays, with repeat all it wraps", () => {
     const q = Q.create(tracks, 0);
     expect(Q.prev(q).pos).toBe(0);

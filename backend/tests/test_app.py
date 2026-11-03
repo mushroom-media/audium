@@ -5,7 +5,7 @@ from audium.db.state import set_state
 from audium.jobs.queue import worker_heartbeat_key
 from audium.main import create_app
 from audium.util import now_ms
-from tests.conftest import ADMIN_PW
+from tests.conftest import ADMIN_PW, cover_bytes, tags
 
 
 def test_health(client, db):
@@ -83,3 +83,34 @@ def test_read_gate_serializes_and_is_reentrant(settings):
     with db.write(), db.read():  # writes are not gated, a read inside a write still works
         pass
     db.dispose()
+
+
+def test_lists_are_compressed_audio_and_covers_are_not(library, admin_client, settings):
+    for i in range(40):
+        library.add(f"A/{i}.mp3", tags(f"Song {i}"), picture=cover_bytes())
+    library.scan()
+    gzip = {"Accept-Encoding": "gzip"}
+    body = admin_client.get("/api/v1/tracks", headers=gzip)
+    assert body.headers["content-encoding"] == "gzip" and body.json()["total"] == 40
+    track = body.json()["items"][0]
+    stream = admin_client.get(f"/api/v1/tracks/{track['id']}/stream", headers={**gzip, "Range": "bytes=0-9"})
+    assert stream.status_code == 206 and "content-encoding" not in stream.headers
+    cover = admin_client.get(f"/api/v1/covers/{track['cover']}/64", headers=gzip)
+    assert cover.status_code == 200 and "content-encoding" not in cover.headers
+
+
+def test_cover_needs_a_session_and_an_existing_file(library, admin_client, client, settings):
+    library.add("A/1.mp3", tags("Song"), picture=cover_bytes())
+    library.scan()
+    digest = admin_client.get("/api/v1/tracks").json()["items"][0]["cover"]
+    url = f"/api/v1/covers/{digest}/64"
+    for _ in range(2):  # the first by the normal way, the second by the shortcut
+        got = admin_client.get(url)
+        assert got.status_code == 200 and got.headers["content-type"] == "image/webp"
+        assert got.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert admin_client.get(f"/api/v1/covers/{'0' * 32}/64").status_code == 404
+    assert admin_client.get(f"/api/v1/covers/{digest}/65").status_code == 404
+    client.cookies.clear()
+    assert client.get(url).status_code == 401
+    client.cookies.set("audium_session", "invalid")
+    assert client.get(url).status_code == 401

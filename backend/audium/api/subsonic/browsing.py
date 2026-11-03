@@ -2,7 +2,7 @@
 
 import os
 
-from audium.analysis.similarity import fallback_group
+from audium.analysis.similarity import blend
 from audium.api.subsonic import ids, mapping
 from audium.api.subsonic.envelope import NOT_FOUND, SubsonicError
 from audium.api.subsonic.routing import Call, endpoint
@@ -142,12 +142,11 @@ def get_artist_info(call: Call) -> dict:
 
 
 def _similar_artists(call: Call, conn, artist_id: int, count: int) -> list[int]:
-    """Album artists of the tracks that sound most like this artist (or share their genres)."""
+    """Album artists of the tracks closest to this artist's (by the radio sources, analysis/sources.py)."""
     own = catalog.artist_track_ids(conn, artist_id, limit=500)
     if not own:
         return []
-    near = call.state.vectors.nearest_to_group(conn, own, 300)
-    candidates = [t for t, _ in near] if near else fallback_group(conn, own, 300)
+    candidates = [t for t, _ in blend(conn, call.state.vectors, own, 300).picks]
     album_artist = catalog.album_artist_of(conn, candidates)
     out: list[int] = []
     for t in candidates:

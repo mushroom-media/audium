@@ -8,10 +8,38 @@ from sqlalchemy import Connection
 from audium.db.state import get_state, set_state
 from audium.errors import BadRequest
 
+MAX_ANALYSIS_WORKERS = 16
+_HOURS = tuple(f"{h:02d}" for h in range(24))
+
+
+def _default_first(default: str, values: tuple[str, ...]) -> tuple[str, ...]:
+    return (default, *(v for v in values if v != default))
+
+
 # key -> allowed values; the first one is the default
 OPTIONS: dict[str, tuple[str, ...]] = {
-    # Artists without their own picture (artist.jpg) show the cover of their newest album.
+    # Artists without their own picture (artist.jpg) show the cover of their newest album. The
+    # default for users who leave it at "server" (see services/view_prefs.py).
     "artist_album_covers": ("on", "off"),
+    # Without an artist.jpg, a folder.jpg in the artist folder (Artist/folder.jpg next to
+    # Artist/Album/) is the artist's picture. Applied by the scan (scanner/scan.py).
+    "artist_folder_images": ("on", "off"),
+    # Audio analysis (analysis/tasks.py): parallel processes, one CPU core each ("default":
+    # AUDIUM_ANALYSIS_WORKERS), a pause switch, and an optional time window in server time (full
+    # hours, from inclusive, until exclusive; it may span midnight).
+    "analysis_workers": ("default", *(str(n) for n in range(1, MAX_ANALYSIS_WORKERS + 1))),
+    "analysis_paused": ("off", "on"),
+    "analysis_schedule": ("always", "window"),
+    "analysis_from": _default_first("01", _HOURS),
+    "analysis_until": _default_first("07", _HOURS),
+    # Interfaces (Einstellungen > Schnittstellen). Incoming: the Subsonic API under /rest
+    # (api/subsonic/routing.py) and the audium apps, which call /api with a bearer token
+    # (api/deps.py). Outgoing: the analysis models from essentia.upf.edu (analysis/tasks.py).
+    # The AUDIUM_* switches (subsonic_enabled, analysis_download_models) stay above these: off
+    # there is off here. ListenBrainz is the radio source "artists" (analysis/sources.py).
+    "subsonic_api": ("on", "off"),
+    "app_access": ("on", "off"),
+    "model_download": ("on", "off"),
 }
 
 _PREFIX = "settings."

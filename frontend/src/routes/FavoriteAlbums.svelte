@@ -1,22 +1,37 @@
 <script lang="ts">
   import { get, type Album, type Page } from "../lib/api";
   import AlbumCard from "../lib/components/AlbumCard.svelte";
+  import Icon from "../lib/components/Icon.svelte";
+  import { pageTitle } from "../lib/headerTitle.svelte";
   import VirtualGrid from "../lib/components/VirtualGrid.svelte";
   import { plural } from "../lib/format";
   import { mine } from "../lib/mine.svelte";
-  import { PagedList } from "../lib/paged.svelte";
+  import { keptList } from "../lib/paged.svelte";
+  import { player } from "../lib/player.svelte";
 
   // Reload when the set of favorite albums changes (hearts clicked on an album page).
   const list = $derived.by(() => {
     void mine.favoriteAlbums.size;
-    return new PagedList<Album>((offset, limit, signal) => get<Page<Album>>("/favorites/album", { offset, limit }, signal));
+    return keptList<Album>("favoriteAlbums", (offset, limit, signal) => get<Page<Album>>("/favorites/album", { offset, limit }, signal));
   });
+
+  /** All titles of all favorite albums, mixed (the pool fetches them in batches while playing). */
+  function shuffleAll() {
+    player.playPool({ favorite_albums: 1, sort: "year" }, null, true, { kind: "Playlist", name: "Lieblingsalben", path: "/favorites/albums" });
+  }
 </script>
 
 {#snippet header()}
   <header class="head">
-    <h1>Lieblingsalben</h1>
+    <h1 use:pageTitle={"Lieblingsalben"}>Lieblingsalben</h1>
     {#if list.total !== null}<p class="count">{plural(list.total, "Album", "Alben")}</p>{/if}
+    {#if list.total}
+      <div class="actions">
+        <button class="btn" onclick={shuffleAll} title="Alle Titel der Lieblingsalben zufällig abspielen">
+          <Icon name="shuffle" size={18} /> Zufällig
+        </button>
+      </div>
+    {/if}
     {#if list.total === 0}<p class="empty">Markiere Alben mit dem Herz auf der Albumseite, dann erscheinen sie hier.</p>{/if}
   </header>
 {/snippet}
@@ -41,6 +56,11 @@
   .count {
     margin: 0;
     color: var(--text-muted);
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
   }
   .empty {
     margin: 16px 0 0;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { get, type Album, type Artist, type SearchResult } from "../lib/api";
   import AlbumCard from "../lib/components/AlbumCard.svelte";
   import Cover from "../lib/components/Cover.svelte";
@@ -6,10 +7,11 @@
   import TrackRow from "../lib/components/TrackRow.svelte";
   import { player } from "../lib/player.svelte";
   import { clearSearches, forgetSearch, recentSearches, rememberSearch, type RecentSearch } from "../lib/recentSearches.svelte";
-  import { href, router } from "../lib/router.svelte";
+  import { keepScroll } from "../lib/keepScroll";
+  import { href, recallEntry, rememberEntry, router } from "../lib/router.svelte";
 
   const q = $derived(router.route.query.get("q")?.trim() ?? "");
-  let result = $state<SearchResult | null>(null);
+  let result = $state<SearchResult | null>(untrack(() => recallEntry(`search:${q}`)) ?? null);
   let loading = $state(false);
 
   $effect(() => {
@@ -21,7 +23,10 @@
     const ctrl = new AbortController();
     loading = true;
     get<SearchResult>("/search", { q: query, limit: 24 }, ctrl.signal)
-      .then((r) => (result = r))
+      .then((r) => {
+        result = r;
+        rememberEntry(`search:${query}`, r);
+      })
       .catch(() => {})
       .finally(() => (loading = false));
     return () => ctrl.abort();
@@ -40,7 +45,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" use:keepScroll>
   <div class="toolbar"><h1>{q ? `„${q}“` : "Suche"}</h1></div>
   {#if q.length < 2}
     {#if recentSearches.items.length}
@@ -75,7 +80,7 @@
   {:else if result}
     {#if result.artists.length}
       <h2 class="section">Künstler</h2>
-      <div class="artists">
+      <div class="artists" use:keepScroll={"artists"}>
         {#each result.artists as a (a.id)}
           <a class="artist" href={href(`/artists/${a.id}`)} onclick={() => openedArtist(a)}>
             <Cover hash={a.cover} size={256} round />

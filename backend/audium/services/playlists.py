@@ -30,7 +30,7 @@ MAX_ITEMS = 20_000
 MAX_ADD = 5_000
 VISIBILITIES = ("private", "users")
 SHARE_ROLES = ("viewer", "editor")
-COVER_PRESETS = 20  # built-in cover designs, drawn by the web UI
+COVER_PRESETS = 25  # built-in cover designs, drawn by the web UI
 _EVENT_RETENTION_MS = 7 * 86_400_000
 
 

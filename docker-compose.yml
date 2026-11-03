@@ -1,7 +1,7 @@
 # audium deployment.
-#   cp .env.example .env        # then set AUDIUM_MUSIC_PATH (and the port, if you like)
+#   cp .env.example .env        # optional: set AUDIUM_MUSIC_PATH (and the port, if you like)
 #   docker compose up -d --build
-#   docker compose logs audium | grep setup_token     # one-time token for the first admin
+#   then open http://<server>:8091 in a browser within 30 minutes: it guides you through the rest
 #
 # audium only sees what you mount here. Mount every music folder read-only below /music;
 # each top-level folder (here: /music/main and /music/nas) becomes its own library folder.
@@ -16,7 +16,7 @@ services:
       - "${AUDIUM_HOST_PORT:-8091}:8080"
     volumes:
       - ./data:/data                     # database, cover cache; back this up
-      - "${AUDIUM_MUSIC_PATH:?set AUDIUM_MUSIC_PATH in .env}:/music/main:ro"  # read-only
+      - "${AUDIUM_MUSIC_PATH:-./music}:/music/main:ro"  # read-only; default: the folder ./music
       # - /mnt/nas/music:/music/nas:ro   # more folders: one line each
     environment:
       TZ: ${TZ:-Europe/Berlin}

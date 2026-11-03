@@ -132,6 +132,14 @@ class DeviceRegistry:
         data = {"action": action, "args": args, "from": sender}
         self._bus.publish(DeviceMessage(d.user_id, "command", data, to=d.id))
 
+    def rename(self, d: Device, name: str) -> None:
+        d.name = clean_name(name)
+        self._announce(d)
+        for other in self.list(d.user_id):  # it may be steering others
+            if d.id in other.controllers:
+                other.controllers[d.id] = d.name
+                self._announce(other)
+
     def set_controller(self, d: Device, controller_id: str, name: str | None, on: bool) -> None:
         if on:
             own = self.get(d.user_id, controller_id)
@@ -187,7 +195,7 @@ class StateIn(BaseModel):
 
 Action = Literal[
     "toggle", "play", "pause", "next", "prev", "seek", "volume", "mute", "shuffle", "repeat",
-    "jump", "remove", "play_tracks", "play_pool", "play_radio", "play_next", "append",
+    "jump", "remove", "play_tracks", "play_pool", "play_radio", "play_next", "append", "enqueue",
 ]  # fmt: skip
 
 
@@ -197,6 +205,10 @@ class CommandIn(BaseModel):
     action: Action
     args: dict[str, Any] = Field(default_factory=dict)
     sender: str | None = Field(None, alias="from", pattern=ID_PATTERN, description="The controlling device")
+
+
+class DeviceRename(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
 
 
 class ControlIn(BaseModel):
@@ -212,6 +224,17 @@ class ControlIn(BaseModel):
 @router.get("/devices", summary="Your players that are open right now")
 async def list_devices(user: User = Depends(current_user), reg: DeviceRegistry = Depends(registry)):
     return [d.public(with_queue=True) for d in reg.list(user.id)]
+
+
+@router.patch("/devices/{device_id}", summary="Rename a device (it keeps the name and sends it when it connects)")
+async def rename_device(
+    device_id: str, body: DeviceRename, user: User = Depends(current_user), reg: DeviceRegistry = Depends(registry)
+):
+    d = reg.get(user.id, device_id)
+    if d is None:
+        raise NotFound("device not connected")
+    reg.rename(d, body.name)
+    return d.public()
 
 
 @router.put("/devices/{device_id}/state", status_code=204, summary="A device reports what it plays")

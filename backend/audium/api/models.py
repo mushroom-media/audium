@@ -61,11 +61,12 @@ class MediaTokenOut(BaseModel):
 
 
 class SetupStatus(BaseModel):
-    needs_setup: bool
+    needs_setup: bool = Field(description="No user exists yet")
+    window_open: bool = Field(description="The first admin can be created right now")
+    dialog_pending: bool = Field(description="The first-run dialog is not finished")
 
 
 class SetupIn(BaseModel):
-    setup_token: str = Field(max_length=128)
     username: str = Field(max_length=64)
     password: str = Field(max_length=256)
     display_name: str | None = Field(None, max_length=64)
@@ -170,17 +171,63 @@ class UserSettings(BaseModel):
     theme: Literal["system", "dark", "light"]
     stream_quality: Literal["auto", "high", "medium", "low"]
     shortcuts: Literal["on", "off"]
+    replay_gain: Literal["off", "track", "album"]
+    crossfade: Literal["off", "on"]
+    crossfade_s: int = Field(description="Crossfade length in seconds")
+    backdrop_motion: int = Field(description="Movement of the cover backdrop in 'now playing', 0-100")
+    library_tab: Literal["last", "tracks", "albums", "artists"]
+    track_sort: Literal["title", "added", "year"]
+    album_sort: Literal["title", "artist", "year", "added"]
+    artist_role: Literal["album", "all"]
+    artist_images: Literal["server", "on", "off"]
+    artist_images_default: Literal["on", "off"] = Field(description="What artist_images 'server' means (read-only)")
+    subsonic_api: Literal["on", "off"] = Field("on", description="The Subsonic API is on (read-only)")
 
 
 class UserSettingsUpdate(BaseModel):
     theme: Literal["system", "dark", "light"] | None = None
     stream_quality: Literal["auto", "high", "medium", "low"] | None = None
     shortcuts: Literal["on", "off"] | None = None
+    replay_gain: Literal["off", "track", "album"] | None = None
+    crossfade: Literal["off", "on"] | None = None
+    crossfade_s: int | None = Field(None, ge=1, le=12)
+    backdrop_motion: int | None = Field(None, ge=0, le=100)
+    library_tab: Literal["last", "tracks", "albums", "artists"] | None = None
+    track_sort: Literal["title", "added", "year"] | None = None
+    album_sort: Literal["title", "artist", "year", "added"] | None = None
+    artist_role: Literal["album", "all"] | None = None
+    artist_images: Literal["server", "on", "off"] | None = None
 
 
 class ServerSettings(BaseModel):
     artist_album_covers: Literal["on", "off"]
+    artist_folder_images: Literal["on", "off"] = Field(description="folder.jpg in the artist folder as its picture")
+    analysis_workers: str = Field(description='"default" (AUDIUM_ANALYSIS_WORKERS) or 1..16 processes')
+    analysis_paused: Literal["off", "on"]
+    analysis_schedule: Literal["always", "window"]
+    analysis_from: str = Field(description='Hour "00".."23", server time')
+    analysis_until: str = Field(description='Hour "00".."23" (exclusive), server time')
+    subsonic_api: Literal["on", "off"] = Field(description="The Subsonic API under /rest")
+    app_access: Literal["on", "off"] = Field(description="The audium apps (bearer tokens on /api)")
+    model_download: Literal["on", "off"] = Field(description="Download the analysis models")
 
 
 class ServerSettingsUpdate(BaseModel):
     artist_album_covers: Literal["on", "off"] | None = None
+    artist_folder_images: Literal["on", "off"] | None = None
+    analysis_workers: str | None = None
+    analysis_paused: Literal["off", "on"] | None = None
+    analysis_schedule: Literal["always", "window"] | None = None
+    analysis_from: str | None = None
+    analysis_until: str | None = None
+    subsonic_api: Literal["on", "off"] | None = None
+    app_access: Literal["on", "off"] | None = None
+    model_download: Literal["on", "off"] | None = None
+
+
+class Interfaces(BaseModel):
+    """What the environment allows; the switches themselves are server settings."""
+
+    subsonic_available: bool = Field(description="AUDIUM_SUBSONIC_ENABLED is on")
+    model_download_available: bool = Field(description="AUDIUM_ANALYSIS_DOWNLOAD_MODELS is on")
+    app_origins: list[str] = Field(description="AUDIUM_APP_ORIGINS: where the apps may connect from")

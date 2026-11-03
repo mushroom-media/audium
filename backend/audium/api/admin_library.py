@@ -4,6 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
+from audium.analysis.tasks import analysis_blocked, enqueue_analysis
 from audium.api.deps import get_db, get_settings, require_admin
 from audium.api.library_models import (
     BrowseOut,
@@ -16,7 +17,7 @@ from audium.api.library_models import (
     RootUpdate,
     ScanRequest,
 )
-from audium.api.models import Ok, Page, ServerSettings, ServerSettingsUpdate
+from audium.api.models import Interfaces, Ok, Page, ServerSettings, ServerSettingsUpdate
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.db.pagination import Sort, fetch_ordered, page_ids
@@ -24,7 +25,6 @@ from audium.db.schema import albums, artists, jobs, tracks
 from audium.db.state import bump_library_generation
 from audium.errors import NotFound
 from audium.jobs import queue as jobq
-from audium.scanner.scan import refresh_artists
 from audium.scanner.tasks import enqueue_scan
 from audium.services import roots as root_service
 from audium.services import server_settings as server_settings_service
@@ -180,9 +180,21 @@ def update_server_settings(
     with db.write() as conn:
         merged, changed = server_settings_service.update_server_settings(conn, body.model_dump(exclude_none=True))
         if "artist_album_covers" in changed:
-            refresh_artists(conn)
-            bump_library_generation(conn)
+            bump_library_generation(conn)  # artist pictures change for users who follow the server
+        if "artist_folder_images" in changed:
+            enqueue_scan(conn)  # picks the artist pictures anew (unchanged tracks are skipped)
+        if any(k.startswith("analysis_") for k in changed) and analysis_blocked(conn) is None:
+            enqueue_analysis(conn)  # resumes at once (a running analysis picks up the new settings itself)
     return merged
+
+
+@router.get("/interfaces", response_model=Interfaces, summary="What the environment allows of the interfaces")
+def interfaces(_admin: User = Depends(require_admin), settings: Settings = Depends(get_settings)):
+    return Interfaces(
+        subsonic_available=settings.subsonic_enabled,
+        model_download_available=settings.analysis_download_models,
+        app_origins=settings.app_origin_list,
+    )
 
 
 @router.get("/stats", response_model=LibraryStats)

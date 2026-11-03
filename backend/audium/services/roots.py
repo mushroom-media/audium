@@ -139,29 +139,32 @@ def browse(conn: Connection, settings: Settings, path: str | None):
     return {"path": str(target), "parent": parent, "root_id": roots.get(str(target)), "folders": entries}
 
 
+def initial_candidates(settings: Settings) -> list[str]:
+    """The library folders of a new installation: AUDIUM_LIBRARY_ROOTS if given, otherwise every
+    top-level folder of the music dir (one root per mount, so an unmounted share is detected as
+    offline instead of looking like deleted music). Falls back to the music dir itself."""
+    if settings.library_roots:
+        return [p.strip() for p in settings.library_roots.split(",") if p.strip()]
+    music = settings.music_dir
+    if not music.is_dir():
+        return []
+    try:
+        subdirs = sorted(
+            e.path
+            for e in os.scandir(music)
+            if e.is_dir() and not e.name.startswith(".") and e.name.lower() not in IGNORED_DIRS
+        )
+    except OSError:
+        subdirs = []
+    return subdirs or [str(music)]
+
+
 def discover_initial_roots(conn: Connection, settings: Settings) -> list[str]:
-    """On first start: AUDIUM_LIBRARY_ROOTS if given, otherwise every top-level folder of the
-    music dir (one root per mount, so an unmounted share is detected as offline instead of
-    looking like deleted music). Falls back to the music dir itself."""
+    """On first start, without any library folder yet: adds the initial candidates."""
     if conn.execute(select(func.count()).select_from(library_roots)).scalar_one() > 0:
         return []
-    if settings.library_roots:
-        candidates = [p.strip() for p in settings.library_roots.split(",") if p.strip()]
-    else:
-        music = settings.music_dir
-        if not music.is_dir():
-            return []
-        try:
-            subdirs = sorted(
-                e.path
-                for e in os.scandir(music)
-                if e.is_dir() and not e.name.startswith(".") and e.name.lower() not in IGNORED_DIRS
-            )
-        except OSError:
-            subdirs = []
-        candidates = subdirs or [str(music)]
     added = []
-    for path in candidates:
+    for path in initial_candidates(settings):
         try:
             added.append(add_root(conn, settings, path).path)
         except (BadRequest, Conflict) as exc:

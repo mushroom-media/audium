@@ -1,7 +1,10 @@
+import threading
+
 import pytest
 from sqlalchemy import select, update
 
 from audium.config import Settings
+from audium.db.engine import Database
 from audium.db.schema import tracks
 from audium.main import create_app
 from tests.conftest import tags
@@ -34,6 +37,21 @@ def test_raw_stream_supports_range(lib_client, db, library):
     assert part.content == full.content[100:200]
     tail = lib_client.get(f"/api/v1/tracks/{tid}/stream", headers={"Range": "bytes=-10"})
     assert tail.content == full.content[-10:]
+
+
+def test_stream_starts_past_the_queue_of_reads(tmp_path):
+    db = Database(f"sqlite:///{tmp_path}/queue.db", read_concurrency=1)
+    db._read_gate.acquire()  # a long read, e.g. all ids of a big library
+    try:
+        waiting = threading.Thread(target=lambda: db.read().__enter__(), daemon=True)
+        waiting.start()
+        waiting.join(0.2)
+        assert waiting.is_alive()  # an ordinary read waits for its turn
+        with db.read(urgent=True) as conn:
+            assert conn.exec_driver_sql("select 1").scalar() == 1
+    finally:
+        db._read_gate.release()
+    waiting.join(2)
 
 
 @pytest.mark.parametrize(

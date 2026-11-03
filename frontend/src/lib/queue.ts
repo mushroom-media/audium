@@ -14,6 +14,8 @@ export interface Queue {
   pos: number;
   shuffle: boolean;
   repeat: Repeat;
+  /** Tracks queued by hand wait in `order` right after the current one, up to this index (exclusive). */
+  queuedUntil?: number;
 }
 
 export type Rng = () => number;
@@ -54,7 +56,7 @@ export function next(q: Queue, auto: boolean): Queue | null {
   if (!q.order.length) return null;
   if (auto && q.repeat === "one") return { ...q };
   if (q.pos + 1 < q.order.length) return { ...q, pos: q.pos + 1 };
-  if (q.repeat === "all" || (!auto && q.repeat === "one")) return { ...q, pos: 0 };
+  if (q.repeat === "all" || (!auto && q.repeat === "one")) return { ...q, pos: 0, queuedUntil: 0 };
   return null;
 }
 
@@ -68,11 +70,17 @@ export function setShuffle(q: Queue, on: boolean, rng: Rng = Math.random): Queue
   if (on === q.shuffle) return q;
   if (!q.order.length) return { ...q, shuffle: on };
   const cur = q.order[q.pos];
+  // What was queued by hand stays next, in its order; only the rest changes.
+  const queued = q.order.slice(q.pos + 1, queuedEnd(q));
+  const fixed = new Set([cur, ...queued]);
   if (on) {
-    const rest = shuffled(identity(q.tracks.length).filter((i) => i !== cur), rng);
-    return { ...q, order: [cur, ...rest], pos: 0, shuffle: true };
+    const rest = shuffled(identity(q.tracks.length).filter((i) => !fixed.has(i)), rng);
+    return { ...q, order: [cur, ...queued, ...rest], pos: 0, shuffle: true, queuedUntil: 1 + queued.length };
   }
-  return { ...q, order: identity(q.tracks.length), pos: cur, shuffle: false };
+  const before = identity(cur).filter((i) => !fixed.has(i));
+  const after = identity(q.tracks.length).slice(cur + 1).filter((i) => !fixed.has(i));
+  const pos = before.length;
+  return { ...q, order: [...before, cur, ...queued, ...after], pos, shuffle: false, queuedUntil: pos + 1 + queued.length };
 }
 
 export function cycleRepeat(q: Queue): Queue {
@@ -86,7 +94,21 @@ export function playNext(q: Queue, add: Track[]): Queue {
   const base = q.tracks.length;
   const ids = add.map((_, i) => base + i);
   const order = [...q.order.slice(0, q.pos + 1), ...ids, ...q.order.slice(q.pos + 1)];
-  return { ...q, tracks: [...q.tracks, ...add], order };
+  const queuedUntil = queuedEnd(q) > q.pos + 1 ? queuedEnd(q) + add.length : 0;
+  return { ...q, tracks: [...q.tracks, ...add], order, queuedUntil };
+}
+
+function queuedEnd(q: Queue): number {
+  return Math.max(q.pos + 1, q.queuedUntil ?? 0);
+}
+
+/** Into the queue: after the current track and what was queued before, first in, first out. */
+export function enqueue(q: Queue, add: Track[]): Queue {
+  if (!q.order.length) return create(add, 0, q);
+  const base = q.tracks.length;
+  const at = queuedEnd(q);
+  const order = [...q.order.slice(0, at), ...add.map((_, i) => base + i), ...q.order.slice(at)];
+  return { ...q, tracks: [...q.tracks, ...add], order, queuedUntil: at + add.length };
 }
 
 export function append(q: Queue, add: Track[]): Queue {
@@ -97,20 +119,21 @@ export function append(q: Queue, add: Track[]): Queue {
 
 export function jump(q: Queue, orderPos: number): Queue {
   if (orderPos < 0 || orderPos >= q.order.length) return q;
-  return { ...q, pos: orderPos };
+  return { ...q, pos: orderPos, queuedUntil: orderPos < q.pos ? 0 : q.queuedUntil };
 }
 
 /** Remove the entry at `orderPos` from the play order (not the current one). */
 export function remove(q: Queue, orderPos: number): Queue {
   if (orderPos === q.pos || orderPos < 0 || orderPos >= q.order.length) return q;
   const order = q.order.filter((_, i) => i !== orderPos);
-  return { ...q, order, pos: orderPos < q.pos ? q.pos - 1 : q.pos };
+  const queuedUntil = orderPos < (q.queuedUntil ?? 0) ? q.queuedUntil! - 1 : q.queuedUntil;
+  return { ...q, order, pos: orderPos < q.pos ? q.pos - 1 : q.pos, queuedUntil };
 }
 
-/** Keep what has played and the current track, replace everything after it with `add`. */
+/** Keep what has played, the current track and what was queued by hand, replace the rest with `add`. */
 export function replaceUpcoming(q: Queue, add: Track[]): Queue {
   if (!q.order.length) return create(add, 0, q);
-  const kept = q.order.slice(0, q.pos + 1).map((i) => q.tracks[i]);
+  const kept = q.order.slice(0, queuedEnd(q)).map((i) => q.tracks[i]);
   const tracks = [...kept, ...add];
   return { ...q, tracks, order: identity(tracks.length), pos: q.pos };
 }
@@ -120,7 +143,8 @@ export function trimHistory(q: Queue, keep: number): Queue {
   const from = q.pos - keep;
   if (from <= 0) return q;
   const order = q.order.slice(from);
-  return { ...q, tracks: order.map((i) => q.tracks[i]), order: identity(order.length), pos: q.pos - from };
+  const queuedUntil = Math.max(0, (q.queuedUntil ?? 0) - from);
+  return { ...q, tracks: order.map((i) => q.tracks[i]), order: identity(order.length), pos: q.pos - from, queuedUntil };
 }
 
 export function upcoming(q: Queue): { track: Track; orderPos: number }[] {
