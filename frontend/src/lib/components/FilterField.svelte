@@ -3,6 +3,7 @@
   // filter currently applied (from the URL), followed on back/forward without eating a typed space.
   import { untrack } from "svelte";
   import Icon from "./Icon.svelte";
+  import { t } from "../i18n.svelte";
 
   let {
     query,
@@ -47,7 +48,7 @@
     enterkeyhint="search"
   />
   {#if value}
-    <button type="button" class="clear" aria-label="Filter löschen" onclick={clear}><Icon name="close" size={16} /></button>
+    <button type="button" class="clear" aria-label={t("Filter löschen")} onclick={clear}><Icon name="close" size={16} /></button>
   {/if}
 </label>
 

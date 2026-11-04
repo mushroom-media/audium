@@ -7,6 +7,7 @@ from audium.auth import ratelimit
 from audium.config import Settings
 from audium.db.engine import Database
 from audium.db.state import RESET_STATE, get_state, set_state
+from audium.i18n import server_language, tr
 from audium.jobs import queue as jobq
 from audium.jobs.worker import JobContext
 from audium.logging import get_logger
@@ -57,7 +58,8 @@ def make_handlers(db: Database, settings: Settings):
         with db.read() as conn:
             if not similar_artists.enabled(conn):
                 return {"artists": 0}
-        ctx.progress(0, 1, "Ähnliche Künstler werden abgefragt")
+            lang = server_language(conn)
+        ctx.progress(0, 1, tr(lang, "Ähnliche Künstler werden abgefragt"))
         stats = similar_artists.run_batch(db)
         if stats["left"]:
             with db.write() as conn:

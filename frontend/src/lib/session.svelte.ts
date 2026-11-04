@@ -14,11 +14,14 @@ import {
   type User,
   type UserSettings,
 } from "./api";
+import { browserLanguage, setLanguage, type Lang } from "./i18n.svelte";
 
 interface SetupStatus {
   needs_setup: boolean;
   window_open: boolean;
   dialog_pending: boolean;
+  /** null: no admin has chosen one yet. */
+  language: Lang | null;
 }
 
 export const session = $state({
@@ -32,6 +35,8 @@ export const session = $state({
   setupPending: false,
   user: null as User | null,
   settings: {
+    language: "server",
+    language_default: "de",
     theme: "system",
     stream_quality: "auto",
     shortcuts: "on",
@@ -49,6 +54,11 @@ export const session = $state({
   } as UserSettings,
 });
 
+/** The language a user sees: their own choice, or the server language. */
+export function applyLanguage(settings: UserSettings) {
+  setLanguage(settings.language === "server" ? settings.language_default : settings.language);
+}
+
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
   if (theme === "system") root.removeAttribute("data-theme");
@@ -62,6 +72,7 @@ export async function loadSession() {
     // An app that is not connected yet: the login screen asks for the server too.
     session.user = null;
     session.needsSetup = false;
+    setLanguage(browserLanguage());
     session.ready = true;
     return;
   }
@@ -70,6 +81,7 @@ export async function loadSession() {
     session.user = await get<User>("/auth/me");
     session.settings = await get<UserSettings>("/auth/me/settings");
     applyTheme(session.settings.theme);
+    applyLanguage(session.settings);
     session.setupPending = !isApp && session.user.role === "admin" && (await get<SetupStatus>("/setup")).dialog_pending;
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 401)) throw e;
@@ -77,10 +89,12 @@ export async function loadSession() {
     if (isApp) {
       forgetToken(); // revoked in the settings, or the account was disabled
       session.needsSetup = false;
+      setLanguage(browserLanguage());
     } else {
       const setup = await get<SetupStatus>("/setup");
       session.needsSetup = setup.needs_setup;
       session.setupWindowOpen = setup.window_open;
+      setLanguage(setup.language ?? browserLanguage());
     }
   }
   session.waiting = null;
@@ -129,11 +143,14 @@ export async function saveSettings(changes: Partial<UserSettings>) {
   const before = session.settings;
   session.settings = { ...before, ...changes };
   applyTheme(session.settings.theme);
+  applyLanguage(session.settings);
   try {
     session.settings = await patch<UserSettings>("/auth/me/settings", changes);
+    applyLanguage(session.settings);
   } catch (e) {
     session.settings = before;
     applyTheme(before.theme);
+    applyLanguage(before);
     throw e;
   }
 }

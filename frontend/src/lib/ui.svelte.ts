@@ -1,6 +1,7 @@
 // App-wide UI state: the track context menu, the text prompt, short notifications.
 
 import type { Track } from "./api";
+import { t } from "./i18n.svelte";
 
 export const ui = $state({
   menu: null as null | { x: number; y: number; tracks: Track[]; label: string },
@@ -30,7 +31,7 @@ export function openTrackMenu(e: MouseEvent, tracks: Track[], label = "") {
     x: r ? r.right : e.clientX,
     y: r ? r.bottom + 4 : e.clientY,
     tracks,
-    label: label || (tracks.length === 1 ? tracks[0].title : `${tracks.length} Titel`),
+    label: label || (tracks.length === 1 ? tracks[0].title : t("{n} Titel", { n: tracks.length })),
   };
 }
 

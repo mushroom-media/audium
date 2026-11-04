@@ -9,6 +9,7 @@
   import { keepScroll } from "../lib/keepScroll";
   import { pageTitle } from "../lib/headerTitle.svelte";
   import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { id }: { id: string } = $props();
   const kept = untrack(() => recallEntry<{ seed: Track; tracks: Track[] }>(`similar:${id}`));
@@ -28,7 +29,7 @@
     return () => ctrl.abort();
   });
 
-  const similarSource = (t: Track) => ({ kind: "Ähnlich wie", name: t.title, path: `/tracks/${t.id}/similar` });
+  const similarSource = (track: Track) => ({ kind: t("Ähnlich wie"), name: track.title, path: `/tracks/${track.id}/similar` });
 </script>
 
 <div class="page" use:keepScroll>
@@ -36,20 +37,20 @@
     <header class="hero">
       <div class="art"><Cover hash={seed.cover} size={256} /></div>
       <div>
-        <p class="kind">Ähnlich wie</p>
+        <p class="kind">{t("Ähnlich wie")}</p>
         <h1 use:pageTitle={seed.title}>{seed.title}</h1>
         <p class="by">{seed.artist}</p>
         <div class="actions">
-          <button class="btn primary" onclick={() => seed && navigate(radioPath("track", seed.id))}><Icon name="radio" size={18} /> Zum Radio</button>
+          <button class="btn primary" onclick={() => seed && navigate(radioPath("track", seed.id))}><Icon name="radio" size={18} /> {t("Zum Radio")}</button>
           <button class="btn" disabled={!tracks?.length} onclick={() => seed && tracks && player.playTracks([seed, ...tracks], 0, undefined, similarSource(seed))}>
-            <Icon name="play" size={18} /> Alle abspielen
+            <Icon name="play" size={18} /> {t("Alle abspielen")}
           </button>
         </div>
       </div>
     </header>
   {/if}
   {#if tracks && !tracks.length}
-    <p class="empty">Keine ähnlichen Titel gefunden.</p>
+    <p class="empty">{t("Keine ähnlichen Titel gefunden.")}</p>
   {:else if tracks}
     <div class="list">
       {#each tracks as t, i (t.id)}

@@ -4,6 +4,7 @@
   import Icon from "../../lib/components/Icon.svelte";
   import { href } from "../../lib/router.svelte";
   import { fmtDate, isBusy, type Job } from "./common";
+  import { locale, t, tn } from "../../lib/i18n.svelte";
 
   let analysis = $state<AnalysisStatus | null>(null);
   let job = $state<Job | null>(null);
@@ -51,7 +52,7 @@
       await post("/admin/analysis/start");
       await tick();
     } catch (e) {
-      startError = e instanceof ApiError ? e.message : "Start fehlgeschlagen";
+      startError = e instanceof ApiError ? e.message : t("Start fehlgeschlagen");
     } finally {
       starting = false;
     }
@@ -61,7 +62,7 @@
   const stuck = $derived(job?.status === "queued" && now - job.created_at > STUCK_MS);
   const result = $derived(job?.result as { analyzed?: number; failed?: number; skipped?: string } | null | undefined);
 
-  const num = (n: number) => n.toLocaleString("de-DE");
+  const num = (n: number) => n.toLocaleString(locale());
 
   // --- processes, pause, time window (server settings) ------------------------------------------
 
@@ -88,29 +89,29 @@
       await refresh();
     } catch (e) {
       power = before;
-      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen"));
     }
   }
-  const windowText = $derived(power ? `${Number(power.analysis_from)}–${Number(power.analysis_until)} Uhr` : "");
+  const windowText = $derived(power ? t("{from}–{until} Uhr", { from: Number(power.analysis_from), until: Number(power.analysis_until) }) : "");
   const soundOn = $derived(!!analysis?.backend.includes("+effnet"));
 </script>
 
 {#if analysis === null}
-  <p class="set-note">Lädt …</p>
+  <p class="set-note">{t("Lädt …")}</p>
 {:else if analysis.backend === "none"}
   <div class="set-card"><div class="set-row"><span class="set-label">
-    <strong>Keine Audioanalyse auf dieser Plattform</strong>
-    <small>Essentia gibt es nur für x86_64. Auto-Playlists nach Genre und Jahrzehnt und das Radio nach Genre/Jahr funktionieren trotzdem.</small>
+    <strong>{t("Keine Audioanalyse auf dieser Plattform")}</strong>
+    <small>{t("Essentia gibt es nur für x86_64. Auto-Playlists nach Genre und Jahrzehnt und das Radio nach Genre/Jahr funktionieren trotzdem.")}</small>
   </span></div></div>
 {:else}
   <section class="set-group">
-    <h2>Fortschritt</h2>
+    <h2>{t("Fortschritt")}</h2>
     <div class="set-card">
       <div class="set-row meter">
         <span class="icon" aria-hidden="true"><Icon name="spark" size={18} /></span>
         <div class="set-label">
-          <strong>Audio-Merkmale</strong>
-          <small>Tempo, Energie, Tanzbarkeit, Tonart – für „Stimmung & Aktivität“ und die Mixe.</small>
+          <strong>{t("Audio-Merkmale")}</strong>
+          <small>{t("Tempo, Energie, Tanzbarkeit, Tonart – für „Stimmung & Aktivität“ und die Mixe.")}</small>
           <div class="set-progress"><div style:width="{pct(analysis.analyzed, analysis.tracks)}%"></div></div>
         </div>
         <span class="value"><strong>{num(analysis.analyzed)}</strong> / {num(analysis.tracks)}</span>
@@ -118,10 +119,10 @@
       <div class="set-row meter">
         <span class="icon" aria-hidden="true"><Icon name="wave" size={18} /></span>
         <div class="set-label">
-          <strong>Klangerkennung (Fingerabdrücke)</strong>
+          <strong>{t("Klangerkennung (Fingerabdrücke)")}</strong>
           <small>
-            {#if soundOn}Für Radio und „Ähnliche Titel“.
-            {:else}Modelle nicht geladen – Radio und „Ähnliche Titel“ nutzen die Audio-Merkmale.{/if}
+            {#if soundOn}{t("Für Radio und „Ähnliche Titel“.")}
+            {:else}{t("Modelle nicht geladen – Radio und „Ähnliche Titel“ nutzen die Audio-Merkmale.")}{/if}
           </small>
           <div class="set-progress"><div style:width="{pct(analysis.fingerprints, analysis.tracks)}%"></div></div>
         </div>
@@ -130,8 +131,8 @@
       <div class="set-row">
         <span class="icon" aria-hidden="true"><Icon name="tag" size={18} /></span>
         <div class="set-label">
-          <strong>Erkannte Stile</strong>
-          <small>Titel mit mindestens einem erkannten Stil; ab 25 Titeln wird daraus ein Playlist-Vorschlag.</small>
+          <strong>{t("Erkannte Stile")}</strong>
+          <small>{t("Titel mit mindestens einem erkannten Stil; ab 25 Titeln wird daraus ein Playlist-Vorschlag.")}</small>
         </div>
         <span class="value"><strong>{num(analysis.styles)}</strong></span>
       </div>
@@ -140,38 +141,38 @@
 
   {#if power}
     <section class="set-group">
-      <h2>Rechenleistung</h2>
+      <h2>{t("Rechenleistung")}</h2>
       <div class="set-card">
         <div class="set-row">
           <div class="set-label">
-            <strong>Gleichzeitige Analysen</strong>
-            <small>Jede nutzt einen CPU-Kern, mit niedrigster Priorität: Wiedergabe und Bedienung gehen immer vor. Der Server hat {analysis.cpus} {analysis.cpus === 1 ? "Kern" : "Kerne"}.</small>
+            <strong>{t("Gleichzeitige Analysen")}</strong>
+            <small>{tn(analysis.cpus, "Jede nutzt einen CPU-Kern, mit niedrigster Priorität: Wiedergabe und Bedienung gehen immer vor. Der Server hat {n} Kern.", "Jede nutzt einen CPU-Kern, mit niedrigster Priorität: Wiedergabe und Bedienung gehen immer vor. Der Server hat {n} Kerne.")}</small>
           </div>
-          <select aria-label="Gleichzeitige Analysen" value={power.analysis_workers} onchange={(e) => savePower({ analysis_workers: e.currentTarget.value })}>
-            <option value="default">Standard ({analysis.workers_default})</option>
+          <select aria-label={t("Gleichzeitige Analysen")} value={power.analysis_workers} onchange={(e) => savePower({ analysis_workers: e.currentTarget.value })}>
+            <option value="default">{t("Standard ({n})", { n: analysis.workers_default })}</option>
             {#each workerChoices as n (n)}<option value={n}>{n}</option>{/each}
           </select>
         </div>
         <label class="set-row">
-          <span class="set-label"><strong>Analyse pausieren</strong><small>Ein laufender Durchgang hält nach den gerade bearbeiteten Titeln an.</small></span>
+          <span class="set-label"><strong>{t("Analyse pausieren")}</strong><small>{t("Ein laufender Durchgang hält nach den gerade bearbeiteten Titeln an.")}</small></span>
           <input type="checkbox" class="toggle" checked={power.analysis_paused === "on"} onchange={(e) => savePower({ analysis_paused: e.currentTarget.checked ? "on" : "off" })} />
         </label>
         <label class="set-row">
           <span class="set-label">
-            <strong>Nur in einem Zeitfenster</strong>
-            <small>Zum Beispiel nachts, wenn der Server sonst nichts zu tun hat. Uhrzeit des Servers, gerade {analysis.server_time} Uhr.</small>
+            <strong>{t("Nur in einem Zeitfenster")}</strong>
+            <small>{t("Zum Beispiel nachts, wenn der Server sonst nichts zu tun hat. Uhrzeit des Servers, gerade {time} Uhr.", { time: analysis.server_time })}</small>
           </span>
           <input type="checkbox" class="toggle" checked={power.analysis_schedule === "window"} onchange={(e) => savePower({ analysis_schedule: e.currentTarget.checked ? "window" : "always" })} />
         </label>
         {#if power.analysis_schedule === "window"}
           <div class="set-row">
-            <div class="set-label"><strong>Von – bis</strong><small>Bis zur vollen Stunde; über Mitternacht geht auch (z. B. 22–6 Uhr).</small></div>
+            <div class="set-label"><strong>{t("Von – bis")}</strong><small>{t("Bis zur vollen Stunde; über Mitternacht geht auch (z. B. 22–6 Uhr).")}</small></div>
             <div class="hours">
-              <select aria-label="Von" value={power.analysis_from} onchange={(e) => savePower({ analysis_from: e.currentTarget.value })}>
+              <select aria-label={t("Von")} value={power.analysis_from} onchange={(e) => savePower({ analysis_from: e.currentTarget.value })}>
                 {#each HOURS as h (h)}<option value={h}>{h}:00</option>{/each}
               </select>
               <span>–</span>
-              <select aria-label="Bis" value={power.analysis_until} onchange={(e) => savePower({ analysis_until: e.currentTarget.value })}>
+              <select aria-label={t("Bis")} value={power.analysis_until} onchange={(e) => savePower({ analysis_until: e.currentTarget.value })}>
                 {#each HOURS as h (h)}<option value={h}>{h}:00</option>{/each}
               </select>
             </div>
@@ -182,67 +183,67 @@
   {/if}
 
   <section class="set-group">
-    <h2>Status</h2>
+    <h2>{t("Status")}</h2>
     <div class="set-card">
       <div class="set-row">
         <div class="set-label">
           {#if stuck}
-            <strong>Wartet auf den Analyse-Worker</strong>
-            <small>Der Job steht seit {fmtDate(job?.created_at ?? null)} in der Warteschlange. Läuft der Worker? Siehe Server-Log.</small>
+            <strong>{t("Wartet auf den Analyse-Worker")}</strong>
+            <small>{t("Der Job steht seit {date} in der Warteschlange. Läuft der Worker? Siehe Server-Log.", { date: fmtDate(job?.created_at ?? null) })}</small>
           {:else if analysis.waiting && !isBusy(job)}
-            <strong>{analysis.waiting === "paused" ? "Pausiert" : `Wartet auf das Zeitfenster (${windowText})`}</strong>
-            <small>{num(analysis.pending)} Titel ausstehend. {analysis.waiting === "paused" ? "Geht weiter, sobald du die Pause aufhebst." : "Geht von selbst weiter, sobald das Zeitfenster beginnt."}</small>
+            <strong>{analysis.waiting === "paused" ? t("Pausiert") : t("Wartet auf das Zeitfenster ({window})", { window: windowText })}</strong>
+            <small>{t("{n} Titel ausstehend.", { n: num(analysis.pending) })} {analysis.waiting === "paused" ? t("Geht weiter, sobald du die Pause aufhebst.") : t("Geht von selbst weiter, sobald das Zeitfenster beginnt.")}</small>
           {:else if isBusy(job)}
-            <strong>{job?.status === "queued" ? "Analyse startet …" : "Analyse läuft"}</strong>
+            <strong>{job?.status === "queued" ? t("Analyse startet …") : t("Analyse läuft")}</strong>
             {#if job?.message}<small>{job.message}</small>{/if}
             <div class="set-progress job">
               {#if jobPct === null}<div class="indeterminate"></div>{:else}<div style:width="{jobPct}%"></div>{/if}
             </div>
           {:else if analysis.pending}
-            <strong>{num(analysis.pending)} Titel ausstehend</strong>
-            <small>Startet sonst automatisch nach dem nächsten Scan.</small>
+            <strong>{t("{n} Titel ausstehend", { n: num(analysis.pending) })}</strong>
+            <small>{t("Startet sonst automatisch nach dem nächsten Scan.")}</small>
           {:else}
-            <strong>Alles analysiert</strong>
-            <small>Neue Titel werden nach jedem Scan analysiert.</small>
+            <strong>{t("Alles analysiert")}</strong>
+            <small>{t("Neue Titel werden nach jedem Scan analysiert.")}</small>
           {/if}
         </div>
         {#if !isBusy(job) && analysis.pending && !analysis.waiting}
-          <button class="btn primary" onclick={start} disabled={starting}>{starting ? "Startet …" : "Jetzt analysieren"}</button>
+          <button class="btn primary" onclick={start} disabled={starting}>{starting ? t("Startet …") : t("Jetzt analysieren")}</button>
         {/if}
       </div>
       {#if startError}
-        <div class="set-row"><span class="set-label"><strong class="bad">Start fehlgeschlagen</strong><small>{startError}</small></span></div>
+        <div class="set-row"><span class="set-label"><strong class="bad">{t("Start fehlgeschlagen")}</strong><small>{startError}</small></span></div>
       {:else if job && !isBusy(job)}
         <div class="set-row">
           <span class="set-label">
             <strong class:bad={job.status === "failed"}>
-              Letzter Lauf {fmtDate(job.finished_at ?? job.created_at)}:
-              {#if job.status === "failed"}fehlgeschlagen
-              {:else if job.status === "cancelled"}abgebrochen
-              {:else if result?.skipped}übersprungen
-              {:else}{num(result?.analyzed ?? 0)} analysiert{#if result?.failed}, {num(result.failed)} nicht analysierbar{/if}{/if}
+              {t("Letzter Lauf {date}:", { date: fmtDate(job.finished_at ?? job.created_at) })}
+              {#if job.status === "failed"}{t("fehlgeschlagen")}
+              {:else if job.status === "cancelled"}{t("abgebrochen")}
+              {:else if result?.skipped}{t("übersprungen")}
+              {:else}{t("{n} analysiert", { n: num(result?.analyzed ?? 0) })}{#if result?.failed}, {t("{n} nicht analysierbar", { n: num(result.failed) })}{/if}{/if}
             </strong>
             {#if job.error}<small class="set-mono">{job.error}</small>
             {:else if result?.skipped}<small>{result.skipped}</small>
             {:else if job.status === "done" && !result?.analyzed && !result?.failed && analysis.pending}
-              <small>Der Lauf fand nichts zu tun, obwohl Titel ausstehen. Details im Server-Log.</small>
+              <small>{t("Der Lauf fand nichts zu tun, obwohl Titel ausstehen. Details im Server-Log.")}</small>
             {/if}
           </span>
         </div>
       {/if}
       <div class="set-row">
-        <div class="set-label"><strong>Analyse-Backend</strong><small class="set-mono">{analysis.backend}</small></div>
+        <div class="set-label"><strong>{t("Analyse-Backend")}</strong><small class="set-mono">{analysis.backend}</small></div>
       </div>
       {#if analysis.failed}
         <details class="set-row failures">
-          <summary><strong>{num(analysis.failed)} nicht analysierbar</strong> <small>Details</small></summary>
+          <summary><strong>{t("{n} nicht analysierbar", { n: num(analysis.failed) })}</strong> <small>{t("Details")}</small></summary>
           <ul>{#each failures as f (f.track_id)}<li><code>{f.path}</code> – {f.error}</li>{/each}</ul>
         </details>
       {/if}
     </div>
   </section>
 
-  <p class="set-note"><a href={href("/settings/autoplaylists")}>Auto-Playlist-Vorschläge ansehen →</a></p>
+  <p class="set-note"><a href={href("/settings/autoplaylists")}>{t("Auto-Playlist-Vorschläge ansehen →")}</a></p>
 {/if}
 
 <style>

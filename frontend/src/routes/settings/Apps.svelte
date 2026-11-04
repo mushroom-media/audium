@@ -7,6 +7,7 @@
   import { session } from "../../lib/session.svelte";
   import { toast } from "../../lib/ui.svelte";
   import { fmtDate } from "./common";
+  import { t } from "../../lib/i18n.svelte";
 
   interface AppPassword {
     id: number;
@@ -43,18 +44,18 @@
       name = "";
       reload++;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
   async function revoke(e: AppPassword) {
-    if (!confirm(`„${e.name}“ widerrufen? Die App kann sich danach nicht mehr anmelden.`)) return;
+    if (!confirm(t("„{name}“ widerrufen? Die App kann sich danach nicht mehr anmelden.", { name: e.name }))) return;
     try {
       await del(`/auth/app-passwords/${e.id}`);
-      toast("Widerrufen");
+      toast(t("Widerrufen"));
       reload++;
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "Fehlgeschlagen");
+      toast(err instanceof ApiError ? err.message : t("Fehlgeschlagen"));
     }
   }
 
@@ -63,80 +64,80 @@
       await navigator.clipboard.writeText(text);
       toast(`${what} kopiert`);
     } catch {
-      toast("Kopieren geht nur über HTTPS – bitte von Hand übernehmen");
+      toast(t("Kopieren geht nur über HTTPS – bitte von Hand übernehmen"));
     }
   }
 </script>
 
 <p class="intro">
-  Mit einer Subsonic-App wie <strong>Symfonium</strong> (Android), <strong>Amperfy</strong> (iPhone) oder <strong>Feishin</strong>
-  (Desktop) hörst du deine Bibliothek auch offline.
+  {t("Mit einer Subsonic-App wie")} <strong>{t("Symfonium")}</strong> {t("(Android),")} <strong>{t("Amperfy")}</strong> {t("(iPhone) oder")} <strong>{t("Feishin")}</strong>
+  {t("(Desktop) hörst du deine Bibliothek auch offline.")}
 </p>
 
 {#if session.settings.subsonic_api === "off"}
-  <p class="intro warn">Die Subsonic-API ist auf diesem Server gerade abgeschaltet. Verbundene Apps werden abgewiesen, bis ein Admin sie unter „Schnittstellen“ wieder einschaltet.</p>
+  <p class="intro warn">{t("Die Subsonic-API ist auf diesem Server gerade abgeschaltet. Verbundene Apps werden abgewiesen, bis ein Admin sie unter „Schnittstellen“ wieder einschaltet.")}</p>
 {/if}
 
 <div class="top-actions">
-  <button class="btn primary" onclick={() => (naming = true)}><Icon name="plus" size={16} /> App verbinden</button>
+  <button class="btn primary" onclick={() => (naming = true)}><Icon name="plus" size={16} /> {t("App verbinden")}</button>
 </div>
 
 <section class="set-group">
-  <h2>Verbundene Apps</h2>
+  <h2>{t("Verbundene Apps")}</h2>
   <div class="set-card">
     {#each entries as e (e.id)}
       <div class="set-row">
         <div class="set-label">
           <strong>{e.name} <span class="set-mono prefix">{e.prefix}…</span></strong>
           <small>
-            angelegt {fmtDate(e.created_at)} ·
-            {#if e.last_used_at}zuletzt benutzt {fmtDate(e.last_used_at)}{e.last_client ? ` von ${e.last_client}` : ""}{:else}noch nie benutzt{/if}
+            {t("angelegt {date}", { date: fmtDate(e.created_at) })} ·
+            {#if e.last_used_at}{e.last_client ? t("zuletzt benutzt {date} von {client}", { date: fmtDate(e.last_used_at), client: e.last_client }) : t("zuletzt benutzt {date}", { date: fmtDate(e.last_used_at) })}{:else}{t("noch nie benutzt")}{/if}
           </small>
         </div>
-        <button class="btn small ghost" onclick={() => revoke(e)}>Widerrufen</button>
+        <button class="btn small ghost" onclick={() => revoke(e)}>{t("Widerrufen")}</button>
       </div>
     {:else}
       <div class="set-row">
-        <div class="set-label"><small>{loaded ? "Noch keine App verbunden." : "Lädt …"}</small></div>
+        <div class="set-label"><small>{loaded ? t("Noch keine App verbunden.") : t("Lädt …")}</small></div>
       </div>
     {/each}
   </div>
-  <p class="set-note">Jede App mit Subsonic-Unterstützung funktioniert.</p>
+  <p class="set-note">{t("Jede App mit Subsonic-Unterstützung funktioniert.")}</p>
 </section>
 
 {#if naming}
-  <Modal title="App verbinden" onclose={() => (naming = false)}>
+  <Modal title={t("App verbinden")} onclose={() => (naming = false)}>
     <form class="form" onsubmit={(ev) => (ev.preventDefault(), create())}>
       <label>
-        Name
-        <input bind:value={name} required maxlength="64" placeholder="z. B. Symfonium Handy" />
+        {t("Name")}
+        <input bind:value={name} required maxlength="64" placeholder={t("z. B. Symfonium Handy")} />
       </label>
-      <p class="hint">Damit du später erkennst, welches Gerät welches Passwort hat.</p>
+      <p class="hint">{t("Damit du später erkennst, welches Gerät welches Passwort hat.")}</p>
       <div class="modal-buttons">
-        <button type="button" class="btn ghost" onclick={() => (naming = false)}>Abbrechen</button>
-        <button class="btn primary">Passwort erzeugen</button>
+        <button type="button" class="btn ghost" onclick={() => (naming = false)}>{t("Abbrechen")}</button>
+        <button class="btn primary">{t("Passwort erzeugen")}</button>
       </div>
     </form>
   </Modal>
 {/if}
 
 {#if created}
-  <Modal title="„{created.name}“ verbinden" onclose={() => (created = null)}>
-    <p class="hint">Trage diese Daten in der App ein. Das Passwort wird <strong>nur jetzt</strong> angezeigt.</p>
+  <Modal title={t("„{name}“ verbinden", { name: created.name })} onclose={() => (created = null)}>
+    <p class="hint">{t("Trage diese Daten in der App ein. Das Passwort wird")} <strong>{t("nur jetzt")}</strong> {t("angezeigt.")}</p>
     <dl class="creds">
-      <dt>Server</dt>
-      <dd><code>{server}</code><button class="btn small ghost" onclick={() => copy(server, "Server")}>Kopieren</button></dd>
-      <dt>Benutzername</dt>
-      <dd><code>{session.user?.username}</code><button class="btn small ghost" onclick={() => copy(session.user?.username ?? "", "Benutzername")}>Kopieren</button></dd>
-      <dt>Passwort</dt>
-      <dd><code class="pw">{created.password}</code><button class="btn small ghost" onclick={() => copy(created!.password, "Passwort")}>Kopieren</button></dd>
+      <dt>{t("Server")}</dt>
+      <dd><code>{server}</code><button class="btn small ghost" onclick={() => copy(server, "Server")}>{t("Kopieren")}</button></dd>
+      <dt>{t("Benutzername")}</dt>
+      <dd><code>{session.user?.username}</code><button class="btn small ghost" onclick={() => copy(session.user?.username ?? "", "Benutzername")}>{t("Kopieren")}</button></dd>
+      <dt>{t("Passwort")}</dt>
+      <dd><code class="pw">{created.password}</code><button class="btn small ghost" onclick={() => copy(created!.password, "Passwort")}>{t("Kopieren")}</button></dd>
     </dl>
     {#if insecure}
-      <p class="hint warn">Die Verbindung ist unverschlüsselt (http). Für Apps außerhalb des Heimnetzes einen Reverse Proxy mit HTTPS verwenden.</p>
+      <p class="hint warn">{t("Die Verbindung ist unverschlüsselt (http). Für Apps außerhalb des Heimnetzes einen Reverse Proxy mit HTTPS verwenden.")}</p>
     {/if}
-    <p class="hint">In der App „Legacy-Anmeldung“ bzw. „Klartext-Passwort“ ausgeschaltet lassen.</p>
+    <p class="hint">{t("In der App „Legacy-Anmeldung“ bzw. „Klartext-Passwort“ ausgeschaltet lassen.")}</p>
     <div class="modal-buttons">
-      <button class="btn primary" onclick={() => (created = null)}>Fertig</button>
+      <button class="btn primary" onclick={() => (created = null)}>{t("Fertig")}</button>
     </div>
   </Modal>
 {/if}

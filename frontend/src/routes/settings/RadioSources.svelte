@@ -3,6 +3,7 @@
   // and a weight per source, for the whole server. At least one source stays on.
   import { ApiError, get, patch } from "../../lib/api";
   import { toast } from "../../lib/ui.svelte";
+  import { locale, msg, t } from "../../lib/i18n.svelte";
 
   type Name = "sound" | "features" | "genre" | "artists" | "taste";
   interface Source {
@@ -17,14 +18,18 @@
   }
 
   const INFO: { name: Name; title: string; text: string }[] = [
-    { name: "sound", title: "Klang", text: "Ähnlich klingende Titel nach dem Klang-Fingerabdruck der Audioanalyse. Aus: auch keine Klang-Mixe." },
-    { name: "features", title: "Audio-Merkmale", text: "Tempo, Energie, Tanzbarkeit, Stimmung. Aus: auch keine Mixe aus der Bibliothek." },
-    { name: "genre", title: "Genre & Jahr", text: "Gleiche Genres (aus den Tags und von der Audioanalyse erkannt) oder derselbe Künstler; das Jahr entscheidet nur unter diesen, allein nie. Braucht keine Audioanalyse." },
-    { name: "artists", title: "Ähnliche Künstler (ListenBrainz)", text: "Künstler, die Fans gemeinsam hören: Wer X mag, mag auch Y." },
+    { name: "sound", title: msg("Klang"), text: msg("Ähnlich klingende Titel nach dem Klang-Fingerabdruck der Audioanalyse. Aus: auch keine Klang-Mixe.") },
+    { name: "features", title: msg("Audio-Merkmale"), text: msg("Tempo, Energie, Tanzbarkeit, Stimmung. Aus: auch keine Mixe aus der Bibliothek.") },
+    {
+      name: "genre",
+      title: msg("Genre & Jahr"),
+      text: msg("Gleiche Genres (aus den Tags und von der Audioanalyse erkannt) oder derselbe Künstler; das Jahr entscheidet nur unter diesen, allein nie. Braucht keine Audioanalyse."),
+    },
+    { name: "artists", title: msg("Ähnliche Künstler (ListenBrainz)"), text: msg("Künstler, die Fans gemeinsam hören: Wer X mag, mag auch Y.") },
     {
       name: "taste",
-      title: "Eigener Geschmack",
-      text: "Für jeden Nutzer eigen: Von den Titeln, die die anderen Quellen finden, rücken Favoriten (Titel, Album, Künstler) und oft Gehörtes nach vorn. Bringt selbst keine Titel ins Radio.",
+      title: msg("Eigener Geschmack"),
+      text: msg("Für jeden Nutzer eigen: Von den Titeln, die die anderen Quellen finden, rücken Favoriten (Titel, Album, Künstler) und oft Gehörtes nach vorn. Bringt selbst keine Titel ins Radio."),
     },
   ];
 
@@ -49,7 +54,7 @@
     try {
       data = await patch<Sources>("/admin/radio/options", change);
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen"));
     }
   }
 
@@ -57,14 +62,14 @@
     try {
       data = await patch<Sources>("/admin/radio/sources", { [n]: change });
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen"));
     }
     delete draft[n];
   }
 </script>
 
 <section class="set-group">
-  <h2>Quellen</h2>
+  <h2>{t("Quellen")}</h2>
   {#if data}
     <div class="set-card">
       {#each INFO as i (i.name)}
@@ -73,15 +78,15 @@
         <div class="set-row source" class:off={!s.on}>
           <label class="head">
             <span class="set-label">
-              <strong>{i.title}</strong>
-              <small>{i.text}</small>
+              <strong>{t(i.title)}</strong>
+              <small>{t(i.text)}</small>
             </span>
             <input
               type="checkbox"
               class="toggle"
               checked={s.on}
               disabled={last}
-              title={last ? "Mindestens eine Quelle bleibt an" : undefined}
+              title={last ? t("Mindestens eine Quelle bleibt an") : undefined}
               onchange={(e) => save(i.name, { on: e.currentTarget.checked })}
             />
           </label>
@@ -92,46 +97,41 @@
               max="100"
               value={weightOf(i.name)}
               disabled={!s.on}
-              aria-label="Gewicht {i.title}"
+              aria-label={t("Gewicht {source}", { source: t(i.title) })}
               style:--p="{weightOf(i.name)}%"
               oninput={(e) => (draft[i.name] = +e.currentTarget.value)}
               onchange={(e) => save(i.name, { weight: +e.currentTarget.value })}
             />
-            <span class="pct">{s.on ? `${share(i.name)} %` : "aus"}</span>
+            <span class="pct">{s.on ? `${share(i.name)} %` : t("aus")}</span>
           </div>
           {#if i.name === "artists"}
             <p class="hint">
-              Beim Einschalten schickt audium die Namen bzw. MusicBrainz-IDs der Künstler deiner Bibliothek an ListenBrainz, für Künstler
-              ohne ID in den Tags auch an MusicBrainz. Was die Nutzer hören, bleibt auf dem Server.
-              {#if s.on}<br />{data.artists_known.toLocaleString("de-DE")} Künstler mit Ergebnis{#if data.artists_pending}, {data.artists_pending.toLocaleString("de-DE")} noch nicht abgefragt (etwa ein Künstler pro Sekunde){/if}.{/if}
+              {t("Beim Einschalten schickt audium die Namen bzw. MusicBrainz-IDs der Künstler deiner Bibliothek an ListenBrainz, für Künstler ohne ID in den Tags auch an MusicBrainz. Was die Nutzer hören, bleibt auf dem Server.")}
+              {#if s.on}<br />{t("{n} Künstler mit Ergebnis", { n: data.artists_known })}{#if data.artists_pending}, {t("{n} noch nicht abgefragt (etwa ein Künstler pro Sekunde)", { n: data.artists_pending })}{/if}.{/if}
             </p>
           {/if}
         </div>
       {/each}
     </div>
     <p class="set-note">
-      Radio, „Ähnliche Titel“ und die Subsonic-Apps mischen ihre Titel aus den eingeschalteten Quellen. Der Regler legt fest, wie stark eine Quelle zählt;
-      die Prozentzahl zeigt ihren Anteil an allen eingeschalteten. Titel, die mehrere Quellen vorschlagen, kommen zuerst. Findet keine eingeschaltete Quelle etwas
-      (z. B. vor der Audioanalyse), springen Genre & Jahr ein.
+      {t("Radio, „Ähnliche Titel“ und die Subsonic-Apps mischen ihre Titel aus den eingeschalteten Quellen. Der Regler legt fest, wie stark eine Quelle zählt; die Prozentzahl zeigt ihren Anteil an allen eingeschalteten. Titel, die mehrere Quellen vorschlagen, kommen zuerst. Findet keine eingeschaltete Quelle etwas (z. B. vor der Audioanalyse), springen Genre & Jahr ein.")}
     </p>
-    <h2 class="sub">Reihenfolge</h2>
+    <h2 class="sub">{t("Reihenfolge")}</h2>
     <div class="set-card">
       <label class="set-row">
         <span class="set-label">
-          <strong>Keine großen Tempo-Sprünge</strong>
-          <small>Von den nächsten Titeln eines Radios kommt der zuerst, dessen BPM am besten zum vorigen passt. Halbes und doppeltes Tempo (70 und 140 BPM) gelten als passend. Braucht die Audioanalyse.</small>
+          <strong>{t("Keine großen Tempo-Sprünge")}</strong>
+          <small>{t("Von den nächsten Titeln eines Radios kommt der zuerst, dessen BPM am besten zum vorigen passt. Halbes und doppeltes Tempo (70 und 140 BPM) gelten als passend. Braucht die Audioanalyse.")}</small>
         </span>
         <input type="checkbox" class="toggle" checked={data.options.smooth_tempo} onchange={(e) => saveOption({ smooth_tempo: e.currentTarget.checked })} />
       </label>
     </div>
     <p class="set-note">
-      Überspringt jemand einen Titel in den ersten 30 Sekunden eines Radios, kommt er bei dieser Person in ähnlichen Radios seltener: im selben Radio deutlich,
-      in Radios zu denselben Künstlern etwas weniger, bei laut ListenBrainz ähnlichen Künstlern nur leicht. Nach zwei Monaten zählt ein Überspringen nur noch
-      halb, nach einem halben Jahr gar nicht mehr. Zufallswiedergabe, Playlists und „Ähnliche Titel“ bleiben davon unberührt.
+      {t("Überspringt jemand einen Titel in den ersten 30 Sekunden eines Radios, kommt er bei dieser Person in ähnlichen Radios seltener: im selben Radio deutlich, in Radios zu denselben Künstlern etwas weniger, bei laut ListenBrainz ähnlichen Künstlern nur leicht. Nach zwei Monaten zählt ein Überspringen nur noch halb, nach einem halben Jahr gar nicht mehr. Zufallswiedergabe, Playlists und „Ähnliche Titel“ bleiben davon unberührt.")}
     </p>
-    <p class="set-note">Warum ein Titel in einem Radio, bei „Ähnliche Titel“ oder in einer Auto-Playlist ist, sehen nur Admins, in der Spalte rechts neben dem Titel.</p>
+    <p class="set-note">{t("Warum ein Titel in einem Radio, bei „Ähnliche Titel“ oder in einer Auto-Playlist ist, sehen nur Admins, in der Spalte rechts neben dem Titel.")}</p>
   {:else}
-    <p class="set-note">Lädt …</p>
+    <p class="set-note">{t("Lädt …")}</p>
   {/if}
 </section>
 

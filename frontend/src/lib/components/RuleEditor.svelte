@@ -3,8 +3,10 @@
   // preview of how many tracks match. Used for smart playlists and admin rule playlists.
   import { untrack } from "svelte";
   import { ApiError, get, post, type Rule, type RuleCondition, type RuleField, type Track } from "../api";
+  import { ruleFieldLabels } from "../errors";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
+  import { locale, msg, t } from "../i18n.svelte";
 
   let {
     title,
@@ -23,13 +25,26 @@
   } = $props();
 
   const OP_LABELS: Record<string, string> = {
-    "=": "ist", "!=": "ist nicht", "<": "kleiner als", "<=": "höchstens", ">": "größer als", ">=": "mindestens",
-    between: "zwischen", is: "ist", is_not: "ist nicht", contains: "enthält",
+    "=": msg("ist"),
+    "!=": msg("ist nicht"),
+    "<": msg("kleiner als"),
+    "<=": msg("höchstens"),
+    ">": msg("größer als"),
+    ">=": msg("mindestens"),
+    between: msg("zwischen"),
+    is: msg("ist"),
+    is_not: msg("ist nicht"),
+    contains: msg("enthält"),
   };
   const ORDER_LABELS: Record<string, string> = {
-    random: "Zufällig", added: "Neu hinzugefügt", year: "Jahr", title: "Titel", bpm: "Tempo", energy: "Energie",
+    random: msg("Zufällig"),
+    added: msg("Neu hinzugefügt"),
+    year: msg("Jahr"),
+    title: msg("Titel|Sortierung"),
+    bpm: msg("Tempo"),
+    energy: msg("Energie"),
   };
-  const OPTION_LABELS: Record<string, string> = { major: "Dur", minor: "Moll" };
+  const OPTION_LABELS: Record<string, string> = { major: msg("Dur"), minor: msg("Moll") };
 
   let fields = $state<RuleField[]>([]);
   let orders = $state<string[]>(["random"]);
@@ -51,6 +66,7 @@
   $effect(() => {
     get<{ fields: RuleField[]; orders: string[] }>("/rules/fields").then((r) => {
       fields = r.fields;
+      for (const f of r.fields) ruleFieldLabels[f.name] = f.label;
       orders = r.orders;
     });
     get<{ name: string }[]>("/genres").then((g) => (genres = g.map((x) => x.name)));
@@ -90,7 +106,7 @@
         previewError = null;
       } catch (e) {
         preview = null;
-        previewError = e instanceof ApiError ? e.message : "Fehler";
+        previewError = e instanceof ApiError ? e.message : t("Fehler");
       }
     }, 350);
     return () => clearTimeout(timer);
@@ -101,7 +117,7 @@
     try {
       await onsave(name.trim(), JSON.parse(JSON.stringify(rule)));
     } catch (e) {
-      previewError = e instanceof ApiError ? e.message : "Speichern fehlgeschlagen";
+      previewError = e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen");
     } finally {
       saving = false;
     }
@@ -113,60 +129,60 @@
 <Modal {title} {onclose} width={680}>
   <div class="editor">
     {#if askName}
-      <label class="name">Name<input bind:value={name} maxlength="200" placeholder="z. B. Schnelle 90er" /></label>
+      <label class="name">{t("Name")}<input bind:value={name} maxlength="200" placeholder={t("z. B. Schnelle 90er")} /></label>
     {/if}
     <div class="match">
-      Titel, die
-      <select bind:value={match} aria-label="Verknüpfung">
-        <option value="all">alle</option>
-        <option value="any">mindestens eine</option>
+      {t("Titel, die")}
+      <select bind:value={match} aria-label={t("Verknüpfung")}>
+        <option value="all">{t("alle")}</option>
+        <option value="any">{t("mindestens eine")}</option>
       </select>
-      Bedingungen erfüllen:
+      {t("Bedingungen erfüllen:")}
     </div>
 
     {#each conditions as c, i (i)}
       {@const f = fieldOf(c.field)}
       <div class="cond">
-        <select value={c.field} onchange={(e) => setField(c, e.currentTarget.value)} aria-label="Feld">
+        <select value={c.field} onchange={(e) => setField(c, e.currentTarget.value)} aria-label={t("Feld")}>
           {#each fields as opt (opt.name)}<option value={opt.name}>{opt.label}{opt.needs_analysis ? " ✦" : ""}</option>{/each}
         </select>
-        <select value={c.op} onchange={(e) => setOp(c, e.currentTarget.value)} aria-label="Operator">
-          {#each f?.ops ?? [] as op (op)}<option value={op}>{OP_LABELS[op] ?? op}</option>{/each}
+        <select value={c.op} onchange={(e) => setOp(c, e.currentTarget.value)} aria-label={t("Operator")}>
+          {#each f?.ops ?? [] as op (op)}<option value={op}>{OP_LABELS[op] ? t(OP_LABELS[op]) : op}</option>{/each}
         </select>
         <span class="value">
           {#if f?.kind === "enum"}
-            <select bind:value={c.value} aria-label="Wert">
-              {#each f.options as o (o)}<option value={o}>{OPTION_LABELS[o] ?? o}</option>{/each}
+            <select bind:value={c.value} aria-label={t("Wert")}>
+              {#each f.options as o (o)}<option value={o}>{OPTION_LABELS[o] ? t(OPTION_LABELS[o]) : o}</option>{/each}
             </select>
           {:else if f?.kind === "text"}
-            <input bind:value={c.value} list={c.field === "genre" ? "genre-list" : c.field === "style" ? "style-list" : undefined} aria-label="Wert" />
+            <input bind:value={c.value} list={c.field === "genre" ? "genre-list" : c.field === "style" ? "style-list" : undefined} aria-label={t("Wert")} />
           {:else if Array.isArray(c.value)}
             <input type="number" step={isScale(c) ? 0.05 : 1} min={isScale(c) ? 0 : undefined} max={isScale(c) ? 1 : undefined}
-              value={display(c.value[0])} oninput={(e) => ((c.value as [number, number])[0] = Number(e.currentTarget.value))} aria-label="Von" />
-            <span>und</span>
+              value={display(c.value[0])} oninput={(e) => ((c.value as [number, number])[0] = Number(e.currentTarget.value))} aria-label={t("Von")} />
+            <span>{t("und")}</span>
             <input type="number" step={isScale(c) ? 0.05 : 1} min={isScale(c) ? 0 : undefined} max={isScale(c) ? 1 : undefined}
-              value={display(c.value[1])} oninput={(e) => ((c.value as [number, number])[1] = Number(e.currentTarget.value))} aria-label="Bis" />
+              value={display(c.value[1])} oninput={(e) => ((c.value as [number, number])[1] = Number(e.currentTarget.value))} aria-label={t("Bis")} />
           {:else if isScale(c)}
-            <input type="range" min="0" max="1" step="0.05" bind:value={c.value} style:--p="{Number(c.value) * 100}%" aria-label="Wert" />
+            <input type="range" min="0" max="1" step="0.05" bind:value={c.value} style:--p="{Number(c.value) * 100}%" aria-label={t("Wert")} />
             <span class="pct">{Math.round(Number(c.value) * 100)} %</span>
           {:else}
-            <input type="number" bind:value={c.value} aria-label="Wert" />{#if f?.unit}<span>{f.unit}</span>{/if}
+            <input type="number" bind:value={c.value} aria-label={t("Wert")} />{#if f?.unit}<span>{f.unit}</span>{/if}
           {/if}
         </span>
-        <button class="icon-btn" aria-label="Bedingung entfernen" disabled={conditions.length === 1}
+        <button class="icon-btn" aria-label={t("Bedingung entfernen")} disabled={conditions.length === 1}
           onclick={() => conditions.splice(i, 1)}><Icon name="close" size={16} /></button>
       </div>
     {/each}
     <datalist id="genre-list">{#each genres as g (g)}<option value={g}></option>{/each}</datalist>
     <datalist id="style-list">{#each styles as s (s)}<option value={s}></option>{/each}</datalist>
     <button class="btn ghost small" onclick={() => conditions.push({ field: "year", op: ">=", value: 2000 })}>
-      <Icon name="plus" size={16} /> Bedingung
+      <Icon name="plus" size={16} /> {t("Bedingung")}
     </button>
 
     <div class="row">
-      <label>Höchstens <input type="number" min="1" max="1000" bind:value={limit} class="short" /> Titel</label>
-      <label>sortiert nach
-        <select bind:value={order}>{#each orders as o (o)}<option value={o}>{ORDER_LABELS[o] ?? o}</option>{/each}</select>
+      <label>{t("Höchstens")} <input type="number" min="1" max="1000" bind:value={limit} class="short" /> {t("Titel|Anzahl")}</label>
+      <label>{t("sortiert nach")}
+        <select bind:value={order}>{#each orders as o (o)}<option value={o}>{ORDER_LABELS[o] ? t(ORDER_LABELS[o]) : o}</option>{/each}</select>
       </label>
     </div>
 
@@ -174,8 +190,8 @@
       {#if previewError}
         <span class="err">{previewError}</span>
       {:else if preview}
-        <strong>{preview.count.toLocaleString("de-DE")}</strong> passende Titel{#if preview.count === 0 && preview.needs_analysis}
-          – ✦-Felder brauchen die Audioanalyse; ist sie fertig?{/if}
+        <strong>{preview.count.toLocaleString(locale())}</strong> {t("passende Titel")}{#if preview.count === 0 && preview.needs_analysis}
+          {t("– ✦-Felder brauchen die Audioanalyse; ist sie fertig?")}{/if}
         {#if preview.tracks.length}
           <ul>{#each preview.tracks.slice(0, 5) as t (t.id)}<li>{t.title} <small>· {t.artist}</small></li>{/each}</ul>
         {/if}
@@ -183,11 +199,11 @@
         …
       {/if}
     </div>
-    <p class="hint">✦ = aus der Audioanalyse. Energie, Tanzbarkeit usw. gehen von 0 % bis 100 %.</p>
+    <p class="hint">{t("✦ = aus der Audioanalyse. Energie, Tanzbarkeit usw. gehen von 0 % bis 100 %.")}</p>
 
     <div class="buttons">
-      <button class="btn ghost" onclick={onclose}>Abbrechen</button>
-      <button class="btn primary" disabled={saving || !!previewError || (askName && !name.trim())} onclick={save}>Speichern</button>
+      <button class="btn ghost" onclick={onclose}>{t("Abbrechen")}</button>
+      <button class="btn primary" disabled={saving || !!previewError || (askName && !name.trim())} onclick={save}>{t("Speichern")}</button>
     </div>
   </div>
 </Modal>

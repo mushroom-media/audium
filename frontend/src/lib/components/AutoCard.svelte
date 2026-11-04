@@ -8,6 +8,7 @@
   import { href } from "../router.svelte";
   import Cover from "./Cover.svelte";
   import Icon from "./Icon.svelte";
+  import { t } from "../i18n.svelte";
 
   let { playlist, actions }: { playlist: AutoPlaylist; actions?: Snippet } = $props();
   const origin = $derived(ORIGINS[playlist.origin]);
@@ -16,10 +17,10 @@
 <a class="card" href={href(`/discover/${playlist.id}`)}>
   <div class="art">
     <Cover hash={playlist.cover} size={256} />
-    <span class="badge" title="{origin.label}: {origin.hint}"><Icon name={origin.icon} size={14} /></span>
+    <span class="badge" title="{t(origin.label)}: {t(origin.hint)}"><Icon name={origin.icon} size={14} /></span>
   </div>
   <div class="title">{playlist.name}</div>
-  <div class="sub">{plural(playlist.track_count, "Titel", "Titel")} · {origin.label}</div>
+  <div class="sub">{plural(playlist.track_count, "Titel", "Titel")} · {t(origin.label)}</div>
   {#if actions}{@render actions()}{/if}
 </a>
 

@@ -15,6 +15,7 @@
   import { player } from "../lib/player.svelte";
   import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { promptText, toast, ui } from "../lib/ui.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { id }: { id: string } = $props();
   const pid = $derived(Number(id));
@@ -49,7 +50,7 @@
       error = null;
     } catch (e) {
       meta = null;
-      error = e instanceof ApiError && e.status === 404 ? "Diese Playlist gibt es nicht (mehr) oder sie ist nicht für dich freigegeben." : String(e);
+      error = e instanceof ApiError && e.status === 404 ? t("Diese Playlist gibt es nicht (mehr) oder sie ist nicht für dich freigegeben.") : String(e);
     }
   }
 
@@ -111,29 +112,29 @@
       reload();
       loadPlaylists();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
   async function rename() {
-    const name = await promptText("Playlist umbenennen", meta?.name ?? "", "Speichern");
+    const name = await promptText(t("Playlist umbenennen"), meta?.name ?? "", t("Speichern"));
     if (name) act(() => patch(`/playlists/${pid}`, { name }));
   }
 
   async function describe() {
-    const description = await promptText("Beschreibung", meta?.description ?? "", "Speichern");
+    const description = await promptText(t("Beschreibung"), meta?.description ?? "", t("Speichern"));
     if (description !== null) act(() => patch(`/playlists/${pid}`, { description }));
   }
 
   async function remove() {
-    if (!confirm(`„${meta?.name}“ wirklich löschen? Das kann nicht rückgängig gemacht werden.`)) return;
+    if (!confirm(t("„{name}“ wirklich löschen? Das kann nicht rückgängig gemacht werden.", { name: meta?.name ?? "" }))) return;
     try {
       await del(`/playlists/${pid}`);
       await loadPlaylists();
       navigate("/", { replace: true });
-      toast("Playlist gelöscht");
+      toast(t("Playlist gelöscht"));
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
@@ -184,11 +185,11 @@
 {#if error}
   <div class="page"><p class="empty">{error}</p></div>
 {:else if meta}
-  <VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Titel der Playlist" keep="playlist:{id}">
+  <VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label={t("Titel der Playlist")} keep="playlist:{id}">
     {#snippet header()}
       <header class="hero">
         {#if isOwner}
-          <button class="art edit" onclick={() => (pickingCover = true)} aria-label="Cover ändern" title="Cover ändern">
+          <button class="art edit" onclick={() => (pickingCover = true)} aria-label={t("Cover ändern")} title={t("Cover ändern")}>
             <PlaylistCover playlist={meta!} />
             <span class="edit-badge" aria-hidden="true"><Icon name="image" size={18} /></span>
           </button>
@@ -197,32 +198,32 @@
         {/if}
         <div class="info">
           <p class="kind">
-            {isSmart ? "Smart-Playlist" : "Playlist"}{#if meta!.visibility === "users"} · für alle sichtbar{/if}{#if meta!.role !== "owner"} · von {meta!.owner.display_name}{/if}
+            {isSmart ? t("Smart-Playlist") : t("Playlist")}{#if meta!.visibility === "users"} {t("· für alle sichtbar")}{/if}{#if meta!.role !== "owner"} · {t("von {name}", { name: meta!.owner.display_name })}{/if}
           </p>
           <h1 use:pageTitle={meta!.name}>{meta!.name}</h1>
           {#if meta!.description}<p class="desc">{meta!.description}</p>{/if}
           <p class="by">
             {plural(meta!.item_count, "Titel", "Titel")}{#if meta!.duration_ms}, {longDuration(meta!.duration_ms)}{/if}
-            {#if meta!.role === "editor"} · du kannst bearbeiten{:else if meta!.role === "viewer"} · nur ansehen{/if}
+            {#if meta!.role === "editor"} {t("· du kannst bearbeiten")}{:else if meta!.role === "viewer"} {t("· nur ansehen")}{/if}
           </p>
           <div class="actions">
             <PlayToggle ref="playlist:{pid}" disabled={!meta!.item_count} start={() => play(0, false)} />
-            <button class="btn square" disabled={!meta!.item_count} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
+            <button class="btn square" disabled={!meta!.item_count} onclick={() => play(null, true)} title={t("Zufällig abspielen")} aria-label={t("Zufällig abspielen")}><Icon name="shuffle" size={18} /></button>
             {#if isOwner}
-              <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> Teilen</button>
-              {#if isSmart}<button class="btn ghost" onclick={() => (editingRule = true)}><Icon name="spark" size={18} /> Regel</button>{/if}
-              <button class="icon-btn" title="Umbenennen" aria-label="Umbenennen" onclick={rename}><Icon name="edit" size={18} /></button>
-              <button class="icon-btn" title="Beschreibung" aria-label="Beschreibung bearbeiten" onclick={describe}><Icon name="list" size={18} /></button>
-              <button class="icon-btn" title="Löschen" aria-label="Playlist löschen" onclick={remove}><Icon name="trash" size={18} /></button>
+              <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> {t("Teilen")}</button>
+              {#if isSmart}<button class="btn ghost" onclick={() => (editingRule = true)}><Icon name="spark" size={18} /> {t("Regel")}</button>{/if}
+              <button class="icon-btn" title={t("Umbenennen")} aria-label={t("Umbenennen")} onclick={rename}><Icon name="edit" size={18} /></button>
+              <button class="icon-btn" title={t("Beschreibung")} aria-label={t("Beschreibung bearbeiten")} onclick={describe}><Icon name="list" size={18} /></button>
+              <button class="icon-btn" title={t("Löschen")} aria-label={t("Playlist löschen")} onclick={remove}><Icon name="trash" size={18} /></button>
             {:else if meta!.role !== "viewer" || meta!.visibility !== "users"}
-              <button class="btn ghost" onclick={leave}>Aus meiner Liste entfernen</button>
+              <button class="btn ghost" onclick={leave}>{t("Aus meiner Liste entfernen")}</button>
             {/if}
           </div>
         </div>
       </header>
       {#if meta!.item_count === 0}
         <p class="empty">
-          Noch leer. Füge Titel über das <Icon name="more" size={14} />-Menü bei einem Titel oder Album hinzu.
+          {t("Noch leer. Füge Titel über das")} <Icon name="more" size={14} />{t("-Menü bei einem Titel oder Album hinzu.")}
         </p>
       {/if}
     {/snippet}
@@ -271,7 +272,7 @@
 {/if}
 
 {#if editingRule && meta?.rule}
-  <RuleEditor title="Regel von „{meta.name}“" initial={meta.rule as Rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
+  <RuleEditor title={t("Regel von „{name}“", { name: meta.name })} initial={meta.rule as Rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
 {/if}
 
 <style>

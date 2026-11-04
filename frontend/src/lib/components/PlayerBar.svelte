@@ -3,7 +3,7 @@
   import type { Track } from "../api";
   import { devices, others } from "../devices.svelte";
   import { duration } from "../format";
-  import { player } from "../player.svelte";
+  import { player, REPEAT_LABELS } from "../player.svelte";
   import * as Q from "../queue";
   import { href } from "../router.svelte";
   import { resist, swipe } from "../swipe";
@@ -12,6 +12,7 @@
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
   import RemoteStrip from "./RemoteStrip.svelte";
+  import { t } from "../i18n.svelte";
 
   const track = $derived(player.current);
   let dragging = $state<number | null>(null);
@@ -60,11 +61,13 @@
   });
   let strip = $state<HTMLElement>();
   let busy = false; // the swipe's animation is running
+  let sliding = $state(false); // edges fade while the tracks move
   const canSkip = (dx: number) => slides.some((s) => s.offset === (dx < 0 ? 1 : -1));
 
   const slideSwipe = {
     enabled: () => !!phone?.matches && !busy && !!track,
     onmove(dx: number) {
+      sliding = true;
       if (strip) strip.style.transform = `translateX(${canSkip(dx) ? dx : resist(dx, strip.offsetWidth, 0.15)}px)`;
     },
     onend: release,
@@ -97,10 +100,11 @@
         .finished.catch(() => {});
     }
     busy = false;
+    sliding = false;
   }
 </script>
 
-<footer class="bar" aria-label="Player">
+<footer class="bar" aria-label={t("Player")}>
   <RemoteStrip />
   <input
     class="seek"
@@ -110,8 +114,8 @@
     step="0.1"
     value={shown}
     style:--p="{progress}%"
-    aria-label="Position"
-    aria-valuetext="{duration(shown * 1000)} von {duration(player.duration * 1000)}"
+    aria-label={t("Position")}
+    aria-valuetext={t("{pos} von {total}", { pos: duration(shown * 1000), total: duration(player.duration * 1000) })}
     disabled={!track}
     oninput={(e) => (dragging = Number(e.currentTarget.value))}
     onchange={(e) => {
@@ -122,11 +126,11 @@
   <div class="now">
     {#if track}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (cover and title are the keyboard targets) -->
-      <div class="slides" use:swipe={slideSwipe} onclickcapture={tapNow}>
+      <div class="slides" class:sliding use:swipe={slideSwipe} onclickcapture={tapNow}>
         <div class="strip" bind:this={strip}>
           {#each slides as s (s.key)}
             <div class="slide" style:--offset={s.offset} inert={s.offset !== 0}>
-              <a class="art" href={href(`/albums/${s.track.album_id}`)} title={s.track.album} aria-label="Album {s.track.album} öffnen"><Cover hash={s.track.cover} size={64} /></a>
+              <a class="art" href={href(`/albums/${s.track.album_id}`)} title={s.track.album} aria-label={t("Album {album} öffnen", { album: s.track.album ?? "" })}><Cover hash={s.track.cover} size={64} /></a>
               <div class="meta">
                 <button class="title" title={s.track.title} onclick={openNowPlaying}>{s.track.title}</button>
                 <div class="artist"><ArtistLinks track={s.track} /></div>
@@ -137,25 +141,25 @@
       </div>
       <Heart {track} />
     {:else}
-      <div class="meta idle">Nichts in der Warteschlange</div>
+      <div class="meta idle">{t("Nichts in der Warteschlange")}</div>
     {/if}
   </div>
 
   <div class="controls">
-    <button class="icon-btn side" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} disabled={player.radio} title={player.radio ? "Radio hat schon eine eigene Reihenfolge" : "Zufallswiedergabe (S)"} aria-pressed={player.queue.shuffle} aria-label="Zufallswiedergabe">
+    <button class="icon-btn side" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} disabled={player.radio} title={player.radio ? t("Radio hat schon eine eigene Reihenfolge") : t("Zufallswiedergabe (S)")} aria-pressed={player.queue.shuffle} aria-label={t("Zufallswiedergabe")}>
       <Icon name="shuffle" size={18} />
     </button>
-    <button class="icon-btn" onclick={() => player.prev()} title="Zurück (Shift+←)" aria-label="Zurück" disabled={!track}>
+    <button class="icon-btn" onclick={() => player.prev()} title={t("Zurück (Shift+←)")} aria-label={t("Zurück")} disabled={!track}>
       <Icon name="prev" size={20} />
     </button>
-    <button class="playpause" onclick={() => player.toggle()} title="Abspielen/Pause (Leertaste)" aria-label={player.playing ? "Pause" : "Abspielen"} disabled={!track}>
+    <button class="playpause" onclick={() => player.toggle()} title={t("Abspielen/Pause (Leertaste)")} aria-label={player.playing ? "Pause" : "Abspielen"} disabled={!track}>
       {#if player.buffering && player.playing}<span class="spin" aria-hidden="true"></span>{/if}
       <Icon name={player.playing ? "pause" : "play"} size={22} />
     </button>
-    <button class="icon-btn" onclick={() => player.next()} title="Weiter (Shift+→)" aria-label="Weiter" disabled={!track}>
+    <button class="icon-btn" onclick={() => player.next()} title={t("Weiter (Shift+→)")} aria-label={t("Weiter")} disabled={!track}>
       <Icon name="next" size={20} />
     </button>
-    <button class="icon-btn side repeat" class:on={player.queue.repeat !== "off"} onclick={() => player.cycleRepeat()} title="Wiederholen (R)" aria-label="Wiederholen: {player.queue.repeat}">
+    <button class="icon-btn side repeat" class:on={player.queue.repeat !== "off"} onclick={() => player.cycleRepeat()} title={t("Wiederholen (R)")} aria-label={t(REPEAT_LABELS[player.queue.repeat])}>
       <Icon name="repeat" size={18} />
       {#if player.queue.repeat === "one"}<span class="one">1</span>{/if}
     </button>
@@ -163,7 +167,7 @@
 
   <div class="right">
     <span class="time">{duration(shown * 1000)} / {duration(player.duration * 1000)}</span>
-    <button class="icon-btn" onclick={() => player.setMuted(!player.muted)} title="Stumm (M)" aria-label={player.muted ? "Ton an" : "Stumm"}>
+    <button class="icon-btn" onclick={() => player.setMuted(!player.muted)} title={t("Stumm (M)")} aria-label={player.muted ? "Ton an" : "Stumm"}>
       <Icon name={player.muted || player.volume === 0 ? "mute" : "volume"} size={18} />
     </button>
     <input
@@ -174,18 +178,18 @@
       step="0.01"
       value={player.muted ? 0 : player.volume}
       style:--p="{(player.muted ? 0 : player.volume) * 100}%"
-      aria-label="Lautstärke"
+      aria-label={t("Lautstärke")}
       oninput={(e) => player.setVolume(Number(e.currentTarget.value))}
     />
     {#if others().length || devices.target}
-      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} title="Gerät steuern" aria-label="Gerät steuern">
+      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} title={t("Gerät steuern")} aria-label={t("Gerät steuern")}>
         <Icon name="devices" size={18} />
       </button>
     {/if}
-    <button class="icon-btn" class:on={player.queueOpen} onclick={() => (player.queueOpen = !player.queueOpen)} title="Warteschlange (Q)" aria-label="Warteschlange" aria-pressed={player.queueOpen}>
+    <button class="icon-btn" class:on={player.queueOpen} onclick={() => (player.queueOpen = !player.queueOpen)} title={t("Warteschlange (Q)")} aria-label={t("Warteschlange")} aria-pressed={player.queueOpen}>
       <Icon name="queue" size={18} />
     </button>
-    <button class="icon-btn" onclick={openNowPlaying} disabled={!track} title="Jetzt läuft (N)" aria-label="Jetzt läuft öffnen">
+    <button class="icon-btn" onclick={openNowPlaying} disabled={!track} title={t("Jetzt läuft (N)")} aria-label={t("Jetzt läuft öffnen")}>
       <Icon name="expand" size={18} />
     </button>
   </div>
@@ -211,6 +215,12 @@
     top: -7px;
     width: 100%;
     margin: 0;
+  }
+  /* Registered so the swipe's edge fade can transition. */
+  @property --fade {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
   }
   .now {
     display: flex;
@@ -363,6 +373,14 @@
       align-self: stretch;
       overflow: hidden;
       touch-action: pan-y;
+      /* Tracks fade in and out at the edges while swiping; at rest the cover keeps a hard edge. */
+      --fade: 0px;
+      mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+      transition: --fade 200ms ease;
+    }
+    .slides.sliding {
+      --fade: 28px;
+      transition-duration: 120ms;
     }
     .strip {
       position: absolute;

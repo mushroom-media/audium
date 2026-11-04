@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Letter } from "../api";
+  import { t } from "../i18n.svelte";
 
   // A-Z strip at the right edge of long alphabetical lists (touch devices): drag along it to jump
   // straight to a letter, like the contacts app. Letters without entries jump to the one before.
@@ -49,10 +50,10 @@
   onpointerup={() => (active = null)}
   onpointercancel={() => (active = null)}
   role="navigation"
-  aria-label="Zu Buchstabe springen"
+  aria-label={t("Zu Buchstabe springen")}
 >
   {#each ALL as l, i (l)}
-    <button class="l" class:off={!present.has(l)} class:here={l === here} tabindex="-1" aria-label="Zu {l}" onclick={() => onjump(offsetFor(i))}>{l}</button>
+    <button class="l" class:off={!present.has(l)} class:here={l === here} tabindex="-1" aria-label={t("Zu {letter}", { letter: l })} onclick={() => onjump(offsetFor(i))}>{l}</button>
   {/each}
   {#if active}<div class="bubble" style:top="{active.y}px" aria-hidden="true">{active.letter}</div>{/if}
 </div>

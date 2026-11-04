@@ -8,6 +8,7 @@
   import { mine } from "../lib/mine.svelte";
   import { keptList } from "../lib/paged.svelte";
   import { player } from "../lib/player.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   // Reload when the set of favorite albums changes (hearts clicked on an album page).
   const list = $derived.by(() => {
@@ -23,16 +24,16 @@
 
 {#snippet header()}
   <header class="head">
-    <h1 use:pageTitle={"Lieblingsalben"}>Lieblingsalben</h1>
+    <h1 use:pageTitle={"Lieblingsalben"}>{t("Lieblingsalben")}</h1>
     {#if list.total !== null}<p class="count">{plural(list.total, "Album", "Alben")}</p>{/if}
     {#if list.total}
       <div class="actions">
-        <button class="btn" onclick={shuffleAll} title="Alle Titel der Lieblingsalben zufällig abspielen">
-          <Icon name="shuffle" size={18} /> Zufällig
+        <button class="btn" onclick={shuffleAll} title={t("Alle Titel der Lieblingsalben zufällig abspielen")}>
+          <Icon name="shuffle" size={18} /> {t("Zufällig")}
         </button>
       </div>
     {/if}
-    {#if list.total === 0}<p class="empty">Markiere Alben mit dem Herz auf der Albumseite, dann erscheinen sie hier.</p>{/if}
+    {#if list.total === 0}<p class="empty">{t("Markiere Alben mit dem Herz auf der Albumseite, dann erscheinen sie hier.")}</p>{/if}
   </header>
 {/snippet}
 

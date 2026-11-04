@@ -9,6 +9,7 @@
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
+  import { locale, t } from "../i18n.svelte";
 
   let {
     track,
@@ -78,7 +79,7 @@
     onend(_dx: number, _velocity: number, cancelled: boolean) {
       if (pastThreshold && !cancelled && track) {
         player.enqueue([track]);
-        toast("Zur Warteschlange hinzugefügt");
+        toast(t("Zur Warteschlange hinzugefügt"));
       }
       settling = pull > 0;
       pull = 0;
@@ -103,7 +104,7 @@
     ontransitioncancel={() => (settling = false)}
     class:active
     class:unavailable
-    title={unavailable ? "Datei fehlt gerade in der Bibliothek" : undefined}
+    title={unavailable ? t("Datei fehlt gerade in der Bibliothek") : undefined}
     oncontextmenu={(e) => openTrackMenu(e, [track])}
     class:no-album={!showAlbum}
     class:has-count={count != null}
@@ -130,21 +131,21 @@
       {#if note}<span class="album note" title={note}>{note}</span>
       {:else}<a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>{/if}
     {/if}
-    {#if count != null}<div class="count">{count.toLocaleString("de-DE")}</div>{/if}
+    {#if count != null}<div class="count">{count.toLocaleString(locale())}</div>{/if}
     <div class="dur">{duration(track.duration_ms)}</div>
     <div class="actions">
       {#if ondislike}
-        <button class="icon-btn" title="Mag ich nicht" aria-label="{track.title}: Mag ich nicht" onclick={(e) => (e.stopPropagation(), ondislike())}>
+        <button class="icon-btn" title={t("Mag ich nicht")} aria-label={t("{title}: Mag ich nicht", { title: track.title })} onclick={(e) => (e.stopPropagation(), ondislike())}>
           <Icon name="dislike" size={17} />
         </button>
       {/if}
       <Heart {track} size={17} />
       {#if onremove}
-        <button class="icon-btn" title="Aus Playlist entfernen" aria-label="Aus Playlist entfernen" onclick={(e) => (e.stopPropagation(), onremove())}>
+        <button class="icon-btn" title={t("Aus Playlist entfernen")} aria-label={t("Aus Playlist entfernen")} onclick={(e) => (e.stopPropagation(), onremove())}>
           <Icon name="close" size={16} />
         </button>
       {/if}
-      <button class="icon-btn" title="Mehr" aria-label="Mehr zu {track.title}" onclick={(e) => openTrackMenu(e, [track])}>
+      <button class="icon-btn" title={t("Mehr")} aria-label={t("Mehr zu {title}", { title: track.title })} onclick={(e) => openTrackMenu(e, [track])}>
         <Icon name="more" size={18} />
       </button>
     </div>

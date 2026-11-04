@@ -1,4 +1,4 @@
-"""Why a track is in a station, as a short German text for the admin ("Warum?" column).
+"""Why a track is in a station, as a short text for the admin ("Warum?" column), German or English.
 
 From the shares similarity.blend gives each track, e.g.
 "Klingt ähnlich 70 % · Genre: Rock, 1994 30 %". Sources with a small share are left out.
@@ -9,19 +9,20 @@ from sqlalchemy import Connection, select
 from audium.analysis import explain
 from audium.analysis.similarity import Blend
 from audium.db.schema import artists, genres, track_features, track_genres, tracks
+from audium.i18n import tr
 
 _MIN_PART = 0.2  # of the track's total score; smaller shares are not mentioned
 
 
-def _genre_year(names: list[str], year: int | None) -> str:
+def _genre_year(names: list[str], year: int | None, lang: str) -> str:
     bits = [", ".join(names[:2]), str(year) if year else ""]
     text = ", ".join(b for b in bits if b)
-    return f"Genre: {text}" if text else "Genre/Jahr"
+    return tr(lang, "Genre: {text}", text=text) if text else tr(lang, "Genre/Jahr")
 
 
-def describe(conn: Connection, station: Blend, own: str = "Eigener Titel") -> dict[int, str]:
+def describe(conn: Connection, station: Blend, own: str = "Eigener Titel", lang: str = "de") -> dict[int, str]:
     """track id -> reason, for every track of the station. `own`: label of the group's own
-    tracks ("Vom Album", "Vom Künstler")."""
+    tracks ("Vom Album", "Vom Künstler"), German (translated here)."""
     ids = [t for t, _ in station.picks]
     if not ids:
         return {}
@@ -48,22 +49,26 @@ def describe(conn: Connection, station: Blend, own: str = "Eigener Titel") -> di
 
     def part(t: int, source: str) -> str:
         if source == "seed":
-            return "Startpunkt"
+            return tr(lang, "Startpunkt")
         if source == "own":
-            return own
+            return tr(lang, own)
         if source == "sound":
-            return "Klingt ähnlich"
+            return tr(lang, "Klingt ähnlich")
         if source == "features":
-            text = explain.describe(feats[t]) if t in feats else ""
-            return f"Ähnliche Merkmale ({text})" if text else "Ähnliche Merkmale"
+            text = explain.describe(feats[t], lang=lang) if t in feats else ""
+            return tr(lang, "Ähnliche Merkmale ({text})", text=text) if text else tr(lang, "Ähnliche Merkmale")
         if source == "taste":
-            return "Passt zu deinem Geschmack"
+            return tr(lang, "Passt zu deinem Geschmack")
         if source == "artists":
             via = seed_names.get(station.via.get(t, -1))
-            artist = info[t].artist if t in info else "diese Band"
-            return f"Fans von {via} hören auch {artist}" if via else "Fans hören auch"
-        text = _genre_year(names.get(t, []), info[t].year if t in info else None)
-        return f"Ersatz, {text}" if source == "fallback" else text
+            artist = info[t].artist if t in info else tr(lang, "diese Band")
+            return (
+                tr(lang, "Fans von {via} hören auch {artist}", via=via, artist=artist)
+                if via
+                else tr(lang, "Fans hören auch")
+            )
+        text = _genre_year(names.get(t, []), info[t].year if t in info else None, lang)
+        return tr(lang, "Ersatz, {text}", text=text) if source == "fallback" else text
 
     out: dict[int, str] = {}
     for t, why in station.picks:
@@ -75,5 +80,10 @@ def describe(conn: Connection, station: Blend, own: str = "Eigener Titel") -> di
         else:
             out[t] = " · ".join(f"{part(t, s)} {round(100 * v / total)} %" for s, v in kept)
         if t in station.skipped:
-            out[t] += f" · in ähnlichem Radio übersprungen (× {station.skipped[t]:.2f})".replace(".", ",")
+            factor = f"{station.skipped[t]:.2f}"
+            out[t] += tr(
+                lang,
+                " · in ähnlichem Radio übersprungen (× {factor})",
+                factor=factor.replace(".", ",") if lang == "de" else factor,
+            )
     return out

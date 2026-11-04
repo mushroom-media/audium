@@ -127,6 +127,7 @@ def test_explain():
     assert explain.describe(f, ("bpm", "energy", "danceability")) == "128 BPM · hohe Energie · tanzbar"
     assert explain.describe(f, ("key", "brightness")) == "a-Moll · warmer Klang"
     assert explain.describe({"energy": 0.5}, ("energy",)) == ""
+    assert explain.describe(f, ("energy", "key", "brightness"), "en") == "high energy · A minor · warm sound"
 
 
 # --- analysis ------------------------------------------------------------------------------
@@ -411,6 +412,28 @@ def test_visibility_of_auto_playlists(analysed, db, users):
     admin_c.patch(f"/api/v1/admin/autoplaylists/{workout['id']}", json={"access": "admin_only"})
     assert bob_c.get(f"/api/v1/autoplaylists/{workout['id']}").status_code == 404
     assert admin_c.get(f"/api/v1/autoplaylists/{workout['id']}").status_code == 200
+
+
+def test_auto_playlist_names_in_the_user_language(analysed, db, users):
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+    bob_c.patch("/api/v1/auth/me/settings", json={"language": "en"})
+    german = {a["key"]: a for a in admin_c.get("/api/v1/autoplaylists").json()}
+    for a in german.values():
+        admin_c.patch(f"/api/v1/admin/autoplaylists/{a['id']}", json={"status": "published"})
+    english = {a["key"]: a for a in bob_c.get("/api/v1/autoplaylists").json()}
+    assert german["rule:chill"]["name"] == "Zum Entspannen" and english["rule:chill"]["name"] == "To relax"
+    assert english["rule:chill"]["description"] == "Calm and slow."
+    decades = [k for k in english if k.startswith("decade:")]
+    assert decades and all(
+        english[k]["name"].startswith("The ") and german[k]["name"].startswith("Die ") for k in decades
+    )
+    assert any(a["name"].startswith("Mix: ") and a["generator"] == "cluster" for a in english.values())
+    # A name the admin gives is the same for everybody.
+    chill = german["rule:chill"]["id"]
+    admin_c.patch(f"/api/v1/admin/autoplaylists/{chill}", json={"name": "Abends"})
+    assert bob_c.get(f"/api/v1/autoplaylists/{chill}").json()["name"] == "Abends"
 
 
 def test_freeze_copies_into_own_playlist(analysed, db, users):

@@ -4,6 +4,8 @@
 // The look is moody 80s vintage photo: faded warm colours, lifted blacks, film grain and a vignette
 // (the grain/vignette layer is added to every design by presetSvg).
 
+import { msg } from "./i18n.svelte";
+
 export interface CoverPreset {
   name: string;
   svg: string;
@@ -54,7 +56,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 
 export const COVER_PRESETS: CoverPreset[] = [
   {
-    name: "Abendrot",
+    name: msg("Abendrot"),
     svg: `<defs>${lin(SUNSET, 0, 1)}${lin(["#4a2d3c", "#1c1420"], 0, 1, "w")}${haze("h", "#f3c07a", 0.7)}</defs>${bg}
       <circle cx="50" cy="62" r="36" fill="url(#ID-h)"/>
       <g fill="#e3926a" opacity=".45"><rect x="8" y="28" width="38" height="2.2" rx="1.1"/><rect x="58" y="36" width="34" height="1.8" rx=".9"/><rect x="20" y="45" width="26" height="1.4" rx=".7"/></g>
@@ -63,7 +65,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       ${glitter(50, 64, "#eaa864")}`,
   },
   {
-    name: "Wellen",
+    name: msg("Wellen"),
     svg: `<defs>${lin(["#3c4a5c", "#8a7f86", "#d4a27e"], 0, 1)}${haze("h", "#f0dcb4", 0.5)}</defs>${bg}
       <circle cx="72" cy="24" r="18" fill="url(#ID-h)"/><circle cx="72" cy="24" r="8" fill="#f0dcb4" opacity=".9"/>
       ${[
@@ -79,7 +81,7 @@ export const COVER_PRESETS: CoverPreset[] = [
         .join("")}`,
   },
   {
-    name: "Bögen",
+    name: msg("Bögen"),
     svg: `<defs>${lin(["#ece0c6", "#d8c39c"])}</defs>${bg}
       <g fill="none" stroke-width="8">${[
         [38, RUST],
@@ -93,7 +95,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <g fill="${SEPIA}" opacity=".5"><circle cx="16" cy="20" r="1.6"/><circle cx="84" cy="26" r="1.3"/><circle cx="74" cy="12" r="1"/></g>`,
   },
   {
-    name: "Punkte",
+    name: msg("Punkte"),
     svg: `<defs>${lin(["#2a1d2e", "#4a2b45"], 0, 1)}${lin(["#ecbc66", RUST], 0, 1, "s")}</defs>${bg}
       <g fill="${ROSE}" opacity=".5">${Array.from({ length: 100 }, (_, i) => {
         const row = Math.floor(i / 10);
@@ -102,14 +104,14 @@ export const COVER_PRESETS: CoverPreset[] = [
       <circle cx="64" cy="38" r="20" fill="url(#ID-s)"/>`,
   },
   {
-    name: "Streifen",
+    name: msg("Streifen"),
     svg: `<defs>${lin(["#2b2420", SEPIA])}</defs>${bg}
       <g transform="rotate(-28 50 50)">${[CREAM, MUSTARD, RUST, CHERRY]
         .map((c, i) => `<rect x="-30" y="${36 + i * 9}" width="160" height="7" fill="${c}"/>`)
         .join("")}</g>`,
   },
   {
-    name: "Kreise",
+    name: msg("Kreise"),
     svg: `<defs>${lin(["#2a2433", "#3d3348"])}</defs>${bg}
       <g opacity=".8" style="mix-blend-mode:screen">
         <circle cx="38" cy="40" r="22" fill="${ROSE}"/>
@@ -118,7 +120,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Berge",
+    name: msg("Berge"),
     svg: `<defs>${lin(["#3b2f4a", "#8a5e78", "#d99a6c"], 0, 1)}${haze("h", "#f0c890", 0.6)}</defs>${bg}
       <circle cx="60" cy="40" r="26" fill="url(#ID-h)"/><circle cx="60" cy="40" r="11" fill="#f0c890"/>
       <path d="M0 58 14 44l12 8 16-16 16 14 14-10 16 12 12-6v54H0z" fill="#7a5a78"/>
@@ -126,7 +128,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <path d="M0 84 22 68l18 12 20-10 18 12 22-8v26H0z" fill="#2a1f30"/>`,
   },
   {
-    name: "Equalizer",
+    name: msg("Equalizer"),
     svg: `<defs>${lin(["#1e1b18", "#2b2622"])}${haze("h", MUSTARD, 0.25)}</defs>${bg}
       <rect x="10" y="16" width="80" height="68" rx="4" fill="#121614" stroke="#4a443c" stroke-width="1.5"/>
       <ellipse cx="50" cy="56" rx="40" ry="30" fill="url(#ID-h)"/>
@@ -140,7 +142,7 @@ export const COVER_PRESETS: CoverPreset[] = [
         .join("")}`,
   },
   {
-    name: "Vinyl",
+    name: msg("Vinyl"),
     svg: `<defs>${lin(["#3a2a20", "#2a1e17"])}</defs>${bg}
       <circle cx="46" cy="52" r="37" fill="#000" opacity=".3"/>
       <circle cx="44" cy="50" r="36" fill="#141110"/>
@@ -155,7 +157,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <rect x="62" y="56" width="8" height="5" rx="1" fill="#8a8278" transform="rotate(-35 66 58)"/>`,
   },
   {
-    name: "Mosaik",
+    name: msg("Mosaik"),
     svg: `<defs>${lin(["#2a221c", "#231c17"])}</defs>${bg}
       <rect x="10" y="10" width="38" height="38" rx="2" fill="${TEAL}"/>
       <rect x="52" y="10" width="38" height="18" rx="2" fill="${MUSTARD}"/>
@@ -165,7 +167,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <g fill="#fff" opacity=".1"><rect x="10" y="10" width="38" height="6" rx="2"/><rect x="52" y="10" width="38" height="4" rx="2"/><rect x="32" y="52" width="58" height="6" rx="2"/></g>`,
   },
   {
-    name: "Kaffee",
+    name: msg("Kaffee"),
     svg: `<defs>${lin(["#2e2219", "#4a3324"])}${haze("h", "#e8a95c", 0.35)}${soft(1.2)}</defs>${bg}
       <circle cx="18" cy="14" r="40" fill="url(#ID-h)"/>
       <g fill="none" stroke="${CREAM}" stroke-width="2.5" stroke-linecap="round" opacity=".4" filter="url(#ID-f)">
@@ -179,7 +181,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <ellipse cx="48" cy="40" rx="20" ry="4" fill="#3a2418" stroke="#f0e4cc" stroke-width="1.2"/>`,
   },
   {
-    name: "Training",
+    name: msg("Training"),
     svg: `<defs>${lin(["#1f2533", "#3a4560"], 0, 1)}${lin(["#d8d2c6", "#8a8478"], 0, 1, "m")}</defs>${bg}
       <g opacity=".85"><rect y="72" width="100" height="4" fill="${RUST}"/><rect y="78" width="100" height="4" fill="${MUSTARD}"/><rect y="84" width="100" height="4" fill="${CREAM}"/></g>
       <g transform="rotate(-30 50 50)">
@@ -189,7 +191,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Baum",
+    name: msg("Baum"),
     svg: `<defs>${lin(["#3a2a4a", "#a4566a", "#e39a62"], 0, 1)}${haze("h", "#f2c27c", 0.6)}</defs>${bg}
       <circle cx="62" cy="62" r="34" fill="url(#ID-h)"/><circle cx="62" cy="64" r="20" fill="#f2c27c"/>
       <rect y="72" width="100" height="28" fill="#2a1f2e"/>
@@ -202,7 +204,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Cocktail",
+    name: msg("Cocktail"),
     svg: `<defs>${lin(["#2a1d2e", "#4a2b45"])}${haze("h", ROSE, 0.45)}</defs>${bg}
       <circle cx="50" cy="44" r="38" fill="url(#ID-h)"/>
       <path d="M28 30h44L50 52z" fill="${ROSE}" opacity=".9"/>
@@ -214,7 +216,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <circle cx="58" cy="34" r="5" fill="${CHERRY}"/><circle cx="56.5" cy="32.5" r="1.4" fill="#fff" opacity=".35"/>`,
   },
   {
-    name: "Party",
+    name: msg("Party"),
     svg: `<defs>${lin(["#2a1d2e", "#3e2a3c"])}<clipPath id="ID-c"><path d="M30 82 50 22l20 60z"/></clipPath></defs>${bg}
       <g opacity=".85">${[
         [16, 22, 20, MUSTARD],
@@ -232,7 +234,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <circle cx="50" cy="21" r="6" fill="${ROSE}"/>`,
   },
   {
-    name: "Sommer",
+    name: msg("Sommer"),
     svg: `<defs>${lin(["#e2b057", "#cf8a3e"], 0, 1)}</defs>${bg}
       <g fill="${RUST}" opacity=".5">${Array.from({ length: 12 }, (_, i) => {
         const a = (i * 30 * Math.PI) / 180;
@@ -244,7 +246,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <rect y="78" width="100" height="22" fill="${SEPIA}"/>`,
   },
   {
-    name: "Herbst",
+    name: msg("Herbst"),
     svg: `<defs>${lin(["#2e2219", "#3d2f1e"])}</defs>${bg}
       ${[
         [34, 36, -30, RUST, 1.1],
@@ -260,7 +262,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <g fill="${RUST}" opacity=".4"><circle cx="16" cy="88" r="1.5"/><circle cx="88" cy="20" r="1.2"/><circle cx="60" cy="90" r="1"/></g>`,
   },
   {
-    name: "Winter",
+    name: msg("Winter"),
     svg: `<defs>${lin(["#1d2330", "#3a4560"], 0, 1)}${haze("h", "#a8b8c8", 0.3)}</defs>${bg}
       <circle cx="50" cy="50" r="40" fill="url(#ID-h)"/>
       <g fill="${CREAM}" opacity=".5"><circle cx="16" cy="18" r="1.6"/><circle cx="84" cy="24" r="1.2"/><circle cx="20" cy="80" r="1.2"/><circle cx="82" cy="82" r="1.6"/><circle cx="10" cy="50" r="1"/><circle cx="90" cy="56" r="1"/></g>
@@ -270,7 +272,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       ).join("")}</g>`,
   },
   {
-    name: "Frühling",
+    name: msg("Frühling"),
     svg: `<defs>${lin(["#24302c", "#3e5048"], 0, 1)}</defs>${bg}
       <path d="M50 50q-3 20 0 38" fill="none" stroke="${OLIVE}" stroke-width="3" stroke-linecap="round"/>
       <ellipse cx="60" cy="72" rx="10" ry="4.5" fill="${OLIVE}" transform="rotate(-30 60 72)"/>
@@ -281,7 +283,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <circle cx="50" cy="38" r="7" fill="${MUSTARD}"/>`,
   },
   {
-    name: "Lesen",
+    name: msg("Lesen"),
     svg: `<defs>${lin(["#2b2a1e", "#4a4630"], 0, 1)}${haze("h", "#e8b45c", 0.45)}</defs>${bg}
       <circle cx="50" cy="20" r="46" fill="url(#ID-h)"/>
       <g stroke="#2a2018" stroke-width="2" stroke-linejoin="round">
@@ -294,7 +296,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Kassette",
+    name: msg("Kassette"),
     svg: `<defs>${lin(["#3b3266", "#7a5a98", "#c98aa8"])}</defs>${bg}
       <g transform="rotate(-12 50 50)">
         <rect x="15" y="28" width="72" height="48" rx="4" fill="#000" opacity=".3"/>
@@ -311,7 +313,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Kopfhörer",
+    name: msg("Kopfhörer"),
     svg: `<defs>${lin(["#2a2620", "#3d3628"], 0, 1)}${haze("h", "#e8b45c", 0.25)}</defs>${bg}
       <circle cx="80" cy="12" r="40" fill="url(#ID-h)"/>
       ${Array.from({ length: 14 }, (_, i) => {
@@ -325,7 +327,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <g fill="none" stroke="#fff" stroke-width="1" stroke-linecap="round" opacity=".18"><path d="M18 64v14M72 64v14"/></g>`,
   },
   {
-    name: "Gitarre",
+    name: msg("Gitarre"),
     svg: `<defs>${lin(["#1a2238", "#2c3a5c"], 0, 1)}${haze("h", "#d9c7a3", 0.35)}
       <radialGradient id="ID-b" cx=".45" cy=".4" r=".7"><stop offset="0" stop-color="#d0503e"/><stop offset=".6" stop-color="${CHERRY}"/><stop offset="1" stop-color="#5a141c"/></radialGradient></defs>${bg}
       <g stroke="#9ab0d0" stroke-width=".6">${Array.from(
@@ -348,7 +350,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       </g>`,
   },
   {
-    name: "Boombox",
+    name: msg("Boombox"),
     svg: `<defs>${lin(["#4a3024", "#a8683a"], 0, 1)}${haze("h", "#f0c890", 0.3)}</defs>${bg}
       <circle cx="78" cy="14" r="36" fill="url(#ID-h)"/>
       <path d="M24 34v-8h52v8" fill="none" stroke="#5a5c5e" stroke-width="3"/>
@@ -371,7 +373,7 @@ export const COVER_PRESETS: CoverPreset[] = [
       <g fill="#8a8c8e"><rect x="42" y="71" width="4" height="3"/><rect x="48" y="71" width="4" height="3"/><rect x="54" y="71" width="4" height="3"/></g>`,
   },
   {
-    name: "Walkman",
+    name: msg("Walkman"),
     svg: `<defs>${lin(["#5a4a8a", "#a87aa8", "#d9a0a8"])}${lin(["#5a7ab8", "#344c84"], 1, 1, "d")}</defs>${bg}
       <path d="M54 84q10 6 24 0" fill="none" stroke="#c8c8cc" stroke-width="1.6"/>
       <path d="M44 16q-6-8 4-12t26 6 14 50" fill="none" stroke="${INK}" stroke-width="1" opacity=".6"/>

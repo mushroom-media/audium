@@ -9,6 +9,7 @@
   import { mine } from "../lib/mine.svelte";
   import { keptList } from "../lib/paged.svelte";
   import { player } from "../lib/player.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   const QUEUE_WINDOW = 500;
   // Reload when the set of favorites changes (hearts clicked elsewhere).
@@ -23,21 +24,21 @@
   }
 </script>
 
-<VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label="Lieblingssongs" keep="favorites">
+<VirtualList count={list.total ?? 0} rowHeight={56} onrange={(s, e) => list.ensure(s, e)} label={t("Lieblingssongs")} keep="favorites">
   {#snippet header()}
     <header class="hero">
       <div class="badge" aria-hidden="true"><Icon name="heart" size={56} filled /></div>
       <div>
-        <p class="kind">Playlist</p>
-        <h1 use:pageTitle={"Lieblingssongs"}>Lieblingssongs</h1>
+        <p class="kind">{t("Playlist")}</p>
+        <h1 use:pageTitle={"Lieblingssongs"}>{t("Lieblingssongs")}</h1>
         {#if list.total !== null}<p class="count">{plural(list.total, "Titel", "Titel")}</p>{/if}
         <div class="actions">
           <PlayToggle ref="favorites" disabled={!list.total} start={() => playFrom(0)} />
-          <button class="btn square" disabled={!list.total} onclick={() => playFrom(0, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
+          <button class="btn square" disabled={!list.total} onclick={() => playFrom(0, true)} title={t("Zufällig abspielen")} aria-label={t("Zufällig abspielen")}><Icon name="shuffle" size={18} /></button>
         </div>
       </div>
     </header>
-    {#if list.total === 0}<p class="empty">Markiere Titel mit dem Herz, dann erscheinen sie hier.</p>{/if}
+    {#if list.total === 0}<p class="empty">{t("Markiere Titel mit dem Herz, dann erscheinen sie hier.")}</p>{/if}
   {/snippet}
   {#snippet row(i)}
     <div class="pad"><TrackRow track={list.get(i)} number={i + 1} onplay={() => playFrom(i)} /></div>

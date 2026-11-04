@@ -13,6 +13,9 @@ Kinds (`generator`):
 The admin picks the source (state key SOURCE_STATE): "all" makes tag, rule, style and cluster
 playlists; "sound" only what the sound recognition found (detected styles and sound mixes).
 
+Names and descriptions are written in German and English (name/name_en; audium/i18n.py), so every
+user sees them in their language. Item reasons ("128 BPM · hohe Energie") follow the server language.
+
 New playlists start as "suggested" (only the admin sees them) until the admin publishes them;
 genre and family playlists are published at once (Discover lists them under "Alle Genres").
 Existing ones keep status, access and an admin-given name; only their tracks are refreshed.
@@ -45,6 +48,7 @@ from audium.db.schema import (
     tracks,
 )
 from audium.db.state import get_state
+from audium.i18n import server_language, tr
 from audium.logging import get_logger
 from audium.util import now_ms
 
@@ -144,12 +148,13 @@ def seed_of(key: str) -> int:
     return zlib.crc32(key.encode())
 
 
-def decade_name(decade: int) -> str:
-    return f"Die {str(decade)[2:]}er" if decade < 2000 else f"Die {decade}er"
+def _short(decade: int) -> str:
+    return str(decade)[2:] if decade < 2000 else str(decade)
 
 
-def decade_suffix(decade: int) -> str:
-    return f"der {str(decade)[2:]}er" if decade < 2000 else f"der {decade}er"
+def _both(de: str, **params) -> tuple[str, str]:
+    """`de` in German and in English."""
+    return tr("de", de, **params), tr("en", de, **params)
 
 
 # --- helpers -------------------------------------------------------------------------------
@@ -164,6 +169,7 @@ def _shuffled(stmt, key: str):
 
 
 def _with_reasons(conn: Connection, ids: list[int], fields: tuple[str, ...] | None, fixed: str | None = None):
+    lang = server_language(conn)
     if fields is None:
         return [(t, fixed) for t in ids]
     rows = (
@@ -171,7 +177,7 @@ def _with_reasons(conn: Connection, ids: list[int], fields: tuple[str, ...] | No
         if ids
         else {}
     )
-    return [(t, explain.describe(rows[t], fields) if t in rows else fixed) for t in ids]
+    return [(t, explain.describe(rows[t], fields, lang) if t in rows else fixed) for t in ids]
 
 
 def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
@@ -205,13 +211,18 @@ def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
             if len(picked) >= MAX_ITEMS:
                 break
         names = sorted(set(ids.values()), key=lambda n: (n != fam, n))
-        more = "" if len(names) <= 5 else " und mehr"
+        listed = ", ".join(names[:5])
+        description, description_en = (
+            _both("{names} und mehr.", names=listed) if len(names) > 5 else (f"{listed}.",) * 2
+        )
         specs.append(
             {
                 "key": key,
                 "generator": "sound" if detected_only else "family",
                 "name": fam,
-                "description": f"{', '.join(names[:5])}{more}.",
+                "name_en": tr("en", fam),
+                "description": description,
+                "description_en": description_en,
                 "items": list(picked.items()),
                 "status": "published",
             }
@@ -234,12 +245,15 @@ def _tag_specs(conn: Connection) -> list[dict]:
             .where(track_genres.c.genre_id == g.id, _present())
         )
         ids = [r[0] for r in conn.execute(_shuffled(stmt, key))]
+        description, description_en = _both("Alles aus dem Genre {name}.", name=g.name)
         specs.append(
             {
                 "key": key,
                 "generator": "tag",
                 "name": g.name,
-                "description": f"Alles aus dem Genre {g.name}.",
+                "name_en": tr("en", g.name),
+                "description": description,
+                "description_en": description_en,
                 "items": [(t, g.name) for t in ids],
                 "status": "published",
             }
@@ -258,12 +272,16 @@ def _tag_specs(conn: Connection) -> list[dict]:
         key = f"decade:{d}"
         stmt = select(tracks.c.id, tracks.c.year).where(_present(), tracks.c.year.between(d, d + 9))
         rows = conn.execute(stmt.order_by(rules.shuffle_key(seed_of(key))).limit(MAX_ITEMS)).all()
+        name, name_en = _both("Die {d}er", d=_short(d))
+        description, description_en = _both("Musik aus den Jahren {start} bis {end}.", start=d, end=d + 9)
         specs.append(
             {
                 "key": key,
                 "generator": "tag",
-                "name": decade_name(d),
-                "description": f"Musik aus den Jahren {d} bis {d + 9}.",
+                "name": name,
+                "name_en": name_en,
+                "description": description,
+                "description_en": description_en,
                 "items": [(r.id, str(r.year)) for r in rows],
             }
         )
@@ -289,12 +307,18 @@ def _tag_specs(conn: Connection) -> list[dict]:
             .where(track_genres.c.genre_id == c.id, _present(), tracks.c.year.between(c.d, c.d + 9))
         )
         rows = conn.execute(stmt.order_by(rules.shuffle_key(seed_of(key))).limit(MAX_ITEMS)).all()
+        name, name_en = _both("{name} der {d}er", name=c.name, d=_short(c.d))
+        description, description_en = _both(
+            "{name} aus den Jahren {start} bis {end}.", name=c.name, start=c.d, end=c.d + 9
+        )
         specs.append(
             {
                 "key": key,
                 "generator": "tag",
-                "name": f"{c.name} {decade_suffix(c.d)}",
-                "description": f"{c.name} aus den Jahren {c.d} bis {c.d + 9}.",
+                "name": name,
+                "name_en": name_en,
+                "description": description,
+                "description_en": description_en,
                 "items": [(r.id, f"{c.name} · {r.year}") for r in rows],
             }
         )
@@ -320,13 +344,19 @@ def _style_specs(conn: Connection, genre_playlists: set[str]) -> list[dict]:
             .where(track_styles.c.style_id == s.id, track_styles.c.prob >= MIN_STYLE_PROB, _present())
         )
         ids = [r[0] for r in conn.execute(_shuffled(stmt, key))]
-        part_of = f" (gehört zu {s.genre})" if s.genre else ""
+        description, description_en = (
+            _both("Vom Klang her als {name} erkannt (gehört zu {genre}).", name=s.name, genre=s.genre)
+            if s.genre
+            else _both("Vom Klang her als {name} erkannt.", name=s.name)
+        )
         specs.append(
             {
                 "key": key,
                 "generator": "tag",
                 "name": s.name,
-                "description": f"Vom Klang her als {s.name} erkannt{part_of}.",
+                "name_en": s.name,
+                "description": description,
+                "description_en": description_en,
                 "items": [(t, s.name) for t in ids],
             }
         )
@@ -350,7 +380,9 @@ def _rule_specs(conn: Connection, analyzed: int, mood_columns: bool) -> list[dic
                 "key": full_key,
                 "generator": "rule",
                 "name": name,
+                "name_en": tr("en", name),
                 "description": description,
+                "description_en": tr("en", description) if description else description,
                 "rule": rule,
                 "items": _with_reasons(conn, ids, fields),
             }
@@ -387,7 +419,7 @@ def sq_distances(z: np.ndarray, centroids: np.ndarray) -> np.ndarray:
     return np.maximum(d, 0)
 
 
-def _cluster_name(centroid: np.ndarray, names: list[str]) -> str:
+def _cluster_name(centroid: np.ndarray, names: list[str], lang: str) -> str:
     traits = []
     for j in np.argsort(-np.abs(centroid)):
         if abs(centroid[j]) < 0.45 or len(traits) == 2:
@@ -395,8 +427,8 @@ def _cluster_name(centroid: np.ndarray, names: list[str]) -> str:
         high, low = _TRAIT_WORDS[names[j]]
         word = high if centroid[j] > 0 else low
         if word:
-            traits.append(word)
-    return "Mix: " + (" & ".join(traits) if traits else "bunt gemischt")
+            traits.append(tr(lang, word))
+    return tr(lang, "Mix: {traits}", traits=" & ".join(traits) if traits else tr(lang, "bunt gemischt"))
 
 
 def _cluster_specs(conn: Connection, analyzed: int) -> list[dict]:
@@ -427,17 +459,21 @@ def _cluster_specs(conn: Connection, analyzed: int) -> list[dict]:
         if len(members) < MIN_RULE_TRACKS:
             continue
         nearest = members[np.argsort(all_dist[members, j])][:MIX_SIZE]
-        name = _cluster_name(centroids[j], names)
+        name, name_en = _cluster_name(centroids[j], names, "de"), _cluster_name(centroids[j], names, "en")
         while name in used_names:
             name += " +"
+            name_en += " +"
         used_names.add(name)
+        description, description_en = _both("Ähnlich klingende Titel aus deiner Bibliothek, automatisch gruppiert.")
         track_ids = [int(ids[i]) for i in nearest]
         specs.append(
             {
                 "key": f"cluster:{rank}",
                 "generator": "cluster",
                 "name": name,
-                "description": "Ähnlich klingende Titel aus deiner Bibliothek, automatisch gruppiert.",
+                "name_en": name_en,
+                "description": description,
+                "description_en": description_en,
                 "items": _with_reasons(conn, track_ids, ("bpm", "energy", "danceability")),
             }
         )
@@ -490,16 +526,21 @@ def _sound_cluster_specs(conn: Connection) -> list[dict]:
             n += 1
             key = f"{base}-{n}"
         used_keys.add(key)
-        name = "Mix: " + (" & ".join(name for name, _slug in named) or "bunt gemischt")
+        listed = " & ".join(name for name, _slug in named)
+        name, name_en = (tr(lang, "Mix: {traits}", traits=listed or tr(lang, "bunt gemischt")) for lang in ("de", "en"))
         if n > 1:
             name += f" ({n})"
+            name_en += f" ({n})"
+        description, description_en = _both("Titel mit ähnlichem Klang-Fingerabdruck, automatisch gruppiert.")
         track_ids = [int(ids[i]) for i in nearest]
         specs.append(
             {
                 "key": key,
                 "generator": "sound",
                 "name": name,
-                "description": "Titel mit ähnlichem Klang-Fingerabdruck, automatisch gruppiert.",
+                "name_en": name_en,
+                "description": description,
+                "description_en": description_en,
                 "items": [(t, top[t][0] if t in top else None) for t in track_ids],
             }
         )
@@ -573,6 +614,7 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
         "generator": spec["generator"],
         "detected_tracks": detected,
         "description": spec.get("description"),
+        "description_en": spec.get("description_en"),
         "rule_json": json.dumps(spec["rule"]) if spec.get("rule") else None,
         "track_count": stats[0],
         "duration_ms": stats[1],
@@ -583,7 +625,13 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
     if existing is None:
         playlist_id = conn.execute(
             insert(auto_playlists).values(
-                key=spec["key"], name=spec["name"], status=status, access="all", created_at=ts, **values
+                key=spec["key"],
+                name=spec["name"],
+                name_en=spec.get("name_en"),
+                status=status,
+                access="all",
+                created_at=ts,
+                **values,
             )
         ).inserted_primary_key[0]
         outcome = "created"
@@ -591,6 +639,7 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
         playlist_id = existing.id
         if not existing.name_locked:
             values["name"] = spec["name"]
+            values["name_en"] = spec.get("name_en")
         if status == "published" and existing.status == "suggested":
             values["status"] = "published"  # genre playlists from before they were published at once
         conn.execute(update(auto_playlists).where(auto_playlists.c.id == playlist_id).values(**values))

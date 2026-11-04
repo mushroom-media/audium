@@ -14,9 +14,17 @@ import { coverUrl, get, post, request, streamUrl, type ReplayGainMode, type Stre
 import { browserCanPlay, chooseSource, listenedStep, replayGainFactor, type Format } from "./playback";
 import * as Q from "./queue";
 import { closeOverlay, openOverlay, router } from "./router.svelte";
+import { msg, t } from "./i18n.svelte";
 
 const STORAGE_KEY = "audium.player";
 const MAX_STORED_TRACKS = 1000;
+/** For the repeat button (translation keys, shown with t()). */
+export const REPEAT_LABELS: Record<Q.Repeat, string> = {
+  off: msg("Wiederholen: aus"),
+  all: msg("Wiederholen: alle"),
+  one: msg("Wiederholen: diesen Titel"),
+};
+
 export const RESTART_THRESHOLD_S = 3;
 // A play counts (history) after 30 s really played, or half of a shorter track.
 const SCROBBLE_AFTER_S = 30;
@@ -782,7 +790,7 @@ class Player {
       return;
     }
     this.buffering = false;
-    this.error = "Dieser Titel kann nicht abgespielt werden.";
+    this.error = t("Dieser Titel kann nicht abgespielt werden.");
   }
 
   #playFailed(e: unknown) {
@@ -790,7 +798,7 @@ class Player {
     // Autoplay without a user gesture is blocked by browsers; just wait for a click.
     if ((e as DOMException)?.name === "NotAllowedError") this.blocked = true;
     if ((e as DOMException)?.name !== "NotAllowedError" && (e as DOMException)?.name !== "AbortError") {
-      this.error = "Wiedergabe fehlgeschlagen.";
+      this.error = t("Wiedergabe fehlgeschlagen.");
     }
   }
 

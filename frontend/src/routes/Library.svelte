@@ -15,16 +15,24 @@
   import { player } from "../lib/player.svelte";
   import { href, navigate, router } from "../lib/router.svelte";
   import { saveSettings, session } from "../lib/session.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   type Tab = "tracks" | "albums" | "artists";
   const TABS: Tab[] = ["tracks", "albums", "artists"];
-  const TRACK_SORTS = { title: "Titel", added: "Neu hinzugefügt", year: "Jahr" } as const;
-  const ALBUM_SORTS = { title: "Titel", artist: "Künstler", year: "Jahr", added: "Neu hinzugefügt" } as const;
+  const TRACK_SORTS = { title: msg("Titel|Sortierung"), added: msg("Neu hinzugefügt"), year: msg("Jahr") };
+  const ALBUM_SORTS = { title: msg("Titel|Sortierung"), artist: msg("Künstler|Sortierung"), year: msg("Jahr"), added: msg("Neu hinzugefügt") };
   type TrackSort = keyof typeof TRACK_SORTS;
   type AlbumSort = keyof typeof ALBUM_SORTS;
-  const ARTIST_ROLES = { album: "Album-Künstler", all: "Alle" } as const;
+  const ARTIST_ROLES = { album: msg("Album-Künstler"), all: msg("Alle") };
   type ArtistRole = keyof typeof ARTIST_ROLES;
-  const TAB_LABELS: Record<Tab, string> = { tracks: "Titel", albums: "Alben", artists: "Künstler" };
+  const TAB_LABELS: Record<Tab, string> = { tracks: msg("Titel"), albums: msg("Alben"), artists: msg("Künstler") };
+  const FILTER_LABELS: Record<Tab, string> = { tracks: msg("Titel filtern"), albums: msg("Alben filtern"), artists: msg("Künstler filtern") };
+  const NONE_FOR: Record<Tab, string> = { tracks: msg("Keine Titel für „{filter}“."), albums: msg("Keine Alben für „{filter}“."), artists: msg("Keine Künstler für „{filter}“.") };
+  const NONE_YET: Record<Tab, string> = {
+    tracks: msg("Noch keine Titel. Läuft der erste Scan noch?"),
+    albums: msg("Noch keine Alben. Läuft der erste Scan noch?"),
+    artists: msg("Noch keine Künstler. Läuft der erste Scan noch?"),
+  };
   const countLabel = (t: Tab, n: number) =>
     t === "tracks" ? plural(n, "Titel", "Titel") : t === "albums" ? plural(n, "Album", "Alben") : plural(n, "Künstler", "Künstler");
   const MIN_FILTER = 2; // the search index needs two characters
@@ -176,7 +184,7 @@
   function playAll(first: Track | null, shuffle?: boolean) {
     const path = `/library?tab=tracks${filter ? `&q=${encodeURIComponent(filter)}` : ""}`;
     const sort = tab === "tracks" ? trackSort : "title";
-    player.playPool({ sort, q: filter || undefined }, first?.id ?? null, shuffle, { kind: "Bibliothek", name: filter ? `„${filter}“` : "Alle Titel", path }, first);
+    player.playPool({ sort, q: filter || undefined }, first?.id ?? null, shuffle, { kind: t("Bibliothek"), name: filter ? t("„{filter}“", { filter }) : t("Alle Titel"), path }, first);
   }
 </script>
 
@@ -186,7 +194,7 @@
   <div class="top" class:float={phone} style:transform={phone && lift ? `translateY(${-lift}px)` : undefined} bind:clientHeight={topHeight}>
     {#if phone}
       <div class="brand">
-        <a class="logo" href={href("/")} aria-label="audium Start">
+        <a class="logo" href={href("/")} aria-label={t("audium Start")}>
           <svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
           <span>audium</span>
         </a>
@@ -194,41 +202,41 @@
     {/if}
     <div class="head" bind:clientHeight={headHeight}>
       <div class="title">
-        <h1>Bibliothek</h1>
+        <h1>{t("Bibliothek")}</h1>
         {#if total !== null}
           <span class="count">{countLabel(tab, total)}</span>
         {/if}
-        <button class="btn shuffle" disabled={total === 0} onclick={() => playAll(null, true)} title={filter ? `Titel zu „${filter}“ zufällig abspielen` : "Ganze Bibliothek zufällig abspielen"}>
-          <Icon name="shuffle" size={18} /> Zufällig
+        <button class="btn shuffle" disabled={total === 0} onclick={() => playAll(null, true)} title={filter ? t("Titel zu „{filter}“ zufällig abspielen", { filter }) : t("Ganze Bibliothek zufällig abspielen")}>
+          <Icon name="shuffle" size={18} /> {t("Zufällig")}
         </button>
       </div>
-      <FilterField query={q} placeholder="{TAB_LABELS[tab]} filtern" onchange={(v) => setParams({ q: v })} />
+      <FilterField query={q} placeholder={t(FILTER_LABELS[tab])} onchange={(v) => setParams({ q: v })} />
       <div class="bar">
-        <div class="segmented" role="tablist" aria-label="Ansicht">
-          {#each TABS as t (t)}
-            <button role="tab" aria-selected={tab === t} class:on={tab === t} onclick={() => showTab(t)}>{TAB_LABELS[t]}</button>
+        <div class="segmented" role="tablist" aria-label={t("Ansicht")}>
+          {#each TABS as which (which)}
+            <button role="tab" aria-selected={tab === which} class:on={tab === which} onclick={() => showTab(which)}>{t(TAB_LABELS[which])}</button>
           {/each}
         </div>
         <label class="sort">
-          <span class="sr-only">Sortierung</span>
+          <span class="sr-only">{t("Sortierung")}</span>
           {#if tab === "tracks"}
             <select value={trackSort} onchange={(e) => keep({ track_sort: e.currentTarget.value as TrackSort })}>
-              {#each Object.entries(TRACK_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
+              {#each Object.entries(TRACK_SORTS) as [key, label] (key)}<option value={key}>{t(label)}</option>{/each}
             </select>
           {:else if tab === "albums"}
             <select value={albumSort} onchange={(e) => pickAlbumSort(e.currentTarget.value as AlbumSort)}>
-              {#each Object.entries(ALBUM_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
+              {#each Object.entries(ALBUM_SORTS) as [key, label] (key)}<option value={key}>{t(label)}</option>{/each}
             </select>
           {:else}
             <select value={artistRole} onchange={(e) => keep({ artist_role: e.currentTarget.value as ArtistRole })}>
-              {#each Object.entries(ARTIST_ROLES) as [key, label] (key)}<option value={key}>{label}</option>{/each}
+              {#each Object.entries(ARTIST_ROLES) as [key, label] (key)}<option value={key}>{t(label)}</option>{/each}
             </select>
           {/if}
         </label>
       </div>
       {#if also.length}
         <div class="also">
-          <span class="also-label">Auch gefunden:</span>
+          <span class="also-label">{t("Auch gefunden:")}</span>
           {#each also as o (o.tab)}
             <button class="chip" onclick={() => showTab(o.tab)}>{countLabel(o.tab, o.count)}</button>
           {/each}
@@ -241,12 +249,12 @@
     {#if total === 0}
       {#if phone}{@render spacer()}{/if}
       <p class="empty">
-        {#if filter}Keine {TAB_LABELS[tab]} für „{filter}“.
-        {:else}Noch keine {TAB_LABELS[tab]}. Läuft der erste Scan noch?{/if}
+        {#if filter}{t(NONE_FOR[tab], { filter })}
+        {:else}{t(NONE_YET[tab])}{/if}
       </p>
     {:else if tracks}
       {#key tracks}
-        <VirtualList count={tracks.total ?? 0} rowHeight={56} onrange={(s, e) => tracks.ensure(s, e)} label="Titel" {letters} header={phone ? spacer : undefined} keep="library:tracks:{trackSort}:{filter}">
+        <VirtualList count={tracks.total ?? 0} rowHeight={56} onrange={(s, e) => tracks.ensure(s, e)} label={t("Titel")} {letters} header={phone ? spacer : undefined} keep="library:tracks:{trackSort}:{filter}">
           {#snippet row(i)}
             <div class="pad"><TrackRow track={tracks.get(i)} number={i + 1} onplay={() => { const t = tracks.get(i); if (t) playAll(t); }} /></div>
           {/snippet}

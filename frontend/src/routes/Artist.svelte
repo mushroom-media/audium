@@ -12,12 +12,13 @@
   import { keepScroll } from "../lib/keepScroll";
   import { pageTitle } from "../lib/headerTitle.svelte";
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   type View = "covers" | "tracks";
   const VIEW_KEY = "audium.artist.view";
   const VIEWS: { key: View; icon: "grid" | "list"; label: string }[] = [
-    { key: "covers", icon: "grid", label: "Nur Cover" },
-    { key: "tracks", icon: "list", label: "Cover mit Titeln" },
+    { key: "covers", icon: "grid", label: msg("Nur Cover") },
+    { key: "tracks", icon: "list", label: msg("Cover mit Titeln") },
   ];
   const DETAIL_CONCURRENCY = 4;
   const ROW_H = 52; // .row-h
@@ -31,7 +32,7 @@
   let error = $state<string | null>(null);
   let view = $state<View>(stored() === "tracks" ? "tracks" : "covers");
 
-  const source = $derived(artist && { kind: "Künstler", name: artist.name, path: `/artists/${id}` });
+  const source = $derived(artist && { kind: t("Künstler|einzeln"), name: artist.name, path: `/artists/${id}` });
 
   function stored(): string | null {
     try {
@@ -133,24 +134,24 @@
     <header class="hero">
       <div class="avatar"><Cover hash={artist.cover} size={256} round /></div>
       <div>
-        <p class="kind">Künstler</p>
+        <p class="kind">{t("Künstler|einzeln")}</p>
         <h1 use:pageTitle={artist.name}>{artist.name}</h1>
         <p class="stats">{plural(artist.album_count, "Album", "Alben")} · {plural(artist.track_count, "Titel", "Titel")}</p>
         {#if artist.track_count > 0}
           <div class="actions">
-            <button class="btn primary" onclick={() => playAll(false)}><Icon name="play" size={18} /> Alle abspielen</button>
-            <button class="btn square" onclick={() => playAll(true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
-            <button class="btn" onclick={() => artist && navigate(radioPath("artist", artist.id))}><Icon name="radio" size={18} /> Radio</button>
+            <button class="btn primary" onclick={() => playAll(false)}><Icon name="play" size={18} /> {t("Alle abspielen")}</button>
+            <button class="btn square" onclick={() => playAll(true)} title={t("Zufällig abspielen")} aria-label={t("Zufällig abspielen")}><Icon name="shuffle" size={18} /></button>
+            <button class="btn" onclick={() => artist && navigate(radioPath("artist", artist.id))}><Icon name="radio" size={18} /> {t("Radio")}</button>
           </div>
         {/if}
       </div>
     </header>
     {#if albums.length}
       <div class="section-bar">
-        <h2 class="section">Alben</h2>
-        <div class="segmented" role="radiogroup" aria-label="Ansicht der Alben">
+        <h2 class="section">{t("Alben")}</h2>
+        <div class="segmented" role="radiogroup" aria-label={t("Ansicht der Alben")}>
           {#each VIEWS as v (v.key)}
-            <button role="radio" aria-checked={view === v.key} class:on={view === v.key} title={v.label} aria-label={v.label} onclick={() => setView(v.key)}>
+            <button role="radio" aria-checked={view === v.key} class:on={view === v.key} title={t(v.label)} aria-label={t(v.label)} onclick={() => setView(v.key)}>
               <Icon name={v.icon} size={16} />
             </button>
           {/each}

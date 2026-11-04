@@ -1,14 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { germanMessage } from "./errors";
+import { afterEach, describe, expect, it } from "vitest";
+import { ruleFieldLabels, uiMessage } from "./errors";
+import { i18n } from "./i18n.svelte";
 
-describe("germanMessage", () => {
-  it("translates rule editor messages and keeps the field label", () => {
-    expect(germanMessage("Genre: a value is required")).toBe("Genre: Bitte einen Wert angeben.");
+describe("uiMessage", () => {
+  afterEach(() => {
+    i18n.lang = "de";
+  });
+  it("translates rule editor messages and shows the field label", () => {
+    ruleFieldLabels.genre = "Genre";
+    expect(uiMessage("genre: a value is required")).toBe("Genre: Bitte einen Wert angeben.");
   });
   it("fills in numbers", () => {
-    expect(germanMessage("password must be 8-256 characters")).toBe("Das Passwort muss 8 bis 256 Zeichen lang sein.");
+    expect(uiMessage("password must be 8-256 characters")).toBe("Das Passwort muss 8 bis 256 Zeichen lang sein.");
+  });
+  it("speaks English when the UI does", () => {
+    i18n.lang = "en";
+    expect(uiMessage("password must be 8-256 characters")).toBe("The password must be 8 to 256 characters long.");
   });
   it("passes unknown messages through", () => {
-    expect(germanMessage("something new")).toBe("something new");
+    expect(uiMessage("something new")).toBe("something new");
   });
 });

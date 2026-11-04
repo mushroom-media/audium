@@ -4,6 +4,7 @@
   import { devices, self, stopControl, target } from "../devices.svelte";
   import { localPlayer, player } from "../player.svelte";
   import { tabs } from "../tabs.svelte";
+  import { t } from "../i18n.svelte";
 
   const steering = $derived(target());
   const steeredBy = $derived(self()?.controllers.map((c) => c.name) ?? []);
@@ -14,17 +15,17 @@
 {#if devices.target}
   <div class="strip on" role="status">
     <button class="what" onclick={() => (devices.picker = true)}>
-      Steuert: <strong>{steering?.name ?? "Gerät"}</strong>
-      {#if steering && !steering.online}<span> · Verbindung unterbrochen …</span>
-      {:else if steering?.status?.blocked}<span> · Auf dem Gerät einmal tippen, damit es abspielen darf</span>{/if}
+      {t("Steuert:")} <strong>{steering?.name ?? t("Gerät")}</strong>
+      {#if steering && !steering.online}<span> {t("· Verbindung unterbrochen …")}</span>
+      {:else if steering?.status?.blocked}<span> {t("· Auf dem Gerät einmal tippen, damit es abspielen darf")}</span>{/if}
     </button>
-    <button class="end" onclick={() => stopControl()}>Trennen</button>
+    <button class="end" onclick={() => stopControl()}>{t("Trennen")}</button>
   </div>
 {:else if steeredBy.length}
   <div class="strip" role="status">
-    <span class="what">Wird von <strong>{steeredBy.join(", ")}</strong> gesteuert</span>
+    <span class="what">{t("Wird von")} <strong>{steeredBy.join(", ")}</strong> {t("gesteuert")}</span>
     {#if blocked}
-      <button class="end" onclick={() => player.toggle()}>Abspielen erlauben</button>
+      <button class="end" onclick={() => player.toggle()}>{t("Abspielen erlauben")}</button>
     {/if}
   </div>
 {/if}

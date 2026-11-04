@@ -6,6 +6,7 @@
   import { keepScroll } from "../lib/keepScroll";
   import { pageTitle } from "../lib/headerTitle.svelte";
   import { recallEntry, rememberEntry } from "../lib/router.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let overview = $state<GenreOverview | null>(recallEntry("genres") ?? null);
   $effect(() => {
@@ -21,25 +22,25 @@
 </script>
 
 <div class="page" use:keepScroll>
-  <div class="toolbar"><h1 use:pageTitle={"Alle Genres"}>Alle Genres</h1></div>
+  <div class="toolbar"><h1 use:pageTitle={t("Alle Genres")}>{t("Alle Genres")}</h1></div>
 
   {#if overview === null}
-    <p class="empty">Lädt …</p>
+    <p class="empty">{t("Lädt …")}</p>
   {:else if !overview.families.length && !overview.others.length}
-    <p class="empty">Noch keine Genres. Sie erscheinen nach dem ersten Scan, sobald ein Genre mindestens 30 Titel hat.</p>
+    <p class="empty">{t("Noch keine Genres. Sie erscheinen nach dem ersten Scan, sobald ein Genre mindestens 30 Titel hat.")}</p>
   {:else}
     {#each overview.families as f (f.name)}
       <section>
         <h2>{f.name}</h2>
         <div class="grid">
-          <GenreTile playlist={f.playlist} label="Alles aus {f.name}" />
+          <GenreTile playlist={f.playlist} label={t("Alles aus {name}", { name: f.name })} />
           {#each f.genres as g (g.id)}<AutoCard playlist={g} />{/each}
         </div>
       </section>
     {/each}
     {#if overview.others.length}
       <section>
-        <h2>Weitere Genres</h2>
+        <h2>{t("Weitere Genres")}</h2>
         <div class="grid">
           {#each overview.others as g (g.id)}<AutoCard playlist={g} />{/each}
         </div>

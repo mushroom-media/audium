@@ -13,6 +13,7 @@ import { playerStatus, queueWindow, runCommand, watchPlayer, WINDOW_SIZE, type P
 import { RemotePlayer } from "./remotePlayer.svelte";
 import { onRole, shareTarget, TabRemote, tabs, targetSync } from "./tabs.svelte";
 import { toast } from "./ui.svelte";
+import { t } from "./i18n.svelte";
 
 export interface Device {
   id: string;
@@ -97,8 +98,8 @@ export function autoDeviceName(): string {
     : /Mac OS X/.test(ua) ? "Mac"
     : /Linux/.test(ua) ? "Linux"
     : "";
-  const what = isApp ? "audium-App" : browser;
-  return os ? `${what} auf ${os}` : what;
+  const what = isApp ? t("audium-App") : browser;
+  return os ? t("{what} auf {os}", { what, os }) : what;
 }
 
 function deviceKind(): Device["kind"] {
@@ -135,7 +136,7 @@ async function loadDevices() {
     const list = await get<Device[]>("/devices");
     const now = performance.now();
     devices.list = list.map((d) => ({ ...d, received: now }));
-    if (devices.target && !list.some((d) => d.id === devices.target)) stopControl("Das Gerät ist nicht mehr verbunden");
+    if (devices.target && !list.some((d) => d.id === devices.target)) stopControl(t("Das Gerät ist nicht mehr verbunden"));
   } catch {
     /* offline: the next connection tries again */
   }
@@ -159,7 +160,7 @@ export function wireDevices(source: EventSource) {
     const { id } = JSON.parse((e as MessageEvent).data) as { id: string };
     const name = devices.list.find((d) => d.id === id)?.name;
     devices.list = devices.list.filter((d) => d.id !== id);
-    if (devices.target === id) stopControl(`Verbindung zu ${name ?? "dem Gerät"} getrennt`);
+    if (devices.target === id) stopControl(name ? t("Verbindung zu {device} getrennt", { device: name }) : t("Verbindung zum Gerät getrennt"));
   });
   source.addEventListener("command", (e) => {
     // While the player moves between tabs both may be connected; only the leader plays.
@@ -242,7 +243,7 @@ function deviceLink(id: string) {
   return {
     mirror: () => devices.list.find((d) => d.id === id),
     send: (action: string, args: Record<string, unknown>) =>
-      post(`/devices/${id}/commands`, { action, args, from: deviceId }).catch(() => toast("Das Gerät ist nicht erreichbar")),
+      post(`/devices/${id}/commands`, { action, args, from: deviceId }).catch(() => toast(t("Das Gerät ist nicht erreichbar"))),
   };
 }
 
@@ -268,7 +269,7 @@ export async function controlDevice(id: string) {
     updateRemote();
     shareTarget(id);
   } catch {
-    toast("Das Gerät ist nicht mehr verbunden");
+    toast(t("Das Gerät ist nicht mehr verbunden"));
     loadDevices();
   }
 }

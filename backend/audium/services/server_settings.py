@@ -18,6 +18,10 @@ def _default_first(default: str, values: tuple[str, ...]) -> tuple[str, ...]:
 
 # key -> allowed values; the first one is the default
 OPTIONS: dict[str, tuple[str, ...]] = {
+    # Language of the web UI for users who leave theirs at "server", and of texts audium writes
+    # for clients without a user language (Subsonic apps). Chosen in the first-run dialog;
+    # installations from before it existed stay German.
+    "language": ("de", "en"),
     # Artists without their own picture (artist.jpg) show the cover of their newest album. The
     # default for users who leave it at "server" (see services/view_prefs.py).
     "artist_album_covers": ("on", "off"),
@@ -48,6 +52,13 @@ _PREFIX = "settings."
 def server_setting(conn: Connection, key: str) -> str:
     value = get_state(conn, _PREFIX + key)
     return value if value in OPTIONS[key] else OPTIONS[key][0]
+
+
+def language_chosen(conn: Connection) -> str | None:
+    """The server language if an admin picked one; None before that (the login page then follows
+    the browser)."""
+    value = get_state(conn, _PREFIX + "language")
+    return value if value in OPTIONS["language"] else None
 
 
 def get_server_settings(conn: Connection) -> dict:

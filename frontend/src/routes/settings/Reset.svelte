@@ -6,6 +6,7 @@
   import { ApiError, forgetToken, get, isApp, post } from "../../lib/api";
   import { navigate } from "../../lib/router.svelte";
   import { loadSession, session } from "../../lib/session.svelte";
+  import { t } from "../../lib/i18n.svelte";
 
   let adminFromEnv = $state<boolean | null>(null);
   let confirming = $state(false);
@@ -31,7 +32,7 @@
     try {
       await post("/admin/setup/reset", { password, keep_users: keepUsers });
     } catch (e) {
-      error = e instanceof ApiError ? e.message : "Zurücksetzen fehlgeschlagen";
+      error = e instanceof ApiError ? e.message : t("Zurücksetzen fehlgeschlagen");
       busy = false;
       return;
     }
@@ -47,52 +48,52 @@
   <div class="set-card">
     <div class="set-row">
       <div class="set-label">
-        <strong>Server auf Werkseinstellungen zurücksetzen</strong>
+        <strong>{t("Server auf Werkseinstellungen zurücksetzen")}</strong>
         <small>
-          Löscht Bibliothek, Audioanalyse, Playlists, Favoriten, Verlauf, Auto-Playlists und alle Server-Einstellungen. Danach sind alle abgemeldet und die Einrichtung beginnt von vorn. Die Musikdateien selbst bleiben unangetastet.
+          {t("Löscht Bibliothek, Audioanalyse, Playlists, Favoriten, Verlauf, Auto-Playlists und alle Server-Einstellungen. Danach sind alle abgemeldet und die Einrichtung beginnt von vorn. Die Musikdateien selbst bleiben unangetastet.")}
         </small>
       </div>
-      <button class="btn danger" onclick={open}><Icon name="trash" size={16} /> Zurücksetzen …</button>
+      <button class="btn danger" onclick={open}><Icon name="trash" size={16} /> {t("Zurücksetzen …")}</button>
     </div>
   </div>
-  <p class="set-note">Der nächste Scan liest die Musikordner neu ein, die Analyse läuft danach noch einmal komplett.</p>
+  <p class="set-note">{t("Der nächste Scan liest die Musikordner neu ein, die Analyse läuft danach noch einmal komplett.")}</p>
 </section>
 
 {#if confirming}
-  <Modal title="Server zurücksetzen?" onclose={() => !busy && (confirming = false)} width={480}>
+  <Modal title={t("Server zurücksetzen?")} onclose={() => !busy && (confirming = false)} width={480}>
     <form class="form" onsubmit={(e) => (e.preventDefault(), reset())}>
       <fieldset class="choice">
-        <legend>Nutzerkonten</legend>
+        <legend>{t("Nutzerkonten")}</legend>
         <label class="option">
           <input type="radio" name="users" checked={keepUsers} onchange={() => (keepUsers = true)} />
           <span>
-            <strong>Behalten</strong>
-            <small>Konten mit ihren Passwörtern, persönlichen Einstellungen und App-Passwörtern bleiben. Alle müssen sich neu anmelden.</small>
+            <strong>{t("Behalten")}</strong>
+            <small>{t("Konten mit ihren Passwörtern, persönlichen Einstellungen und App-Passwörtern bleiben. Alle müssen sich neu anmelden.")}</small>
           </span>
         </label>
         <label class="option">
           <input type="radio" name="users" checked={!keepUsers} onchange={() => (keepUsers = false)} />
           <span>
-            <strong>Auch löschen</strong>
+            <strong>{t("Auch löschen")}</strong>
             <small>
               {#if adminFromEnv}
-                Es bleibt nur der Admin aus <code>AUDIUM_ADMIN_USER</code>. Mit ihm meldest du dich danach an.
+                {t("Es bleibt nur der Admin aus")} <code>{t("AUDIUM_ADMIN_USER")}</code>{t(". Mit ihm meldest du dich danach an.")}
               {:else}
-                Alle Konten werden gelöscht, deines auch. Danach legst du ein neues Admin-Konto an, innerhalb von 30 Minuten.
+                {t("Alle Konten werden gelöscht, deines auch. Danach legst du ein neues Admin-Konto an, innerhalb von 30 Minuten.")}
               {/if}
             </small>
           </span>
         </label>
       </fieldset>
       <label>
-        Dein Passwort zur Bestätigung
+        {t("Dein Passwort zur Bestätigung")}
         <input type="password" bind:value={password} required autocomplete="current-password" />
       </label>
       {#if error}<p class="set-warn">{error}</p>{/if}
-      <p class="set-note warn-note">Das lässt sich nicht rückgängig machen.</p>
+      <p class="set-note warn-note">{t("Das lässt sich nicht rückgängig machen.")}</p>
       <div class="modal-buttons">
-        <button type="button" class="btn ghost" disabled={busy} onclick={() => (confirming = false)}>Abbrechen</button>
-        <button class="btn danger solid" disabled={busy || !password}>{busy ? "Wird zurückgesetzt …" : "Jetzt zurücksetzen"}</button>
+        <button type="button" class="btn ghost" disabled={busy} onclick={() => (confirming = false)}>{t("Abbrechen")}</button>
+        <button class="btn danger solid" disabled={busy || !password}>{busy ? t("Wird zurückgesetzt …") : t("Jetzt zurücksetzen")}</button>
       </div>
     </form>
   </Modal>

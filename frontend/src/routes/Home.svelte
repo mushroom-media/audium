@@ -10,6 +10,7 @@
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { ui } from "../lib/ui.svelte";
   import { session } from "../lib/session.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let recent = $state<Album[] | null>(recallEntry("home:recent") ?? null);
   let played = $state<RecentItem[]>(recallEntry("home:played") ?? []);
@@ -54,51 +55,51 @@
   <div class="toolbar"><h1>{greeting}, {session.user?.display_name}</h1></div>
 
   {#if played.length}
-    <div class="section-head"><h2>Zuletzt gehört</h2></div>
+    <div class="section-head"><h2>{t("Zuletzt gehört")}</h2></div>
     <div class="grid">
       {#each played as item (`${item.type}:${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
     </div>
   {/if}
 
   {#if radios.length}
-    <div class="section-head"><h2>Radios für dich</h2></div>
+    <div class="section-head"><h2>{t("Radios für dich")}</h2></div>
     <div class="grid">
       {#each radios as item (`${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
     </div>
   {/if}
 
   <div class="section-head">
-    <h2>Playlists</h2>
+    <h2>{t("Playlists")}</h2>
     <span class="head-actions">
-      <button class="btn ghost small" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={16} /> Smart</button>
-      <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> Neu</button>
+      <button class="btn ghost small" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={16} /> {t("Smart")}</button>
+      <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> {t("Neu")}</button>
     </span>
   </div>
   <div class="lists">
     <a class="list" href={href("/favorites")}>
       <span class="art fav" aria-hidden="true"><Icon name="heart" size={22} filled /></span>
-      <span class="meta"><strong>Lieblingssongs</strong><small>{plural(mine.favoriteTracks.size, "Titel", "Titel")}</small></span>
+      <span class="meta"><strong>{t("Lieblingssongs")}</strong><small>{plural(mine.favoriteTracks.size, "Titel", "Titel")}</small></span>
     </a>
     {#each mine.playlists.slice(0, 11) as p (p.id)}
       <a class="list" href={href(`/playlists/${p.id}`)}>
         <span class="art"><PlaylistCover playlist={p} size={64} /></span>
         <span class="meta">
           <strong>{p.name}</strong>
-          <small>{p.role === "owner" ? plural(p.item_count, "Titel", "Titel") : `von ${p.owner.display_name}`}</small>
+          <small>{p.role === "owner" ? plural(p.item_count, "Titel", "Titel") : t("von {name}", { name: p.owner.display_name })}</small>
         </span>
       </a>
     {/each}
   </div>
 
   <div class="section-head">
-    <h2>Neu hinzugefügt</h2>
-    <a href={href("/library?tab=albums&sort=added")}>Alle Alben</a>
+    <h2>{t("Neu hinzugefügt")}</h2>
+    <a href={href("/library?tab=albums&sort=added")}>{t("Alle Alben")}</a>
   </div>
   {#if recent && recent.length === 0}
     <p class="empty">
-      Deine Bibliothek ist noch leer. Der erste Scan läuft im Hintergrund{session.user?.role === "admin"
-        ? " – den Fortschritt siehst du in den Einstellungen."
-        : "."}
+      {session.user?.role === "admin"
+        ? t("Deine Bibliothek ist noch leer. Der erste Scan läuft im Hintergrund – den Fortschritt siehst du in den Einstellungen.")
+        : t("Deine Bibliothek ist noch leer. Der erste Scan läuft im Hintergrund.")}
     </p>
   {:else}
     <div class="grid">

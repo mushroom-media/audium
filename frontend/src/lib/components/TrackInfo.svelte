@@ -3,6 +3,7 @@
   import { get, type TrackInfo } from "../api";
   import { ago, duration } from "../format";
   import Modal from "./Modal.svelte";
+  import { locale, msg, num, t } from "../i18n.svelte";
 
   let { trackId, onclose }: { trackId: number; onclose: () => void } = $props();
 
@@ -21,35 +22,35 @@
   type Value = "energy" | "danceability" | "brightness" | "dynamics" | "mood_happy" | "mood_sad" | "mood_aggressive" | "mood_relaxed";
   // The analysis' 0..1 values as bars; moods only where the mood models ran.
   const BARS: { key: Value; label: string }[] = [
-    { key: "energy", label: "Energie" },
-    { key: "danceability", label: "Tanzbarkeit" },
-    { key: "brightness", label: "Helligkeit" },
-    { key: "dynamics", label: "Dynamik" },
-    { key: "mood_happy", label: "Fröhlich" },
-    { key: "mood_sad", label: "Melancholisch" },
-    { key: "mood_aggressive", label: "Kraftvoll" },
-    { key: "mood_relaxed", label: "Entspannt" },
+    { key: "energy", label: msg("Energie") },
+    { key: "danceability", label: msg("Tanzbarkeit") },
+    { key: "brightness", label: msg("Helligkeit") },
+    { key: "dynamics", label: msg("Dynamik") },
+    { key: "mood_happy", label: msg("Fröhlich") },
+    { key: "mood_sad", label: msg("Melancholisch") },
+    { key: "mood_aggressive", label: msg("Kraftvoll") },
+    { key: "mood_relaxed", label: msg("Entspannt") },
   ];
 
   const pct = (v: number) => `${Math.round(v * 100)} %`;
-  const date = (ms: number) => new Date(ms).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" });
-  const comma = (n: number, digits: number) => n.toFixed(digits).replace(".", ",");
+  const date = (ms: number) => new Date(ms).toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" });
+  const comma = (n: number, digits: number) => num(n, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const size = (bytes: number) => (bytes >= 1e9 ? `${comma(bytes / 1e9, 2)} GB` : `${comma(bytes / 1e6, 1)} MB`);
 
-  function format(t: TrackInfo["track"]): string {
+  function format(track: TrackInfo["track"]): string {
     const bits = [
-      (t.codec ?? t.container ?? "").toUpperCase(),
-      t.bitrate ? `${Math.round(t.bitrate / 1000)} kbit/s` : "",
-      t.sample_rate ? `${(t.sample_rate / 1000).toLocaleString("de-DE")} kHz` : "",
-      t.bit_depth ? `${t.bit_depth} Bit` : "",
-      t.channels === 1 ? "Mono" : t.channels === 2 ? "Stereo" : t.channels ? `${t.channels} Kanäle` : "",
+      (track.codec ?? track.container ?? "").toUpperCase(),
+      track.bitrate ? `${Math.round(track.bitrate / 1000)} kbit/s` : "",
+      track.sample_rate ? `${num(track.sample_rate / 1000)} kHz` : "",
+      track.bit_depth ? `${track.bit_depth} Bit` : "",
+      track.channels === 1 ? "Mono" : track.channels === 2 ? "Stereo" : track.channels ? t("{n} Kanäle", { n: track.channels }) : "",
     ];
     return bits.filter(Boolean).join(" · ");
   }
-  function gains(t: TrackInfo["track"]): string {
+  function gains(track: TrackInfo["track"]): string {
     const db = (v: number) => `${v > 0 ? "+" : ""}${comma(v, 1)} dB`;
-    const rg = t.replaygain;
-    return [rg.track_gain != null ? `Titel ${db(rg.track_gain)}` : "", rg.album_gain != null ? `Album ${db(rg.album_gain)}` : ""]
+    const rg = track.replaygain;
+    return [rg.track_gain != null ? t("Titel {gain}", { gain: db(rg.track_gain) }) : "", rg.album_gain != null ? t("Album {gain}", { gain: db(rg.album_gain) }) : ""]
       .filter(Boolean)
       .join(" · ");
   }
@@ -57,35 +58,35 @@
 
 <Modal title={info?.track.title ?? "Info"} {onclose} width={520}>
   {#if failed}
-    <p class="muted">Die Infos konnten nicht geladen werden.</p>
+    <p class="muted">{t("Die Infos konnten nicht geladen werden.")}</p>
   {:else if !info}
-    <p class="muted">Lädt …</p>
+    <p class="muted">{t("Lädt …")}</p>
   {:else}
-    {@const t = info.track}
+    {@const tr = info.track}
     {@const a = info.analysis}
     <dl>
-      <dt>Künstler</dt>
-      <dd>{t.artist}</dd>
-      <dt>Album</dt>
-      <dd>{t.album}{#if t.track_no}&ensp;·&ensp;Titel {t.track_no}{#if t.disc_no && t.disc_no > 1}, CD {t.disc_no}{/if}{/if}</dd>
-      {#if t.date || t.year}<dt>Erschienen</dt><dd>{t.date ?? t.year}</dd>{/if}
-      <dt>Länge</dt>
-      <dd>{duration(t.duration_ms)}</dd>
+      <dt>{t("Künstler|einzeln")}</dt>
+      <dd>{tr.artist}</dd>
+      <dt>{t("Album")}</dt>
+      <dd>{tr.album}{#if tr.track_no}&ensp;·&ensp;{t("Titel {n}", { n: tr.track_no })}{#if tr.disc_no && tr.disc_no > 1}, {t("CD {n}", { n: tr.disc_no })}{/if}{/if}</dd>
+      {#if tr.date || tr.year}<dt>{t("Erschienen")}</dt><dd>{tr.date ?? tr.year}</dd>{/if}
+      <dt>{t("Länge")}</dt>
+      <dd>{duration(tr.duration_ms)}</dd>
     </dl>
 
-    <h3>Genres</h3>
+    <h3>{t("Genres")}</h3>
     {#if info.genres.length}
       <div class="chips">
         {#each info.genres as g (g.name)}
-          <span class="chip" class:detected={g.detected} title={g.detected ? `Erkannt (${pct(g.weight)})` : "Aus den Tags"}>{g.name}</span>
+          <span class="chip" class:detected={g.detected} title={g.detected ? t("Erkannt ({share})", { share: pct(g.weight) }) : t("Aus den Tags")}>{g.name}</span>
         {/each}
       </div>
-      {#if info.genres.some((g) => g.detected)}<p class="hint">Umrandet: von der Audioanalyse erkannt, die anderen stehen in den Tags.</p>{/if}
+      {#if info.genres.some((g) => g.detected)}<p class="hint">{t("Umrandet: von der Audioanalyse erkannt, die anderen stehen in den Tags.")}</p>{/if}
     {:else}
-      <p class="muted">Keine.</p>
+      <p class="muted">{t("Keine.")}</p>
     {/if}
     {#if info.styles.length}
-      <p class="sub">Erkannte Stilrichtungen</p>
+      <p class="sub">{t("Erkannte Stilrichtungen")}</p>
       <ul class="bars">
         {#each info.styles as s (s.name)}
           <li>
@@ -97,53 +98,53 @@
       </ul>
     {/if}
 
-    <h3>Audioanalyse</h3>
+    <h3>{t("Audioanalyse")}</h3>
     {#if !a}
-      <p class="muted">Noch nicht analysiert.</p>
+      <p class="muted">{t("Noch nicht analysiert.")}</p>
     {:else if a.status === "failed"}
-      <p class="muted">Die Analyse ist für diesen Titel fehlgeschlagen.</p>
+      <p class="muted">{t("Die Analyse ist für diesen Titel fehlgeschlagen.")}</p>
     {:else}
       <dl>
-        {#if a.bpm}<dt>Tempo</dt><dd><strong>{Math.round(a.bpm)} BPM</strong></dd>{/if}
-        {#if a.key}<dt>Tonart</dt><dd>{a.key}</dd>{/if}
+        {#if a.bpm}<dt>{t("Tempo")}</dt><dd><strong>{Math.round(a.bpm)} BPM</strong></dd>{/if}
+        {#if a.key}<dt>{t("Tonart")}</dt><dd>{a.key}</dd>{/if}
       </dl>
       <ul class="bars">
         {#each BARS as b (b.key)}
           {@const v = a[b.key]}
           {#if v != null}
             <li>
-              <span class="name">{b.label}</span>
+              <span class="name">{t(b.label)}</span>
               <span class="bar"><i style:width={pct(v)}></i></span>
               <span class="num">{pct(v)}</span>
             </li>
           {/if}
         {/each}
       </ul>
-      <p class="hint">Analysiert {ago(a.analyzed_at)}{a.sound ? ", mit Klang-Fingerabdruck" : ""}.</p>
+      <p class="hint">{a.sound ? t("Analysiert {when}, mit Klang-Fingerabdruck.", { when: ago(a.analyzed_at) }) : t("Analysiert {when}.", { when: ago(a.analyzed_at) })}</p>
     {/if}
 
-    <h3>Du</h3>
+    <h3>{t("Du")}</h3>
     <dl>
-      <dt>Gehört</dt>
-      <dd>{info.plays === 0 || !info.last_played ? "noch nie" : `${info.plays.toLocaleString("de-DE")}×, zuletzt ${ago(info.last_played)}`}</dd>
-      <dt>Lieblingssong</dt>
+      <dt>{t("Gehört")}</dt>
+      <dd>{info.plays === 0 || !info.last_played ? t("noch nie") : t("{n}×, zuletzt {when}", { n: info.plays, when: ago(info.last_played) })}</dd>
+      <dt>{t("Lieblingssong")}</dt>
       <dd>{info.favorite ? "Ja" : "Nein"}</dd>
     </dl>
 
-    <h3>Datei</h3>
+    <h3>{t("Datei")}</h3>
     <dl>
-      <dt>Format</dt>
-      <dd>{format(t)}</dd>
-      <dt>Größe</dt>
-      <dd>{size(t.size)}</dd>
-      {#if gains(t)}<dt>ReplayGain</dt><dd>{gains(t)}</dd>{/if}
-      <dt>Hinzugefügt</dt>
-      <dd>{date(t.added_at)}</dd>
-      <dt>Pfad</dt>
-      <dd class="path">{t.path}</dd>
+      <dt>{t("Format")}</dt>
+      <dd>{format(tr)}</dd>
+      <dt>{t("Größe")}</dt>
+      <dd>{size(tr.size)}</dd>
+      {#if gains(tr)}<dt>ReplayGain</dt><dd>{gains(tr)}</dd>{/if}
+      <dt>{t("Hinzugefügt")}</dt>
+      <dd>{date(tr.added_at)}</dd>
+      <dt>{t("Pfad")}</dt>
+      <dd class="path">{tr.path}</dd>
     </dl>
   {/if}
-  <div class="actions"><button class="btn" onclick={onclose}>Schließen</button></div>
+  <div class="actions"><button class="btn" onclick={onclose}>{t("Schließen")}</button></div>
 </Modal>
 
 <style>

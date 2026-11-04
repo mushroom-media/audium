@@ -1,6 +1,10 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./app.css";
+import { browserLanguage, setLanguage } from "./lib/i18n.svelte";
+
+// Until the session says otherwise (server or user language).
+setLanguage(browserLanguage());
 
 mount(App, { target: document.getElementById("app")! });
 

@@ -11,6 +11,8 @@ from audium.util import now_ms
 
 # key -> allowed values; the first one is the default
 OPTIONS: dict[str, tuple[str, ...]] = {
+    # "server" follows the server language (server setting language).
+    "language": ("server", "de", "en"),
     "theme": ("system", "dark", "light"),
     # auto: original file when the browser can play it, otherwise transcode at high quality.
     # high/medium/low: always transcode (saves bandwidth on slow connections).

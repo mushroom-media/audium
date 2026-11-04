@@ -18,6 +18,7 @@ from audium.api.playlist_models import (
 )
 from audium.db.engine import Database
 from audium.db.schema import users
+from audium.i18n import tr, user_language
 from audium.services import personal
 from audium.services.users import User
 
@@ -118,7 +119,10 @@ def radio_suggestions(
     db: Database = Depends(get_db),
 ):
     with db.read() as conn:
-        return request.app.state.suggestions.get(conn, user, limit)
+        lang = user_language(conn, user.id)
+        items = request.app.state.suggestions.get(conn, user, limit)
+    # The reason under each station ("Oft gehört") is German in the cache, translated here.
+    return [{**item, "subtitle": tr(lang, item["subtitle"])} if item.get("subtitle") else item for item in items]
 
 
 @router.get("/stats", response_model=StatsOut, summary="Your listening statistics")

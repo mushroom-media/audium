@@ -4,7 +4,7 @@
   import { coverUrl } from "../api";
   import { devices, others, target } from "../devices.svelte";
   import { duration } from "../format";
-  import { player } from "../player.svelte";
+  import { player, REPEAT_LABELS } from "../player.svelte";
   import * as Q from "../queue";
   import { href } from "../router.svelte";
   import { session } from "../session.svelte";
@@ -15,6 +15,7 @@
   import Cover from "./Cover.svelte";
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
+  import { t } from "../i18n.svelte";
 
   const CLOSE_SWIPE_PX = 110;
 
@@ -186,7 +187,7 @@
   class="np"
   role="dialog"
   aria-modal="true"
-  aria-label="Jetzt läuft"
+  aria-label={t("Jetzt läuft")}
   tabindex="-1"
   style:transform={swipe ? `translateY(${swipe}px)` : undefined}
   class:swiping={swipe > 0}
@@ -206,26 +207,26 @@
   {/if}
 
   <header>
-    <button class="icon-btn" onclick={close} aria-label="Schließen" title="Schließen (Esc)"><Icon name="down" size={24} /></button>
+    <button class="icon-btn" onclick={close} aria-label={t("Schließen")} title={t("Schließen (Esc)")}><Icon name="down" size={24} /></button>
     <div class="source">
       {#if player.source}
         <span class="label">{player.source.kind}</span>
         {#if player.source.path}<a class="name" href={href(player.source.path)}>{player.source.name}</a>
         {:else}<span class="name">{player.source.name}</span>{/if}
       {:else}
-        <span class="label">Jetzt läuft{#if player.radio} · Radio{/if}</span>
+        <span class="label">{t("Jetzt läuft")}{#if player.radio} {t("· Radio")}{/if}</span>
       {/if}
-      {#if devices.target}<span class="remote">Auf {target()?.name ?? "anderem Gerät"}</span>{/if}
+      {#if devices.target}<span class="remote">{target()?.name ? t("Auf {device}", { device: target()!.name }) : t("Auf anderem Gerät")}</span>{/if}
     </div>
     {#if others().length || devices.target}
-      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} aria-label="Gerät steuern" title="Gerät steuern"><Icon name="devices" size={20} /></button>
+      <button class="icon-btn" class:on={!!devices.target} onclick={() => (devices.picker = true)} aria-label={t("Gerät steuern")} title={t("Gerät steuern")}><Icon name="devices" size={20} /></button>
     {/if}
-    <button class="icon-btn" onclick={showQueue} aria-label="Warteschlange" title="Warteschlange"><Icon name="queue" size={20} /></button>
+    <button class="icon-btn" onclick={showQueue} aria-label={t("Warteschlange")} title={t("Warteschlange")}><Icon name="queue" size={20} /></button>
   </header>
 
   {#if track}
     <div class="body">
-      <div class="art" bind:this={art}><Cover hash={track.cover} size={600} alt="Cover von {track.album}" /></div>
+      <div class="art" bind:this={art}><Cover hash={track.cover} size={600} alt={t("Cover von {album}", { album: track.album ?? "" })} /></div>
 
       <div class="info">
         <div class="meta">
@@ -234,7 +235,7 @@
           <a class="album" href={href(`/albums/${track.album_id}`)}>{track.album}</a>
         </div>
         <Heart {track} size={22} />
-        <button class="icon-btn" aria-label="Mehr zu {track.title}" title="Mehr" onclick={(e) => openTrackMenu(e, [track])}><Icon name="more" size={22} /></button>
+        <button class="icon-btn" aria-label={t("Mehr zu {title}", { title: track.title })} title={t("Mehr")} onclick={(e) => openTrackMenu(e, [track])}><Icon name="more" size={22} /></button>
       </div>
 
       <div class="transport">
@@ -246,8 +247,8 @@
             step="0.1"
             value={shown}
             style:--p="{progress}%"
-            aria-label="Position"
-            aria-valuetext="{duration(shown * 1000)} von {duration(player.duration * 1000)}"
+            aria-label={t("Position")}
+            aria-valuetext={t("{pos} von {total}", { pos: duration(shown * 1000), total: duration(player.duration * 1000) })}
             oninput={(e) => (dragging = Number(e.currentTarget.value))}
             onchange={(e) => {
               player.seek(Number(e.currentTarget.value));
@@ -258,16 +259,16 @@
         </div>
 
         <div class="controls">
-          <button class="icon-btn" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} disabled={player.radio} title={player.radio ? "Radio hat schon eine eigene Reihenfolge" : "Zufallswiedergabe"} aria-pressed={player.queue.shuffle} aria-label="Zufallswiedergabe">
+          <button class="icon-btn" class:on={player.queue.shuffle} onclick={() => player.toggleShuffle()} disabled={player.radio} title={player.radio ? t("Radio hat schon eine eigene Reihenfolge") : t("Zufallswiedergabe")} aria-pressed={player.queue.shuffle} aria-label={t("Zufallswiedergabe")}>
             <Icon name="shuffle" size={22} />
           </button>
-          <button class="icon-btn big" onclick={() => player.prev()} aria-label="Zurück"><Icon name="prev" size={28} /></button>
+          <button class="icon-btn big" onclick={() => player.prev()} aria-label={t("Zurück")}><Icon name="prev" size={28} /></button>
           <button class="playpause" onclick={() => player.toggle()} aria-label={player.playing ? "Pause" : "Abspielen"}>
             {#if player.buffering && player.playing}<span class="spin" aria-hidden="true"></span>{/if}
             <Icon name={player.playing ? "pause" : "play"} size={30} />
           </button>
-          <button class="icon-btn big" onclick={() => player.next()} aria-label="Weiter"><Icon name="next" size={28} /></button>
-          <button class="icon-btn repeat" class:on={player.queue.repeat !== "off"} onclick={() => player.cycleRepeat()} aria-label="Wiederholen: {player.queue.repeat}" title="Wiederholen">
+          <button class="icon-btn big" onclick={() => player.next()} aria-label={t("Weiter")}><Icon name="next" size={28} /></button>
+          <button class="icon-btn repeat" class:on={player.queue.repeat !== "off"} onclick={() => player.cycleRepeat()} aria-label={t(REPEAT_LABELS[player.queue.repeat])} title={t("Wiederholen")}>
             <Icon name="repeat" size={22} />
             {#if player.queue.repeat === "one"}<span class="one">1</span>{/if}
           </button>
@@ -284,7 +285,7 @@
             step="0.01"
             value={player.muted ? 0 : player.volume}
             style:--p="{(player.muted ? 0 : player.volume) * 100}%"
-            aria-label="Lautstärke"
+            aria-label={t("Lautstärke")}
             oninput={(e) => player.setVolume(Number(e.currentTarget.value))}
           />
         </div>
@@ -292,7 +293,7 @@
       {#if player.error}<p class="error" role="status">{player.error}</p>{/if}
     </div>
   {:else}
-    <p class="idle">Nichts in der Warteschlange</p>
+    <p class="idle">{t("Nichts in der Warteschlange")}</p>
   {/if}
 </div>
 

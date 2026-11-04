@@ -1,3 +1,5 @@
+import { locale } from "../../lib/i18n.svelte";
+
 // Shared bits of the settings pages.
 
 export interface Job {
@@ -15,6 +17,6 @@ export interface Job {
 }
 
 export const fmtDate = (ms: number | null) =>
-  ms ? new Date(ms).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "–";
+  ms ? new Date(ms).toLocaleString(locale(), { dateStyle: "short", timeStyle: "short" }) : "–";
 
 export const isBusy = (j: Job | null) => !!j && (j.status === "queued" || j.status === "running");

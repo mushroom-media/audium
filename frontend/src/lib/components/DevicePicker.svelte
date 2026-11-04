@@ -4,6 +4,7 @@
   import { controlDevice, deviceId, devices, stopControl, type Device } from "../devices.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import Modal from "./Modal.svelte";
+  import { t } from "../i18n.svelte";
 
   const close = () => (devices.picker = false);
   const list = $derived([...devices.list].sort((a, b) => Number(b.id === deviceId) - Number(a.id === deviceId) || Number(b.online) - Number(a.online)));
@@ -25,29 +26,28 @@
   const chosen = (d: Device) => (devices.target ?? deviceId) === d.id;
 </script>
 
-<Modal title="Gerät steuern" onclose={close}>
+<Modal title={t("Gerät steuern")} onclose={close}>
   <ul>
     {#each list as d (d.id)}
       <li>
         <button class="dev" class:on={chosen(d)} class:off={!d.online} onclick={() => pick(d)} aria-pressed={chosen(d)}>
           <span class="icon"><Icon name={ICON[d.kind] ?? "devices"} size={22} /></span>
           <span class="meta">
-            <strong>{d.id === deviceId ? "Dieses Gerät" : d.name}</strong>
+            <strong>{d.id === deviceId ? t("Dieses Gerät") : d.name}</strong>
             <small>{d.id === deviceId ? d.name : line(d)}</small>
           </span>
-          {#if d.status?.playing && d.online}<span class="eq" aria-label="spielt"><Icon name="wave" size={18} /></span>{/if}
+          {#if d.status?.playing && d.online}<span class="eq" aria-label={t("spielt")}><Icon name="wave" size={18} /></span>{/if}
         </button>
       </li>
     {:else}
-      <li class="empty">Noch keine Geräte verbunden.</li>
+      <li class="empty">{t("Noch keine Geräte verbunden.")}</li>
     {/each}
   </ul>
   <p class="hint">
-    Öffne audium auf einem anderen Gerät mit deinem Konto, dann erscheint es hier. Das ist eine Fernbedienung: Dieses Gerät spielt
-    weiter, was es gerade spielt.
+    {t("Öffne audium auf einem anderen Gerät mit deinem Konto, dann erscheint es hier. Das ist eine Fernbedienung: Dieses Gerät spielt weiter, was es gerade spielt.")}
   </p>
   {#if devices.target}
-    <button class="btn ghost full" onclick={() => (stopControl(), close())}>Fernsteuerung beenden</button>
+    <button class="btn ghost full" onclick={() => (stopControl(), close())}>{t("Fernsteuerung beenden")}</button>
   {/if}
 </Modal>
 

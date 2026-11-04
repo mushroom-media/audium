@@ -12,11 +12,12 @@
   import { keepScroll } from "../lib/keepScroll";
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
+  import { locale, msg, t } from "../lib/i18n.svelte";
 
   const PERIODS = [
-    { key: "month", label: "30 Tage" },
-    { key: "year", label: "Dieses Jahr" },
-    { key: "all", label: "Insgesamt" },
+    { key: "month", label: msg("30 Tage") },
+    { key: "year", label: msg("Dieses Jahr") },
+    { key: "all", label: msg("Insgesamt") },
   ] as const;
   type Period = (typeof PERIODS)[number]["key"];
   const TOP_TRACKS = 10;
@@ -46,7 +47,33 @@
     return () => ctrl.abort();
   });
 
-  const minutes = (ms: number) => `${Math.round(ms / 60000).toLocaleString("de-DE")} Min.`;
+  // Listening time in minutes or hours; a click on the tile switches, the choice is kept.
+  const UNIT_KEY = "audium.profile.timeUnit";
+  let inHours = $state(storedUnit() === "hours");
+
+  function storedUnit(): string | null {
+    try {
+      return localStorage.getItem(UNIT_KEY);
+    } catch {
+      return null;
+    }
+  }
+  function toggleUnit() {
+    inHours = !inHours;
+    try {
+      localStorage.setItem(UNIT_KEY, inHours ? "hours" : "minutes");
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function duration(ms: number): string {
+    if (inHours) {
+      const h = (ms / 3_600_000).toLocaleString(locale(), { maximumFractionDigits: 1 });
+      return t("{h} Std.", { h });
+    }
+    return t("{m} Min.", { m: Math.round(ms / 60000).toLocaleString(locale()) });
+  }
 
   function playTop(i: number) {
     if (stats) player.playTracks(stats.tracks.map((e) => e.track), i, false);
@@ -88,7 +115,7 @@
     <span class="art"><PlaylistCover playlist={p} size={64} /></span>
     <span class="meta">
       <strong>{p.name}</strong>
-      <small>{p.role === "owner" ? plural(p.item_count, "Titel", "Titel") : `von ${p.owner.display_name}`}</small>
+      <small>{p.role === "owner" ? plural(p.item_count, "Titel", "Titel") : t("von {name}", { name: p.owner.display_name })}</small>
     </span>
   </a>
 {/snippet}
@@ -97,61 +124,63 @@
   <header class="profile">
     <span class="avatar" aria-hidden="true">{initial}</span>
     <div>
-      <p class="kind">Profil</p>
+      <p class="kind">{t("Profil")}</p>
       <h1>{session.user?.display_name}</h1>
     </div>
   </header>
 
   <div class="section-head">
-    <h2>Dein Hören</h2>
-    <div class="periods" role="group" aria-label="Zeitraum">
+    <h2>{t("Dein Hören")}</h2>
+    <div class="periods" role="group" aria-label={t("Zeitraum")}>
       {#each PERIODS as p (p.key)}
-        <button class="chip" class:on={period === p.key} aria-pressed={period === p.key} onclick={() => (period = p.key)}>{p.label}</button>
+        <button class="chip" class:on={period === p.key} aria-pressed={period === p.key} onclick={() => (period = p.key)}>{t(p.label)}</button>
       {/each}
     </div>
   </div>
   <div class="tiles">
-    <div class="tile"><span class="value">{stats ? minutes(stats.listening_ms) : "–"}</span><span class="label">Hörzeit</span></div>
-    <div class="tile"><span class="value">{stats ? stats.plays.toLocaleString("de-DE") : "–"}</span><span class="label">Wiedergaben</span></div>
+    <button class="tile toggle" onclick={toggleUnit} title={inHours ? t("In Minuten anzeigen") : t("In Stunden anzeigen")}>
+      <span class="value">{stats ? duration(stats.listening_ms) : "–"}</span><span class="label">{t("Hörzeit")}</span>
+    </button>
+    <div class="tile"><span class="value">{stats ? stats.plays.toLocaleString(locale()) : "–"}</span><span class="label">{t("Wiedergaben")}</span></div>
   </div>
 
   {#if stats && stats.plays === 0}
-    <p class="empty">In diesem Zeitraum hast du noch nichts gehört.</p>
+    <p class="empty">{t("In diesem Zeitraum hast du noch nichts gehört.")}</p>
   {:else if stats}
-    <div class="section-head sub"><h3>Meistgehörte Titel</h3></div>
+    <div class="section-head sub"><h3>{t("Meistgehörte Titel")}</h3></div>
     <div class="tracks">
-      <div class="tracks-head"><span>Wiedergaben</span></div>
+      <div class="tracks-head"><span>{t("Wiedergaben")}</span></div>
       {#each stats.tracks as e, i (e.track.id)}
         <div class="row-h"><TrackRow track={e.track} number={i + 1} count={e.plays} onplay={() => playTop(i)} /></div>
       {/each}
     </div>
 
-    <div class="section-head sub"><h3>Meistgehörte Künstler</h3></div>
+    <div class="section-head sub"><h3>{t("Meistgehörte Künstler")}</h3></div>
     <div class="artists">
       {#each stats.artists.slice(0, TOP_CARDS) as e (e.artist.id)}
         <a class="artist" href={href(`/artists/${e.artist.id}`)}>
           <span class="artist-art"><Cover hash={e.artist.cover} alt="" round /></span>
-          <span class="meta"><strong>{e.artist.name}</strong><small>{minutes(e.listening_ms)}</small></span>
+          <span class="meta"><strong>{e.artist.name}</strong><small>{duration(e.listening_ms)}</small></span>
         </a>
       {/each}
     </div>
   {/if}
 
-  <div class="section-head"><h2>Favoriten</h2></div>
+  <div class="section-head"><h2>{t("Favoriten")}</h2></div>
 
   <div class="lists">
     <a class="list" href={href("/favorites")}>
       <span class="art fav" aria-hidden="true"><Icon name="heart" size={22} filled /></span>
-      <span class="meta"><strong>Lieblingssongs</strong><small>{plural(mine.favoriteTracks.size, "Titel", "Titel")}</small></span>
+      <span class="meta"><strong>{t("Lieblingssongs")}</strong><small>{plural(mine.favoriteTracks.size, "Titel", "Titel")}</small></span>
     </a>
   </div>
 
   <div class="section-head sub">
-    <h3>Lieblingsalben</h3>
-    {#if albumTotal > 0}<a class="all" href={href("/favorites/albums")}>Alle ansehen</a>{/if}
+    <h3>{t("Lieblingsalben")}</h3>
+    {#if albumTotal > 0}<a class="all" href={href("/favorites/albums")}>{t("Alle ansehen")}</a>{/if}
   </div>
   {#if albums && albums.length === 0}
-    <p class="empty">Markiere Alben mit dem Herz auf der Albumseite, dann erscheinen sie hier.</p>
+    <p class="empty">{t("Markiere Alben mit dem Herz auf der Albumseite, dann erscheinen sie hier.")}</p>
   {:else}
     <div class="grid">
       {#each albums ?? Array(6).fill(undefined) as album, i (album?.id ?? `p${i}`)}<AlbumCard {album} />{/each}
@@ -159,19 +188,19 @@
   {/if}
 
   <div class="section-head">
-    <h2>Deine Playlists</h2>
-    <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> Neu</button>
+    <h2>{t("Deine Playlists")}</h2>
+    <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> {t("Neu")}</button>
   </div>
   {#if own.length}
     <div class="lists">
       {#each own as p (p.id)}{@render playlistLink(p)}{/each}
     </div>
   {:else}
-    <p class="empty">Noch keine eigenen Playlists.</p>
+    <p class="empty">{t("Noch keine eigenen Playlists.")}</p>
   {/if}
 
   {#if shared.length}
-    <div class="section-head"><h2>Mit dir geteilt</h2></div>
+    <div class="section-head"><h2>{t("Mit dir geteilt")}</h2></div>
     <div class="lists">
       {#each shared as p (p.id)}{@render playlistLink(p)}{/each}
     </div>
@@ -265,6 +294,16 @@
     padding: 14px 16px;
     border-radius: var(--radius-sm);
     background: var(--surface-1);
+  }
+  .toggle {
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .toggle:hover {
+    background: var(--surface-2);
   }
   .value {
     font-size: 1.6rem;

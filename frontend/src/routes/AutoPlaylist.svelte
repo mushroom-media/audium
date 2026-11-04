@@ -17,6 +17,7 @@
   import { navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { promptText, toast } from "../lib/ui.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   let { id }: { id: string } = $props();
   const kept = untrack(() => recallEntry<{ auto: AutoPlaylist; items: AutoItem[] }>(`auto:${id}`));
@@ -43,7 +44,7 @@
         rememberEntry(`auto:${id}`, { auto: a, items: page.items });
       })
       .catch((e) => {
-        if (e.name !== "AbortError") error = e instanceof ApiError && e.status === 404 ? "Diese Playlist ist nicht (mehr) verfügbar." : String(e);
+        if (e.name !== "AbortError") error = e instanceof ApiError && e.status === 404 ? t("Diese Playlist ist nicht (mehr) verfügbar.") : String(e);
       });
     return () => ctrl.abort();
   });
@@ -53,11 +54,11 @@
   }
 
   async function freeze() {
-    const name = await promptText("Als eigene Playlist speichern", auto?.name ?? "", "Speichern");
+    const name = await promptText(t("Als eigene Playlist speichern"), auto?.name ?? "", t("Speichern"));
     if (!name) return;
     const pl = await post<Playlist>(`/autoplaylists/${id}/freeze`, { name });
     await loadPlaylists();
-    toast("Gespeichert – du kannst sie jetzt bearbeiten und teilen");
+    toast(t("Gespeichert – du kannst sie jetzt bearbeiten und teilen"));
     navigate(`/playlists/${pl.id}`);
   }
 
@@ -67,18 +68,18 @@
       if (done) toast(done);
       reload++;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
   async function rename() {
-    const name = await promptText("Umbenennen", auto?.name ?? "", "Speichern");
+    const name = await promptText(t("Umbenennen"), auto?.name ?? "", t("Speichern"));
     if (name) admin({ name });
   }
 
   async function remove() {
     const custom = auto?.generator === "custom";
-    if (!confirm(custom ? "Diese Regel-Playlist löschen?" : "Ausblenden? Sie wird dann nicht mehr erzeugt.")) return;
+    if (!confirm(custom ? t("Diese Regel-Playlist löschen?") : t("Ausblenden? Sie wird dann nicht mehr erzeugt."))) return;
     await del(`/admin/autoplaylists/${id}`);
     navigate("/discover", { replace: true });
   }
@@ -101,21 +102,21 @@
     reload++;
   }
 
-  const STATUS: Record<string, string> = { suggested: "Vorschlag", published: "Veröffentlicht", dismissed: "Ausgeblendet" };
-  const ACCESS: Record<string, string> = { all: "Alle Nutzer", restricted: "Ausgewählte Nutzer", admin_only: "Nur Admin" };
+  const STATUS: Record<string, string> = { suggested: msg("Vorschlag"), published: msg("Veröffentlicht"), dismissed: msg("Ausgeblendet") };
+  const ACCESS: Record<string, string> = { all: msg("Alle Nutzer"), restricted: msg("Ausgewählte Nutzer"), admin_only: msg("Nur Admin") };
 </script>
 
 {#if error}
   <div class="page"><p class="empty">{error}</p></div>
 {:else if auto}
-  <VirtualList count={items.length} rowHeight={56} label="Titel" keep="auto:{id}">
+  <VirtualList count={items.length} rowHeight={56} label={t("Titel")} keep="auto:{id}">
     {#snippet header()}
       <header class="hero">
         <div class="art"><Cover hash={auto!.cover} size={256} /></div>
         <div class="info">
           <p class="kind">
-            <Icon name={ORIGINS[auto!.origin].icon} size={13} /> Automatische Playlist · {ORIGINS[auto!.origin].label}
-            {#if isAdmin && auto!.status}· {STATUS[auto!.status]} · {ACCESS[auto!.access ?? "all"]}{/if}
+            <Icon name={ORIGINS[auto!.origin].icon} size={13} /> {t("Automatische Playlist")} · {t(ORIGINS[auto!.origin].label)}
+            {#if isAdmin && auto!.status}· {t(STATUS[auto!.status])} · {t(ACCESS[auto!.access ?? "all"])}{/if}
           </p>
           <h1 use:pageTitle={auto!.name}>{auto!.name}</h1>
           {#if auto!.description}<p class="desc">{auto!.description}</p>{/if}
@@ -123,25 +124,25 @@
           <p class="by">{plural(auto!.track_count, "Titel", "Titel")}{#if auto!.duration_ms}, {longDuration(auto!.duration_ms)}{/if}</p>
           <div class="actions">
             <PlayToggle ref="auto:{id}" disabled={!items.length} start={() => play(0)} />
-            <button class="btn square" disabled={!items.length} onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
-            <button class="btn ghost" disabled={!items.length} onclick={freeze}><Icon name="plus" size={18} /> Als Playlist speichern</button>
+            <button class="btn square" disabled={!items.length} onclick={() => play(null, true)} title={t("Zufällig abspielen")} aria-label={t("Zufällig abspielen")}><Icon name="shuffle" size={18} /></button>
+            <button class="btn ghost" disabled={!items.length} onclick={freeze}><Icon name="plus" size={18} /> {t("Als Playlist speichern")}</button>
           </div>
           {#if isAdmin}
             <div class="actions admin">
               {#if auto!.status === "published"}
-                <button class="btn small" onclick={() => admin({ status: "suggested" }, "Zurückgezogen")}>Zurückziehen</button>
+                <button class="btn small" onclick={() => admin({ status: "suggested" }, t("Zurückgezogen"))}>{t("Zurückziehen")}</button>
               {:else}
-                <button class="btn primary small" onclick={() => admin({ status: "published" }, "Veröffentlicht")}>Veröffentlichen</button>
+                <button class="btn primary small" onclick={() => admin({ status: "published" }, t("Veröffentlicht"))}>{t("Veröffentlichen")}</button>
               {/if}
-              <button class="btn small ghost" onclick={openAccess}>Zugriff</button>
-              <button class="btn small ghost" onclick={rename}>Umbenennen</button>
-              {#if auto!.generator === "custom"}<button class="btn small ghost" onclick={() => (editingRule = true)}>Regel bearbeiten</button>{/if}
-              <button class="btn small ghost" onclick={remove}>{auto!.generator === "custom" ? "Löschen" : "Ausblenden"}</button>
+              <button class="btn small ghost" onclick={openAccess}>{t("Zugriff")}</button>
+              <button class="btn small ghost" onclick={rename}>{t("Umbenennen")}</button>
+              {#if auto!.generator === "custom"}<button class="btn small ghost" onclick={() => (editingRule = true)}>{t("Regel bearbeiten")}</button>{/if}
+              <button class="btn small ghost" onclick={remove}>{auto!.generator === "custom" ? t("Löschen") : t("Ausblenden")}</button>
             </div>
           {/if}
         </div>
       </header>
-      {#if !items.length}<p class="empty">Gerade passt kein Titel.</p>{/if}
+      {#if !items.length}<p class="empty">{t("Gerade passt kein Titel.")}</p>{/if}
     {/snippet}
     {#snippet row(i)}
       <div class="pad">
@@ -154,7 +155,7 @@
 {/if}
 
 {#if accessOpen && auto}
-  <Modal title="Wer sieht „{auto.name}“?" onclose={() => (accessOpen = false)}>
+  <Modal title={t("Wer sieht „{name}“?", { name: auto.name })} onclose={() => (accessOpen = false)}>
     <div class="access">
       {#each Object.entries(ACCESS) as [k, label] (k)}
         <label><input type="radio" name="access" checked={auto.access === k} onchange={() => admin({ access: k })} /> {label}</label>
@@ -165,18 +166,18 @@
             <label><input type="checkbox" checked={auto.user_ids?.includes(u.id)} onchange={(e) => toggleUser(u.id, e.currentTarget.checked)} />
               {u.display_name} <small>@{u.username}</small></label>
           {:else}
-            <p class="empty">Keine anderen Nutzer.</p>
+            <p class="empty">{t("Keine anderen Nutzer.")}</p>
           {/each}
         </div>
       {/if}
-      <p class="note">Sichtbar ist sie nur, solange sie veröffentlicht ist.</p>
-      <div class="buttons"><button class="btn primary" onclick={() => (accessOpen = false)}>Fertig</button></div>
+      <p class="note">{t("Sichtbar ist sie nur, solange sie veröffentlicht ist.")}</p>
+      <div class="buttons"><button class="btn primary" onclick={() => (accessOpen = false)}>{t("Fertig")}</button></div>
     </div>
   </Modal>
 {/if}
 
 {#if editingRule && auto?.rule}
-  <RuleEditor title="Regel bearbeiten" initial={auto.rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
+  <RuleEditor title={t("Regel bearbeiten")} initial={auto.rule} askName={false} onsave={saveRule} onclose={() => (editingRule = false)} />
 {/if}
 
 <style>

@@ -6,6 +6,7 @@
   import Icon from "./Icon.svelte";
   import VirtualList from "./VirtualList.svelte";
   import { navigate } from "../router.svelte";
+  import { t } from "../i18n.svelte";
 
   const upcoming = $derived(Q.upcoming(player.queue));
   const current = $derived(player.current);
@@ -19,44 +20,44 @@
   }
 </script>
 
-<aside class="panel" aria-label="Warteschlange">
+<aside class="panel" aria-label={t("Warteschlange")}>
   <header>
-    <button class="icon-btn back" aria-label="Zurück" onclick={() => (player.queueOpen = false)}><Icon name="back" /></button>
-    <h2>Warteschlange</h2>
-    <button class="icon-btn close" aria-label="Schließen" onclick={() => (player.queueOpen = false)}><Icon name="close" /></button>
+    <button class="icon-btn back" aria-label={t("Zurück")} onclick={() => (player.queueOpen = false)}><Icon name="back" /></button>
+    <h2>{t("Warteschlange")}</h2>
+    <button class="icon-btn close" aria-label={t("Schließen")} onclick={() => (player.queueOpen = false)}><Icon name="close" /></button>
   </header>
   {#if source}
-    <div class="label">Gestartet von</div>
+    <div class="label">{t("Gestartet von")}</div>
     <div class="item now">
       <div class="meta"><div class="a">{source.kind}</div><div class="t src">{source.name}</div></div>
-      {#if source.path}<button class="btn" onclick={openSource}>Öffnen</button>{/if}
+      {#if source.path}<button class="btn" onclick={openSource}>{t("Öffnen")}</button>{/if}
     </div>
   {/if}
   {#if current}
-    <div class="label">Läuft gerade</div>
+    <div class="label">{t("Läuft gerade")}</div>
     <div class="item now">
       <div class="thumb"><Cover hash={current.cover} size={64} /></div>
       <div class="meta"><div class="t">{current.title}</div><div class="a">{current.artist}</div></div>
       <span class="d">{duration(current.duration_ms)}</span>
     </div>
   {/if}
-  <div class="label">Als Nächstes{upcoming.length ? ` · ${upcoming.length}` : ""}</div>
+  <div class="label">{t("Als Nächstes")}{upcoming.length ? ` · ${upcoming.length}` : ""}</div>
   <div class="list">
     {#if upcoming.length}
-      <VirtualList count={upcoming.length} rowHeight={56} label="Als Nächstes">
+      <VirtualList count={upcoming.length} rowHeight={56} label={t("Als Nächstes")}>
         {#snippet row(i)}
           {@const u = upcoming[i]}
           <div class="item">
-            <button class="hit" onclick={() => player.jump(u.orderPos)} aria-label="{u.track.title} abspielen">
+            <button class="hit" onclick={() => player.jump(u.orderPos)} aria-label={t("{title} abspielen", { title: u.track.title })}>
               <div class="thumb"><Cover hash={u.track.cover} size={64} /></div>
               <div class="meta"><div class="t">{u.track.title}</div><div class="a">{u.track.artist}</div></div>
             </button>
-            <button class="icon-btn rm" aria-label="Entfernen" onclick={() => player.remove(u.orderPos)}><Icon name="close" size={16} /></button>
+            <button class="icon-btn rm" aria-label={t("Entfernen")} onclick={() => player.remove(u.orderPos)}><Icon name="close" size={16} /></button>
           </div>
         {/snippet}
       </VirtualList>
     {:else}
-      <p class="empty">Danach ist Schluss. Füge Titel mit <Icon name="plus" size={14} /> hinzu.</p>
+      <p class="empty">{t("Danach ist Schluss. Füge Titel mit")} <Icon name="plus" size={14} /> {t("hinzu.")}</p>
     {/if}
   </div>
 </aside>

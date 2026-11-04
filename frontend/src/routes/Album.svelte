@@ -13,6 +13,7 @@
   import { radioPath } from "../lib/radio";
   import { keepScroll } from "../lib/keepScroll";
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { id }: { id: string } = $props();
   let album = $state<AlbumDetail | null>(untrack(() => recallEntry<AlbumDetail>(`album:${id}`)) ?? null);
@@ -44,36 +45,36 @@
     <p class="empty">{error}</p>
   {:else if album}
     <header class="hero" class:tinted={album.cover_color} style:--tint={album.cover_color}>
-      <div class="art"><Cover hash={album.cover} size={600} alt="Cover von {album.title}" /></div>
+      <div class="art"><Cover hash={album.cover} size={600} alt={t("Cover von {album}", { album: album.title })} /></div>
       <div class="info">
         <p class="kind">{album.compilation ? "Compilation" : "Album"}</p>
         <h1 use:pageTitle={album.title}>{album.title}</h1>
         <p class="by">
           <a href={href(`/artists/${album.artist_id}`)}>{album.artist}</a>
           {#if album.year}<span> · {album.year}</span>{/if}
-          {#if discCount > 1}<span> · {discCount} CDs</span>{/if}
+          {#if discCount > 1}<span> · {t("{n} CDs", { n: discCount })}</span>{/if}
           <span> · {plural(album.track_count, "Titel", "Titel")}, {longDuration(album.duration_ms)}</span>
         </p>
         <div class="actions">
           <PlayToggle ref="album:{album.id}" start={() => play(0, false)} />
-          <button class="btn square" onclick={() => play(null, true)} title="Zufällig abspielen" aria-label="Zufällig abspielen"><Icon name="shuffle" size={18} /></button>
-          <button class="btn" onclick={() => album && navigate(radioPath("album", album.id))}><Icon name="radio" size={18} /> Radio</button>
+          <button class="btn square" onclick={() => play(null, true)} title={t("Zufällig abspielen")} aria-label={t("Zufällig abspielen")}><Icon name="shuffle" size={18} /></button>
+          <button class="btn" onclick={() => album && navigate(radioPath("album", album.id))}><Icon name="radio" size={18} /> {t("Radio")}</button>
           <Heart kind="album" id={album.id} size={22} />
-          <button class="icon-btn" title="Mehr" aria-label="Mehr zu {album.title}" onclick={(e) => album && openTrackMenu(e, album.tracks, album.title)}><Icon name="more" size={20} /></button>
+          <button class="icon-btn" title={t("Mehr")} aria-label={t("Mehr zu {title}", { title: album.title })} onclick={(e) => album && openTrackMenu(e, album.tracks, album.title)}><Icon name="more" size={20} /></button>
         </div>
       </div>
     </header>
     <div class="tracks">
-      {#each album.tracks as t, i (t.id)}
-        {#if multiDisc && (i === 0 || (album.tracks[i - 1].disc_no ?? 1) !== (t.disc_no ?? 1))}
+      {#each album.tracks as track, i (track.id)}
+        {#if multiDisc && (i === 0 || (album.tracks[i - 1].disc_no ?? 1) !== (track.disc_no ?? 1))}
           <h2 class="disc">
             <Icon name="album" size={16} />
-            <span>CD {t.disc_no ?? 1}</span>
-            {#if discTitles.get(t.disc_no ?? 1)}<span class="disc-title">{discTitles.get(t.disc_no ?? 1)}</span>{/if}
+            <span>{t("CD {n}", { n: track.disc_no ?? 1 })}</span>
+            {#if discTitles.get(track.disc_no ?? 1)}<span class="disc-title">{discTitles.get(track.disc_no ?? 1)}</span>{/if}
           </h2>
         {/if}
         <div class="row-h">
-          <TrackRow track={t} number={t.track_no ?? i + 1} showCover={false} showAlbum={false} linkArtist={false} onplay={() => play(i, false)} />
+          <TrackRow {track} number={track.track_no ?? i + 1} showCover={false} showAlbum={false} linkArtist={false} onplay={() => play(i, false)} />
         </div>
       {/each}
     </div>

@@ -3,6 +3,7 @@
   // browser (all its tabs are one device); empty: the automatic name like "Chrome auf Windows".
   import { autoDeviceName, customDeviceName, deviceId, devices, renameDevice } from "../../lib/devices.svelte";
   import { toast } from "../../lib/ui.svelte";
+  import { t } from "../../lib/i18n.svelte";
 
   let stored = $state(customDeviceName() ?? "");
   let name = $state(customDeviceName() ?? "");
@@ -14,21 +15,21 @@
     name = name.trim();
     await renameDevice(name);
     stored = name;
-    toast(name ? `Dieses Gerät heißt jetzt „${name}“` : "Name zurückgesetzt");
+    toast(name ? t("Dieses Gerät heißt jetzt „{name}“", { name }) : t("Name zurückgesetzt"));
   }
 </script>
 
 <section class="set-group">
-  <h2>Dieses Gerät</h2>
+  <h2>{t("Dieses Gerät")}</h2>
   <form class="set-card" onsubmit={save}>
     <div class="set-row">
       <label class="set-label" for="device-name">
-        <strong>Name</strong>
-        <small>So erscheint dieser Browser bei „Gerät steuern“ auf deinen anderen Geräten. Leer: „{autoDeviceName()}“.</small>
+        <strong>{t("Name")}</strong>
+        <small>{t("So erscheint dieser Browser bei „Gerät steuern“ auf deinen anderen Geräten. Leer: „{name}“.", { name: autoDeviceName() })}</small>
       </label>
       <div class="name">
         <input id="device-name" bind:value={name} maxlength="60" placeholder={autoDeviceName()} autocomplete="off" />
-        <button class="btn" disabled={saved}>Speichern</button>
+        <button class="btn" disabled={saved}>{t("Speichern")}</button>
       </div>
     </div>
   </form>
@@ -36,7 +37,7 @@
 
 {#if others.length}
   <section class="set-group">
-    <h2>Gerade verbunden</h2>
+    <h2>{t("Gerade verbunden")}</h2>
     <div class="set-card">
       {#each others as d (d.id)}
         <div class="set-row">

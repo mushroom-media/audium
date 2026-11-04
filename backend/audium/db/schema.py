@@ -489,6 +489,10 @@ auto_playlists = Table(
     Column("name", Text, nullable=False),
     Column("name_locked", Boolean, nullable=False, default=False),  # renamed by the admin: keep it
     Column("description", Text),
+    # The generated name and description in English (the ones above are German); null for the
+    # admin's own rule playlists and before the next generation. See services/auto.py.
+    Column("name_en", Text),
+    Column("description_en", Text),
     Column("rule_json", Text),
     Column("status", Text, nullable=False),  # suggested | published | dismissed
     Column("access", Text, nullable=False, default="all"),  # all | restricted | admin_only

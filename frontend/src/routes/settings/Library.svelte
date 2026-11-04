@@ -6,6 +6,7 @@
   import { href } from "../../lib/router.svelte";
   import { promptText, toast } from "../../lib/ui.svelte";
   import { fmtDate, type Job } from "./common";
+  import { locale, t, tn } from "../../lib/i18n.svelte";
 
   interface Root {
     id: number;
@@ -51,7 +52,7 @@
       reload++;
       return r;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
@@ -94,52 +95,57 @@
   }
 
   async function addRoot(path: string) {
-    await guard(() => post("/admin/roots", { path }), "Ordner hinzugefügt – der Scan startet");
+    await guard(() => post("/admin/roots", { path }), t("Ordner hinzugefügt – der Scan startet"));
     browsing = null;
   }
 
   async function addExclude(root: Root) {
-    const rel = await promptText(`Unterordner von ${root.path} ausschließen (relativer Pfad)`, "", "Ausschließen");
-    if (rel) guard(() => post(`/admin/roots/${root.id}/excludes`, { rel_path: rel }), "Ausgeschlossen – wird beim Scan entfernt");
+    const rel = await promptText(t("Unterordner von {path} ausschließen (relativer Pfad)", { path: root.path }), "", t("Ausschließen"));
+    if (rel) guard(() => post(`/admin/roots/${root.id}/excludes`, { rel_path: rel }), t("Ausgeschlossen – wird beim Scan entfernt"));
   }
 </script>
 
 {#if stats}
   <div class="tiles">
-    <div class="tile"><strong>{stats.tracks.toLocaleString("de-DE")}</strong><span>Titel</span></div>
-    <div class="tile"><strong>{stats.albums.toLocaleString("de-DE")}</strong><span>Alben</span></div>
-    <div class="tile"><strong>{stats.artists.toLocaleString("de-DE")}</strong><span>Künstler</span></div>
+    <div class="tile"><strong>{stats.tracks.toLocaleString(locale())}</strong><span>{t("Titel")}</span></div>
+    <div class="tile"><strong>{stats.albums.toLocaleString(locale())}</strong><span>{t("Alben")}</span></div>
+    <div class="tile"><strong>{stats.artists.toLocaleString(locale())}</strong><span>{t("Künstler")}</span></div>
   </div>
-  {#if stats.missing_tracks}<p class="set-note">{plural(stats.missing_tracks, "Titel fehlt", "Titel fehlen")} gerade (Ordner nicht erreichbar?). Sie werden nach einigen Tagen entfernt.</p>{/if}
+  {#if stats.missing_tracks}<p class="set-note">{tn(stats.missing_tracks, "{n} Titel fehlt gerade (Ordner nicht erreichbar?). Er wird nach einigen Tagen entfernt.", "{n} Titel fehlen gerade (Ordner nicht erreichbar?). Sie werden nach einigen Tagen entfernt.")}</p>{/if}
 {/if}
 
 <section class="set-group">
-  <h2>Scan</h2>
+  <h2>{t("Scan")}</h2>
   <div class="set-card">
     <div class="set-row scan">
       {#if running && job}
         <div class="set-label">
-          <strong>{job.status === "queued" ? "Scan wartet …" : "Scan läuft"}</strong>
-          <small>{job.progress.toLocaleString("de-DE")} Dateien geprüft{#if job.message}<br /><span class="set-mono">{job.message}</span>{/if}</small>
+          <strong>{job.status === "queued" ? t("Scan wartet …") : t("Scan läuft")}</strong>
+          <small>{t("{n} Dateien geprüft", { n: job.progress })}{#if job.message}<br /><span class="set-mono">{job.message}</span>{/if}</small>
           <div class="set-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent ?? undefined}>
             <div style:width="{percent ?? 100}%" class:indeterminate={percent === null}></div>
           </div>
         </div>
-        <button class="btn" onclick={() => job && guard(() => post(`/admin/jobs/${job!.id}/cancel`), "Wird abgebrochen")}>Abbrechen</button>
+        <button class="btn" onclick={() => job && guard(() => post(`/admin/jobs/${job!.id}/cancel`), t("Wird abgebrochen"))}>{t("Abbrechen")}</button>
       {:else}
         <div class="set-label">
-          <strong>Bibliothek scannen</strong>
+          <strong>{t("Bibliothek scannen")}</strong>
           <small>
-            {#if job?.status === "failed"}<span class="set-warn">Letzter Scan fehlgeschlagen: {job.error}</span>
+            {#if job?.status === "failed"}<span class="set-warn">{t("Letzter Scan fehlgeschlagen: {error}", { error: job.error ?? "" })}</span>
             {:else if job?.result}
-              Zuletzt {fmtDate(job.finished_at)}: {job.result.added ?? 0} neu, {job.result.updated ?? 0} geändert, {job.result.missing ?? 0} fehlend,
-              {job.result.errors ?? 0} nicht lesbar
-            {:else}Neue und geänderte Dateien einlesen.{/if}
+              {t("Zuletzt {date}: {added} neu, {updated} geändert, {missing} fehlend, {errors} nicht lesbar", {
+                date: fmtDate(job.finished_at),
+                added: job.result.added ?? 0,
+                updated: job.result.updated ?? 0,
+                missing: job.result.missing ?? 0,
+                errors: job.result.errors ?? 0,
+              })}
+            {:else}{t("Neue und geänderte Dateien einlesen.")}{/if}
           </small>
         </div>
         <div class="btns">
-          <button class="btn primary" onclick={() => scan({}, "Scan gestartet")}>Jetzt scannen</button>
-          <button class="btn ghost" title="Liest auch die Tags unveränderter Dateien neu" onclick={() => scan({ force: true }, "Vollständiger Scan gestartet")}>Alles neu einlesen</button>
+          <button class="btn primary" onclick={() => scan({}, "Scan gestartet")}>{t("Jetzt scannen")}</button>
+          <button class="btn ghost" title={t("Liest auch die Tags unveränderter Dateien neu")} onclick={() => scan({ force: true }, t("Vollständiger Scan gestartet"))}>{t("Alles neu einlesen")}</button>
         </div>
       {/if}
     </div>
@@ -147,7 +153,7 @@
 </section>
 
 <section class="set-group">
-  <h2>Ordner</h2>
+  <h2>{t("Ordner")}</h2>
   <div class="set-card">
     {#each roots as r (r.id)}
       <div class="set-row root">
@@ -155,41 +161,40 @@
         <div class="set-label">
           <strong class="set-mono">{r.path}</strong>
           <small>
-            {r.enabled ? plural(r.track_count, "Titel", "Titel") : "deaktiviert – Titel ausgeblendet"} · letzter Scan {fmtDate(r.last_scan_at)}
+            {r.enabled ? plural(r.track_count, "Titel", "Titel") : t("deaktiviert – Titel ausgeblendet")} · {t("letzter Scan {date}", { date: fmtDate(r.last_scan_at) })}
             {#if r.status_message}<br /><span class="set-warn">{r.status_message}</span>{/if}
           </small>
           {#if excludes[r.id]?.length}
             <div class="excl">
               {#each excludes[r.id] as ex (ex.id)}
-                <span class="set-chip">ohne <code>{ex.rel_path}</code>
-                  <button class="icon-btn tiny" aria-label="Ausschluss entfernen" onclick={() => guard(() => del(`/admin/roots/${r.id}/excludes/${ex.id}`))}><Icon name="close" size={12} /></button>
+                <span class="set-chip">{t("ohne")} <code>{ex.rel_path}</code>
+                  <button class="icon-btn tiny" aria-label={t("Ausschluss entfernen")} onclick={() => guard(() => del(`/admin/roots/${r.id}/excludes/${ex.id}`))}><Icon name="close" size={12} /></button>
                 </span>
               {/each}
             </div>
           {/if}
         </div>
         <div class="btns">
-          <button class="btn small ghost" onclick={() => addExclude(r)}>Unterordner ausschließen</button>
-          <button class="btn small ghost" onclick={() => scan({ root_ids: [r.id] }, "Scan gestartet")}>Scannen</button>
-          <label class="switch"><input type="checkbox" class="toggle" checked={r.enabled} onchange={(e) => guard(() => patch(`/admin/roots/${r.id}`, { enabled: e.currentTarget.checked }))} /> aktiv</label>
+          <button class="btn small ghost" onclick={() => addExclude(r)}>{t("Unterordner ausschließen")}</button>
+          <button class="btn small ghost" onclick={() => scan({ root_ids: [r.id] }, "Scan gestartet")}>{t("Scannen")}</button>
+          <label class="switch"><input type="checkbox" class="toggle" checked={r.enabled} onchange={(e) => guard(() => patch(`/admin/roots/${r.id}`, { enabled: e.currentTarget.checked }))} /> {t("aktiv")}</label>
         </div>
       </div>
     {:else}
-      <div class="set-row"><span class="set-label"><small>Noch keine Bibliotheksordner.</small></span></div>
+      <div class="set-row"><span class="set-label"><small>{t("Noch keine Bibliotheksordner.")}</small></span></div>
     {/each}
     <div class="set-row">
-      <button class="btn" onclick={() => browse()}><Icon name="plus" size={16} /> Ordner hinzufügen</button>
+      <button class="btn" onclick={() => browse()}><Icon name="plus" size={16} /> {t("Ordner hinzufügen")}</button>
     </div>
   </div>
   <p class="set-note">
-    audium sieht nur Ordner, die in den Container unter <code>/music</code> eingebunden sind (in <code>docker-compose.yml</code> unter
-    <code>volumes</code>). Innerhalb davon wählst du hier, was zur Bibliothek gehört. Musikdateien werden nie verändert.
-    Hilfe dabei gibt die <a href={href("/setup")}>Einrichtung</a>, die du jederzeit erneut öffnen kannst.
+    {t("audium sieht nur Ordner, die in den Container unter")} <code>{t("/music")}</code> {t("eingebunden sind (in")} <code>{t("docker-compose.yml")}</code> {t("unter")}
+    <code>{t("volumes")}</code>{t("). Innerhalb davon wählst du hier, was zur Bibliothek gehört. Musikdateien werden nie verändert. Hilfe dabei gibt die")} <a href={href("/setup")}>{t("Einrichtung")}</a>{t(", die du jederzeit erneut öffnen kannst.")}
   </p>
 </section>
 
 {#if browsing}
-  <Modal title="Ordner wählen" width={560} onclose={() => (browsing = null)}>
+  <Modal title={t("Ordner wählen")} width={560} onclose={() => (browsing = null)}>
     <div class="crumb set-mono">{browsing.path}</div>
     <ul class="folders">
       {#if browsing.parent}
@@ -198,16 +203,16 @@
       {#each browsing.folders as f (f.path)}
         <li>
           <button class="folder" onclick={() => browse(f.path)}><Icon name="folder" size={16} /> {f.name}</button>
-          {#if f.root_id}<span class="set-chip">in der Bibliothek</span>{/if}
+          {#if f.root_id}<span class="set-chip">{t("in der Bibliothek")}</span>{/if}
         </li>
       {:else}
-        <li class="set-note">Keine Unterordner.</li>
+        <li class="set-note">{t("Keine Unterordner.")}</li>
       {/each}
     </ul>
     <div class="modal-buttons">
-      <button class="btn ghost" onclick={() => (browsing = null)}>Abbrechen</button>
+      <button class="btn ghost" onclick={() => (browsing = null)}>{t("Abbrechen")}</button>
       <button class="btn primary" disabled={!!browsing.root_id} onclick={() => addRoot(browsing!.path)}>
-        {browsing.root_id ? "Schon in der Bibliothek" : "Diesen Ordner hinzufügen"}
+        {browsing.root_id ? t("Schon in der Bibliothek") : t("Diesen Ordner hinzufügen")}
       </button>
     </div>
   </Modal>

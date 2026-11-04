@@ -14,6 +14,7 @@ from sqlalchemy import Connection, delete, func, insert, select, update
 from audium.analysis import autoplaylists, rules
 from audium.db.schema import auto_playlist_access, auto_playlist_items, auto_playlists, playlists, tracks
 from audium.errors import BadRequest, NotFound
+from audium.i18n import user_language
 from audium.services import playlists as playlist_service
 from audium.services.library import track_item, track_select
 from audium.services.users import User
@@ -65,7 +66,10 @@ def _origin(row) -> str:
     return "styles" if row.generator == "sound" or row.key.startswith("style:") else "tags"
 
 
-def _out(row, admin: bool, access: dict[int, list[int]]) -> dict:
+def _out(row, admin: bool, access: dict[int, list[int]], lang: str) -> dict:
+    # The generator writes name and description in German and English; a name the admin gave
+    # (name_locked) and the admin's own playlists have one text for everybody.
+    english = lang == "en" and not row.name_locked
     out = {
         "id": row.id,
         "key": row.key,
@@ -73,8 +77,8 @@ def _out(row, admin: bool, access: dict[int, list[int]]) -> dict:
         "origin": _origin(row),
         # Stored by the generator: counting per request took seconds in big libraries.
         "detected_tracks": row.detected_tracks,
-        "name": row.name,
-        "description": row.description,
+        "name": (english and row.name_en) or row.name,
+        "description": (english and row.description_en) or row.description,
         "track_count": row.track_count,
         "duration_ms": row.duration_ms,
         "cover": row.cover_hash,
@@ -100,11 +104,12 @@ def list_auto(conn: Connection, user: User, status: str | None = None) -> list[d
     access = _access_lists(conn)
     rows = [r for r in conn.execute(q) if _can_view(user, r, access)]
     rows.sort(key=lambda r: (order.get(r.generator, 9), r.key.startswith("genre-decade"), -r.track_count, r.name))
-    return [_out(r, user.is_admin, access) for r in rows]
+    lang = user_language(conn, user.id)
+    return [_out(r, user.is_admin, access, lang) for r in rows]
 
 
 def get_auto(conn: Connection, user: User, auto_id: int) -> dict:
-    return _out(_get(conn, user, auto_id), user.is_admin, _access_lists(conn, [auto_id]))
+    return _out(_get(conn, user, auto_id), user.is_admin, _access_lists(conn, [auto_id]), user_language(conn, user.id))
 
 
 def list_items(conn: Connection, user: User, auto_id: int, limit: int, offset: int):
@@ -177,6 +182,7 @@ def admin_update(
         values.update(name=clean, name_locked=True)  # the generator keeps the admin's name
     if description is not None:
         values["description"] = description.strip()[:2000] or None
+        values["description_en"] = None  # the admin's text, for everybody
     if status is not None:
         if status not in STATUSES:
             raise BadRequest("status must be suggested, published or dismissed")

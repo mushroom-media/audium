@@ -6,6 +6,7 @@ from audium.db.dialect import insert_for
 from audium.db.pagination import fetch_ordered
 from audium.db.schema import albums, artists, favorites, play_history, tracks
 from audium.errors import BadRequest, Forbidden, NotFound
+from audium.i18n import tr, user_language
 from audium.services import auto as auto_service
 from audium.services.library import album_item, album_select, artist_item, artist_select, track_item, track_select
 from audium.services.permissions import require_playlist
@@ -248,7 +249,8 @@ def _source(conn: Connection, user: User, key: str) -> dict | None:
         except (NotFound, Forbidden):
             return None
         pl = playlist_out(conn, row, role)
-        sub = "Playlist" if role == "owner" else f"von {pl['owner']['display_name']}"
+        owner = pl["owner"]["display_name"]
+        sub = "Playlist" if role == "owner" else tr(user_language(conn, user.id), "von {name}", name=owner)
         return item | {"name": pl["name"], "subtitle": sub, "cover": pl["cover"], "cover_preset": pl["cover_preset"]}
     if kind == "auto":
         try:

@@ -22,6 +22,7 @@
   import Reset from "./settings/Reset.svelte";
   import Shortcuts from "./settings/Shortcuts.svelte";
   import Users from "./settings/Users.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   let { section }: { section?: string } = $props();
 
@@ -34,44 +35,44 @@
     component: Component;
   }
   const PAGES: PageDef[] = [
-    { id: "playback", title: "Wiedergabe", short: "Qualität, Überblenden, Lautstärke", icon: "play", component: Playback },
-    { id: "library-options", title: "Bibliothek", short: "Sortierung, Künstlerbilder", icon: "album", component: LibraryOptions },
-    { id: "appearance", title: "Darstellung", short: "Farbschema, Hintergrund", icon: "palette", component: Appearance },
-    { id: "shortcuts", title: "Tastenkürzel", short: "Steuerung per Tastatur", icon: "keyboard", component: Shortcuts },
-    { id: "devices", title: "Geräte", short: "Name dieses Geräts", icon: "devices", component: Devices },
-    { id: "account", title: "Konto", short: "Profil, Abmelden", icon: "user", component: Account },
-    { id: "apps", title: "Apps verbinden", short: "Symfonium, Amperfy & Co.", icon: "phone", component: Apps },
-    { id: "library", title: "Musikordner", short: "Ordner, Scan, Statistik", icon: "folder", admin: true, component: Library },
-    { id: "analysis", title: "Audioanalyse", short: "Fortschritt, Klangerkennung", icon: "wave", admin: true, component: Analysis },
-    { id: "autoplaylists", title: "Auto-Playlists", short: "Vorschläge für Entdecken", icon: "compass", admin: true, component: AutoPlaylists },
-    { id: "radio", title: "Radio & Mixe", short: "Quellen und Gewichtung", icon: "radio", admin: true, component: RadioSources },
-    { id: "interfaces", title: "Schnittstellen", short: "Subsonic, Apps, ListenBrainz", icon: "plug", admin: true, component: Interfaces },
-    { id: "users", title: "Nutzer", short: "Konten, Einladungen", icon: "users", admin: true, component: Users },
-    { id: "jobs", title: "Hintergrundjobs", short: "Scans, Analysen, Playlists", icon: "jobs", admin: true, component: Jobs },
-    { id: "reset", title: "Zurücksetzen", short: "Werkseinstellungen, neu einrichten", icon: "trash", admin: true, component: Reset },
+    { id: "playback", title: msg("Wiedergabe"), short: msg("Qualität, Überblenden, Lautstärke"), icon: "play", component: Playback },
+    { id: "library-options", title: msg("Bibliothek"), short: msg("Sortierung, Künstlerbilder"), icon: "album", component: LibraryOptions },
+    { id: "appearance", title: msg("Darstellung"), short: msg("Sprache, Farbschema, Hintergrund"), icon: "palette", component: Appearance },
+    { id: "shortcuts", title: msg("Tastenkürzel"), short: msg("Steuerung per Tastatur"), icon: "keyboard", component: Shortcuts },
+    { id: "devices", title: msg("Geräte"), short: msg("Name dieses Geräts"), icon: "devices", component: Devices },
+    { id: "account", title: msg("Konto"), short: msg("Profil, Abmelden"), icon: "user", component: Account },
+    { id: "apps", title: msg("Apps verbinden"), short: msg("Symfonium, Amperfy & Co."), icon: "phone", component: Apps },
+    { id: "library", title: msg("Musikordner"), short: msg("Ordner, Scan, Statistik"), icon: "folder", admin: true, component: Library },
+    { id: "analysis", title: msg("Audioanalyse"), short: msg("Fortschritt, Klangerkennung"), icon: "wave", admin: true, component: Analysis },
+    { id: "autoplaylists", title: msg("Auto-Playlists"), short: msg("Vorschläge für Entdecken"), icon: "compass", admin: true, component: AutoPlaylists },
+    { id: "radio", title: msg("Radio & Mixe"), short: msg("Quellen und Gewichtung"), icon: "radio", admin: true, component: RadioSources },
+    { id: "interfaces", title: msg("Schnittstellen"), short: msg("Subsonic, Apps, ListenBrainz"), icon: "plug", admin: true, component: Interfaces },
+    { id: "users", title: msg("Nutzer"), short: msg("Konten, Einladungen"), icon: "users", admin: true, component: Users },
+    { id: "jobs", title: msg("Hintergrundjobs"), short: msg("Scans, Analysen, Playlists"), icon: "jobs", admin: true, component: Jobs },
+    { id: "reset", title: msg("Zurücksetzen"), short: msg("Werkseinstellungen, neu einrichten"), icon: "trash", admin: true, component: Reset },
   ];
 
   const isAdmin = $derived(session.user?.role === "admin");
   const visible = $derived(PAGES.filter((p) => !p.admin || isAdmin));
   const groups = $derived([
-    { title: "Persönlich", pages: visible.filter((p) => !p.admin) },
-    { title: "Server", pages: visible.filter((p) => p.admin) },
+    { title: msg("Persönlich"), pages: visible.filter((p) => !p.admin) },
+    { title: msg("Server"), pages: visible.filter((p) => p.admin) },
   ]);
   const page = $derived(visible.find((p) => p.id === section) ?? visible[0]);
 </script>
 
 <div class="page settings" class:has-section={!!section} use:keepScroll>
-  <nav class="index" aria-label="Einstellungen">
-    <div class="toolbar"><h1>Einstellungen</h1></div>
+  <nav class="index" aria-label={t("Einstellungen")}>
+    <div class="toolbar"><h1>{t("Einstellungen")}</h1></div>
     {#each groups as g (g.title)}
       {#if g.pages.length}
         <section class="set-group">
-          <h2>{g.title}</h2>
+          <h2>{t(g.title)}</h2>
           <div class="set-card">
             {#each g.pages as p (p.id)}
               <a class="entry" class:on={p.id === page.id} href={href(`/settings/${p.id}`)} aria-current={p.id === page.id && section ? "page" : undefined}>
                 <span class="tile" aria-hidden="true"><Icon name={p.icon} size={18} /></span>
-                <span class="text"><strong>{p.title}</strong><small>{p.short}</small></span>
+                <span class="text"><strong>{t(p.title)}</strong><small>{t(p.short)}</small></span>
                 <span class="chev" aria-hidden="true"><Icon name="chevron" size={16} /></span>
               </a>
             {/each}
@@ -82,7 +83,7 @@
   </nav>
 
   <div class="body">
-    <div class="toolbar"><h1 use:pageTitle={page.title}>{page.title}</h1></div>
+    <div class="toolbar"><h1 use:pageTitle={t(page.title)}>{t(page.title)}</h1></div>
     <div class="content">
       {#key page.id}<page.component />{/key}
     </div>

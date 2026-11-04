@@ -64,6 +64,7 @@ class SetupStatus(BaseModel):
     needs_setup: bool = Field(description="No user exists yet")
     window_open: bool = Field(description="The first admin can be created right now")
     dialog_pending: bool = Field(description="The first-run dialog is not finished")
+    language: Literal["de", "en"] | None = Field(description="The server language; null: not chosen yet")
 
 
 class SetupIn(BaseModel):
@@ -168,6 +169,8 @@ class InviteCheck(BaseModel):
 
 
 class UserSettings(BaseModel):
+    language: Literal["server", "de", "en"]
+    language_default: Literal["de", "en"] = Field(description="What language 'server' means (read-only)")
     theme: Literal["system", "dark", "light"]
     stream_quality: Literal["auto", "high", "medium", "low"]
     shortcuts: Literal["on", "off"]
@@ -185,6 +188,7 @@ class UserSettings(BaseModel):
 
 
 class UserSettingsUpdate(BaseModel):
+    language: Literal["server", "de", "en"] | None = None
     theme: Literal["system", "dark", "light"] | None = None
     stream_quality: Literal["auto", "high", "medium", "low"] | None = None
     shortcuts: Literal["on", "off"] | None = None
@@ -200,6 +204,7 @@ class UserSettingsUpdate(BaseModel):
 
 
 class ServerSettings(BaseModel):
+    language: Literal["de", "en"] = Field(description="Default language of the users and the server's own texts")
     artist_album_covers: Literal["on", "off"]
     artist_folder_images: Literal["on", "off"] = Field(description="folder.jpg in the artist folder as its picture")
     analysis_workers: str = Field(description='"default" (AUDIUM_ANALYSIS_WORKERS) or 1..16 processes')
@@ -213,6 +218,7 @@ class ServerSettings(BaseModel):
 
 
 class ServerSettingsUpdate(BaseModel):
+    language: Literal["de", "en"] | None = None
     artist_album_covers: Literal["on", "off"] | None = None
     artist_folder_images: Literal["on", "off"] | None = None
     analysis_workers: str | None = None

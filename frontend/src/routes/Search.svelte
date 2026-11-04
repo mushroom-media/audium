@@ -9,6 +9,7 @@
   import { clearSearches, forgetSearch, recentSearches, rememberSearch, type RecentSearch } from "../lib/recentSearches.svelte";
   import { keepScroll } from "../lib/keepScroll";
   import { href, recallEntry, rememberEntry, router } from "../lib/router.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   const q = $derived(router.route.query.get("q")?.trim() ?? "");
   let result = $state<SearchResult | null>(untrack(() => recallEntry(`search:${q}`)) ?? null);
@@ -46,12 +47,12 @@
 </script>
 
 <div class="page" use:keepScroll>
-  <div class="toolbar"><h1>{q ? `„${q}“` : "Suche"}</h1></div>
+  <div class="toolbar"><h1>{q ? t("„{filter}“", { filter: q }) : t("Suche")}</h1></div>
   {#if q.length < 2}
     {#if recentSearches.items.length}
       <div class="recent-head">
-        <h2 class="section">Zuletzt gesucht</h2>
-        <button class="link" onclick={clearSearches}>Alle löschen</button>
+        <h2 class="section">{t("Zuletzt gesucht")}</h2>
+        <button class="link" onclick={clearSearches}>{t("Alle löschen")}</button>
       </div>
       <ul class="recent">
         {#each recentSearches.items as e (e.kind === "query" ? `q:${e.q}` : `${e.kind}:${e.id}`)}
@@ -62,24 +63,24 @@
                 <span class="text"><span class="name">{e.q}</span></span>
               {:else if e.kind === "artist"}
                 <span class="thumb"><Cover hash={e.cover} size={64} round /></span>
-                <span class="text"><span class="name">{e.name}</span><span class="sub">Künstler</span></span>
+                <span class="text"><span class="name">{e.name}</span><span class="sub">{t("Künstler|einzeln")}</span></span>
               {:else}
                 <span class="thumb"><Cover hash={e.cover} size={64} /></span>
-                <span class="text"><span class="name">{e.title}</span><span class="sub">Album · {e.artist}</span></span>
+                <span class="text"><span class="name">{e.title}</span><span class="sub">{t("Album")} · {e.artist}</span></span>
               {/if}
             </a>
-            <button class="icon-btn" aria-label="Aus dem Verlauf entfernen" title="Entfernen" onclick={() => forgetSearch(e)}><Icon name="close" size={18} /></button>
+            <button class="icon-btn" aria-label={t("Aus dem Verlauf entfernen")} title={t("Entfernen")} onclick={() => forgetSearch(e)}><Icon name="close" size={18} /></button>
           </li>
         {/each}
       </ul>
     {:else}
-      <p class="empty">Suche nach Titeln, Künstlern und Alben.</p>
+      <p class="empty">{t("Suche nach Titeln, Künstlern und Alben.")}</p>
     {/if}
   {:else if nothing && !loading}
-    <p class="empty">Nichts gefunden.</p>
+    <p class="empty">{t("Nichts gefunden.")}</p>
   {:else if result}
     {#if result.artists.length}
-      <h2 class="section">Künstler</h2>
+      <h2 class="section">{t("Künstler")}</h2>
       <div class="artists" use:keepScroll={"artists"}>
         {#each result.artists as a (a.id)}
           <a class="artist" href={href(`/artists/${a.id}`)} onclick={() => openedArtist(a)}>
@@ -90,7 +91,7 @@
       </div>
     {/if}
     {#if result.albums.length}
-      <h2 class="section">Alben</h2>
+      <h2 class="section">{t("Alben")}</h2>
       <div class="grid">
         {#each result.albums.slice(0, 12) as album (album.id)}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -99,17 +100,17 @@
       </div>
     {/if}
     {#if result.tracks.length}
-      <h2 class="section">Titel</h2>
+      <h2 class="section">{t("Titel")}</h2>
       <div class="tracks">
-        {#each result.tracks as t, i (t.id)}
+        {#each result.tracks as track, i (track.id)}
           <div class="row-h">
             <TrackRow
-              track={t}
+              {track}
               number={i + 1}
               onplay={() => {
                 if (!result) return;
                 rememberSearch({ kind: "query", q });
-                player.playTracks(result.tracks, i, undefined, { kind: "Suche", name: `„${q}“`, path: `/search?q=${encodeURIComponent(q)}` });
+                player.playTracks(result.tracks, i, undefined, { kind: t("Suche"), name: t("„{filter}“", { filter: q }), path: `/search?q=${encodeURIComponent(q)}` });
               }}
             />
           </div>

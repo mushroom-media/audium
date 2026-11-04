@@ -35,7 +35,7 @@ KINDS = ("desktop", "phone", "tablet", "other")
 
 
 def clean_name(name: str | None) -> str:
-    return " ".join((name or "").split())[:60] or "Unbekanntes Gerät"
+    return " ".join((name or "").split())[:60] or "audium"  # the web UI always sends a name
 
 
 @dataclass(eq=False)

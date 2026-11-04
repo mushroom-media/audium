@@ -36,6 +36,7 @@
   import Search from "./routes/Search.svelte";
   import Settings from "./routes/Settings.svelte";
   import Setup from "./routes/Setup.svelte";
+  import { t } from "./lib/i18n.svelte";
 
   // Creating smart playlists from the sidebar is switched off for now; existing ones keep working.
   const SMART_PLAYLIST_BUTTON = false;
@@ -262,7 +263,7 @@
   <!-- Not a logout: the server is starting (e.g. after an update) or not reachable; startSession tries again. -->
   <div class="boot" aria-busy="true">
     {#if session.waiting}
-      <p role="status">{session.waiting === "starting" ? "audium startet …" : "Server nicht erreichbar – neuer Versuch …"}</p>
+      <p role="status">{session.waiting === "starting" ? t("audium startet …") : t("Server nicht erreichbar – neuer Versuch …")}</p>
     {/if}
   </div>
 {:else if session.user && router.route.name === "setup"}
@@ -275,8 +276,8 @@
   {/if}
 {:else}
   <div class="shell" class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
-    <nav class="side" aria-label="Navigation">
-      <a class="logo" href={href("/")} aria-label="audium Start">
+    <nav class="side" aria-label={t("Navigation")}>
+      <a class="logo" href={href("/")} aria-label={t("audium Start")}>
         <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
         <span>audium</span>
       </a>
@@ -288,23 +289,23 @@
       {/each}
 
       <div class="side-head">
-        <span>Playlists</span>
+        <span>{t("Playlists")}</span>
         <span class="side-btns">
           {#if SMART_PLAYLIST_BUTTON}
-            <button class="icon-btn" title="Neue Smart-Playlist (füllt sich nach Regeln)" aria-label="Neue Smart-Playlist" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={17} /></button>
+            <button class="icon-btn" title={t("Neue Smart-Playlist (füllt sich nach Regeln)")} aria-label={t("Neue Smart-Playlist")} onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={17} /></button>
           {/if}
-          <button class="icon-btn" title="Neue Playlist" aria-label="Neue Playlist" onclick={newPlaylist}><Icon name="plus" size={18} /></button>
+          <button class="icon-btn" title={t("Neue Playlist")} aria-label={t("Neue Playlist")} onclick={newPlaylist}><Icon name="plus" size={18} /></button>
         </span>
       </div>
       <div class="side-lists">
         <a href={href("/favorites")} class:active={active("favorites")} class="pl">
-          <span class="pl-art fav" aria-hidden="true"><Icon name="heart" size={14} filled /></span><span class="pl-name">Lieblingssongs</span>
+          <span class="pl-art fav" aria-hidden="true"><Icon name="heart" size={14} filled /></span><span class="pl-name">{t("Lieblingssongs")}</span>
         </a>
         {#each mine.playlists as p (p.id)}
-          <a href={href(`/playlists/${p.id}`)} class="pl" class:active={router.route.name === "playlist" && router.route.params.id === String(p.id)} title={p.role === "owner" ? p.name : `${p.name} – von ${p.owner.display_name}`}>
+          <a href={href(`/playlists/${p.id}`)} class="pl" class:active={router.route.name === "playlist" && router.route.params.id === String(p.id)} title={p.role === "owner" ? p.name : t("{name} – von {owner}", { name: p.name, owner: p.owner.display_name })}>
             <span class="pl-art"><PlaylistCover playlist={p} size={64} /></span>
             <span class="pl-name">{p.name}</span>
-            {#if p.role !== "owner"}<span class="pl-shared" aria-label="geteilt"><Icon name="share" size={13} /></span>{/if}
+            {#if p.role !== "owner"}<span class="pl-shared" aria-label={t("geteilt")}><Icon name="share" size={13} /></span>{/if}
           </a>
         {/each}
       </div>
@@ -318,20 +319,20 @@
       style:transform={lift ? `translateY(${-lift}px)` : undefined}
     >
       {#if backTo}
-        <button class="icon-btn back" title="Zurück" aria-label="Zurück" onclick={() => goBack(backTo)}><Icon name="back" /></button>
+        <button class="icon-btn back" title={t("Zurück")} aria-label={t("Zurück")} onclick={() => goBack(backTo)}><Icon name="back" /></button>
       {:else}
-        <a class="top-logo" href={href("/")} aria-label="audium Start">
+        <a class="top-logo" href={href("/")} aria-label={t("audium Start")}>
           <svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
           <span>audium</span>
         </a>
       {/if}
       <label class="search">
         <Icon name="search" size={18} />
-        <span class="sr-only">Suche</span>
+        <span class="sr-only">{t("Suche")}</span>
         <input
           bind:this={searchInput}
           type="search"
-          placeholder="Titel, Künstler, Alben"
+          placeholder={t("Titel, Künstler, Alben")}
           value={searchValue}
           oninput={(e) => onSearch(e.currentTarget.value)}
           onkeydown={onSearchKey}
@@ -345,8 +346,8 @@
       <!-- The page's heading, once it has scrolled away (see headerTitle.svelte.ts). -->
       <p class="top-title" class:shown={headerTitle.shown} aria-hidden="true">{headerTitle.text}</p>
       <div class="top-end">
-        {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label="Einstellungen" title="Einstellungen"><Icon name="settings" /></a>{/if}
-        <a class="me" class:active={active("profile")} href={href("/profile")} aria-label="Profil" title={session.user.display_name}>{initial}</a>
+        {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label={t("Einstellungen")} title={t("Einstellungen")}><Icon name="settings" /></a>{/if}
+        <a class="me" class:active={active("profile")} href={href("/profile")} aria-label={t("Profil")} title={session.user.display_name}>{initial}</a>
       </div>
     </header>
 
@@ -368,7 +369,7 @@
         {:else if router.route.name === "similar"}<Similar id={router.route.params.id} />
         {:else if router.route.name === "radio"}<Radio kind={router.route.params.kind} id={router.route.params.id} />
         {:else if router.route.name === "albums" || router.route.name === "tracks"}<!-- redirecting -->
-        {:else}<div class="page"><p class="empty">Diese Seite gibt es nicht. <a href={href("/")}>Zur Startseite</a></p></div>
+        {:else}<div class="page"><p class="empty">{t("Diese Seite gibt es nicht.")} <a href={href("/")}>{t("Zur Startseite")}</a></p></div>
         {/if}
       {/key}
     </main>
@@ -381,10 +382,10 @@
     <Overlays />
     {#if devices.picker}<DevicePicker />{/if}
     {#if ui.smartEditor}
-      <RuleEditor title="Neue Smart-Playlist" onsave={createSmart} onclose={() => (ui.smartEditor = false)} />
+      <RuleEditor title={t("Neue Smart-Playlist")} onsave={createSmart} onclose={() => (ui.smartEditor = false)} />
     {/if}
 
-    <nav class="tabs" aria-label="Navigation">
+    <nav class="tabs" aria-label={t("Navigation")}>
       {#each NAV as n (n.name)}
         <a href={href(n.path)} class:active={active(n.name)} aria-current={active(n.name) ? "page" : undefined}>
           <Icon name={n.icon} /><span>{n.label}</span>

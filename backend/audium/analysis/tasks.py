@@ -26,6 +26,7 @@ from audium.db.dialect import insert_for
 from audium.db.engine import Database
 from audium.db.schema import genres, library_roots, track_embeddings, track_features, track_genres, track_styles, tracks
 from audium.db.state import RESET_STATE, bump_library_generation, get_state, set_state
+from audium.i18n import server_language, tr
 from audium.jobs import queue as jobq
 from audium.jobs.worker import JobContext
 from audium.logging import get_logger
@@ -211,6 +212,7 @@ def _store_effnet(conn: Connection, track_id: int, model: str, vector, found: li
 def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     models_dir = settings.data_dir / "models"
     with db.read() as conn:
+        lang = server_language(conn)  # of the progress messages
         # Not while paused or outside the time window: then the analysis would not run anyway.
         download = (
             settings.analysis_download_models
@@ -218,7 +220,7 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
             and analysis_blocked(conn) is None
         )
     if features.effnet_available() and not model_files.present(models_dir) and download:
-        ctx.progress(0, 0, "Modelle werden geladen")
+        ctx.progress(0, 0, tr(lang, "Modelle werden geladen"))
         model_files.ensure(models_dir, download=True)
     analyzer = features.backend_name(models_dir)
     effnet = "+effnet" in analyzer
@@ -234,7 +236,7 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
     waiting: str | None = None
     attempted: set[int] = set()
     style_cache: dict[str, int] = {}
-    ctx.progress(0, total, "Analyse startet")
+    ctx.progress(0, total, tr(lang, "Analyse startet"))
 
     def new_pool():
         return ProcessPoolExecutor(
@@ -287,7 +289,11 @@ def run_analysis(ctx: JobContext, db: Database, settings: Settings) -> dict:
             failed += n_failed
             done += len(results)
             last = batch[-1].rel_path
-            ctx.progress(done, max(total, done), f"{done} von {max(total, done)} analysiert · {last}")
+            ctx.progress(
+                done,
+                max(total, done),
+                tr(lang, "{done} von {total} analysiert · {last}", done=done, total=max(total, done), last=last),
+            )
     finally:
         pool.shutdown(cancel_futures=True)
     ctx.check()
@@ -302,6 +308,7 @@ def run_genre_backfill(ctx: JobContext, db: Database) -> dict:
     """Normalized genres for tracks that were scanned before genres existed (or changed rules)."""
     cache: dict[str, int] = {}
     with db.read() as conn:
+        lang = server_language(conn)
         total = conn.execute(
             select(func.count()).select_from(tracks).where(tracks.c.genre_raw.is_not(None))
         ).scalar_one()
@@ -327,7 +334,7 @@ def run_genre_backfill(ctx: JobContext, db: Database) -> dict:
                 conn.execute(track_genres.insert(), link)
             last_id = ids[-1]
         done += len(rows)
-        ctx.progress(done, total, "Genres werden vereinheitlicht")
+        ctx.progress(done, total, tr(lang, "Genres werden vereinheitlicht"))
         ctx.check()
     with db.write() as conn:
         refresh_genre_counts(conn)
@@ -363,8 +370,8 @@ def make_handlers(db: Database, settings: Settings):
         return run_analysis(ctx, db, settings)
 
     def regenerate(ctx: JobContext, payload: dict) -> dict:
-        ctx.progress(0, 1, "Auto-Playlists werden erzeugt")
         with db.write() as conn:
+            ctx.progress(0, 1, tr(server_language(conn), "Auto-Playlists werden erzeugt"))
             refresh_detected_genres(conn)
         return autoplaylists.generate_in(db)
 

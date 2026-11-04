@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ApiError, currentConnection, get, isApp, post } from "../lib/api";
+  import { ApiError, currentConnection, get, isApp, patch, post } from "../lib/api";
   import { navigate } from "../lib/router.svelte";
   import { loadSession, login, session } from "../lib/session.svelte";
+  import { LANGUAGES, i18n, setLanguage, t, type Lang } from "../lib/i18n.svelte";
 
   let { mode, token = "" }: { mode: "login" | "setup" | "invite"; token?: string } = $props();
 
@@ -24,20 +25,20 @@
 
   function message(e: unknown): string {
     if (e instanceof ApiError) {
-      if (e.status === 429) return `Zu viele Versuche. Bitte in ${e.retryAfter ?? 60} Sekunden erneut versuchen.`;
-      if (e.status === 401) return "Benutzername oder Passwort falsch.";
-      if (e.status === 409) return "Dieser Benutzername ist schon vergeben.";
+      if (e.status === 429) return t("Zu viele Versuche. Bitte in {s} Sekunden erneut versuchen.", { s: e.retryAfter ?? 60 });
+      if (e.status === 401) return t("Benutzername oder Passwort falsch.");
+      if (e.status === 409) return t("Dieser Benutzername ist schon vergeben.");
       return e.message; // includes "server not reachable" / "not an audium server" of the apps
     }
-    if (isApp) return "Keine Verbindung zum Server. Stimmt die Adresse, und ist der Server erreichbar?";
-    return "Keine Verbindung zum Server.";
+    if (isApp) return t("Keine Verbindung zum Server. Stimmt die Adresse, und ist der Server erreichbar?");
+    return t("Keine Verbindung zum Server.");
   }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     error = null;
     if (mode !== "login" && password !== password2) {
-      error = "Die Passwörter stimmen nicht überein.";
+      error = t("Die Passwörter stimmen nicht überein.");
       return;
     }
     busy = true;
@@ -46,6 +47,8 @@
         await login(username, password, server);
       } else if (mode === "setup") {
         await post("/setup", { username, password });
+        // The language chosen on this page becomes the server language (the wizard can change it).
+        await patch("/admin/settings", { language: i18n.lang }).catch(() => {});
         await loadSession();
         navigate("/setup", { replace: true });
         return;
@@ -68,44 +71,48 @@
 <main class="auth">
   {#if mode === "setup" && !session.setupWindowOpen}
   <div class="card">
-    <h1>Einrichtung gesperrt</h1>
+    <h1>{t("Einrichtung gesperrt")}</h1>
     <p class="hint">
-      Das Admin-Konto lässt sich nur in den ersten 30 Minuten nach dem Start anlegen, damit niemand anderes dir zuvorkommt. Starte den Container neu, dann hast du wieder 30 Minuten. Das geht auch in Portainer, Unraid oder Synology.
+      {t("Das Admin-Konto lässt sich nur in den ersten 30 Minuten nach dem Start anlegen, damit niemand anderes dir zuvorkommt. Starte den Container neu, dann hast du wieder 30 Minuten. Das geht auch in Portainer, Unraid oder Synology.")}
     </p>
-    <button class="btn primary wide" onclick={() => loadSession()}>Erneut prüfen</button>
+    <button class="btn primary wide" onclick={() => loadSession()}>{t("Erneut prüfen")}</button>
   </div>
   {:else}
   <form class="card" onsubmit={submit}>
-    <div class="brand" aria-hidden="true">
-      <svg viewBox="0 0 64 64" width="44" height="44"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
+    <div class="brand">
+      <svg aria-hidden="true" viewBox="0 0 64 64" width="44" height="44"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
+      <!-- Only for this page: the language after logging in is the user's or the server's. -->
+      <select class="lang" aria-label="Sprache / Language" value={i18n.lang} onchange={(e) => setLanguage(e.currentTarget.value as Lang)}>
+        {#each Object.entries(LANGUAGES) as [key, name] (key)}<option value={key}>{name}</option>{/each}
+      </select>
     </div>
     {#if mode === "login"}
-      <h1>Anmelden</h1>
+      <h1>{t("Anmelden")}</h1>
     {:else if mode === "setup"}
-      <h1>Willkommen bei audium</h1>
-      <p class="hint">Lege zuerst dein Admin-Konto an. Danach hilft dir audium, deine Musik einzubinden.</p>
+      <h1>{t("Willkommen bei audium")}</h1>
+      <p class="hint">{t("Lege zuerst dein Admin-Konto an. Danach hilft dir audium, deine Musik einzubinden.")}</p>
     {:else}
-      <h1>Konto erstellen</h1>
-      {#if inviteValid === false}<p class="error">Diese Einladung ist ungültig oder abgelaufen.</p>{/if}
+      <h1>{t("Konto erstellen")}</h1>
+      {#if inviteValid === false}<p class="error">{t("Diese Einladung ist ungültig oder abgelaufen.")}</p>{/if}
     {/if}
 
     {#if isApp && mode === "login"}
       <label>
-        Server
-        <input bind:value={server} required placeholder="z. B. 192.168.1.5:8091" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" />
+        {t("Server")}
+        <input bind:value={server} required placeholder={t("z. B. {example}", { example: "192.168.1.5:8091" })} inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" />
       </label>
     {/if}
-    <label>Benutzername<input bind:value={username} required autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
+    <label>{t("Benutzername")}<input bind:value={username} required autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
     <label>
-      Passwort
+      {t("Passwort")}
       <input type="password" bind:value={password} required minlength={minPassword} autocomplete={mode === "login" ? "current-password" : "new-password"} />
     </label>
     {#if mode !== "login"}
-      <label>Passwort wiederholen<input type="password" bind:value={password2} required minlength={minPassword} autocomplete="new-password" /></label>
+      <label>{t("Passwort wiederholen")}<input type="password" bind:value={password2} required minlength={minPassword} autocomplete="new-password" /></label>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <button class="btn primary wide" disabled={busy || (mode === "invite" && inviteValid === false)}>
-      {mode === "login" ? "Anmelden" : "Konto erstellen"}
+      {mode === "login" ? t("Anmelden") : t("Konto erstellen")}
     </button>
   </form>
   {/if}
@@ -126,6 +133,12 @@
   }
   .brand {
     color: var(--text);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .brand .lang {
+    width: auto;
   }
   h1 {
     font-size: 1.6rem;

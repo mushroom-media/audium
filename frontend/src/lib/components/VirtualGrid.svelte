@@ -3,6 +3,7 @@
   import type { Snippet } from "svelte";
   import type { Letter } from "../api";
   import VirtualList from "./VirtualList.svelte";
+  import { t } from "../i18n.svelte";
 
   let {
     count,
@@ -46,7 +47,7 @@
       overscan={2}
       {header}
       keep={keep && `${keep}:${cols}`}
-      label="Raster"
+      label={t("Raster")}
       letters={rowLetters}
       onrange={(s, e) => onrange?.(s * cols, Math.min(count, e * cols))}
     >

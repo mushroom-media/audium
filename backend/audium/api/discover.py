@@ -20,6 +20,7 @@ from audium.db.pagination import fetch_ordered
 from audium.db.schema import artist_similar, genres, library_roots, styles, track_artists, track_features, tracks
 from audium.db.state import set_state
 from audium.errors import NotFound
+from audium.i18n import tr, user_language
 from audium.services import auto as auto_service
 from audium.services import discover as discover_service
 from audium.services import similar_artists
@@ -177,7 +178,7 @@ def _station(conn, station: Blend, user: User, own: str = "Eigener Titel") -> li
     """The station's tracks; admins also get why each one is in there."""
     items = _tracks(conn, [t for t, _ in station.picks])
     if user.is_admin:
-        reasons = why.describe(conn, station, own)
+        reasons = why.describe(conn, station, own, user_language(conn, user.id))
         items = [{**item, "reason": reasons.get(item["id"])} for item in items]
     return items
 
@@ -212,8 +213,10 @@ def list_styles(_user: User = Depends(current_user), db: Database = Depends(get_
 
 
 @router.get("/rules/fields", summary="Fields, operators and values for the rule editor")
-def rule_fields(_user: User = Depends(current_user)):
-    return {"fields": rules.field_definitions(), "orders": list(rules.ORDERS), "max_limit": rules.MAX_LIMIT}
+def rule_fields(user: User = Depends(current_user), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        lang = user_language(conn, user.id)
+    return {"fields": rules.field_definitions(lang), "orders": list(rules.ORDERS), "max_limit": rules.MAX_LIMIT}
 
 
 @router.post("/rules/preview", response_model=RulePreviewOut, summary="Try a rule before saving it")
@@ -351,7 +354,9 @@ def discover_rediscover(
     limit: int = Query(8, ge=1, le=24), user: User = Depends(viewer), db: Database = Depends(get_db)
 ):
     with db.read() as conn:
-        return discover_service.rediscover(conn, user, limit)
+        lang = user_language(conn, user.id)
+        items = discover_service.rediscover(conn, user, limit)
+    return [{**item, "subtitle": tr(lang, item["subtitle"])} if item["type"] == "artist" else item for item in items]
 
 
 @router.get("/autoplaylists", response_model=list[AutoPlaylistOut], summary="Auto-playlists you can see")

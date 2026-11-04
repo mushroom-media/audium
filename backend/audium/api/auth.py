@@ -43,7 +43,7 @@ from audium.services import app_passwords
 from audium.services import auth as auth_service
 from audium.services import settings as settings_service
 from audium.services import users as user_service
-from audium.services.server_settings import server_setting
+from audium.services.server_settings import language_chosen, server_setting
 from audium.services.users import User
 from audium.util import now_ms
 
@@ -66,6 +66,7 @@ def setup_status(request: Request, db: Database = Depends(get_db)):
             needs_setup=needs,
             window_open=needs and _setup_window_open(request),
             dialog_pending=auth_service.setup_pending(conn),
+            language=language_chosen(conn),
         )
 
 
@@ -283,6 +284,7 @@ def register(
 def _settings_out(conn, settings: dict) -> dict:
     return {
         **settings,
+        "language_default": server_setting(conn, "language"),
         "artist_images_default": server_setting(conn, "artist_album_covers"),
         "subsonic_api": server_setting(conn, "subsonic_api"),
     }

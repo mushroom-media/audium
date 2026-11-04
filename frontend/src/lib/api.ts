@@ -1,6 +1,8 @@
+import type { Lang } from "./i18n.svelte";
 // Typed client for the audium REST API (see /api/docs for the full schema).
 
-import { germanMessage } from "./errors";
+import { uiMessage } from "./errors";
+import { t } from "./i18n.svelte";
 
 declare global {
   interface Window {
@@ -81,9 +83,9 @@ export async function connectServer(server: string, username: string, password: 
     const res = await fetch(`${base}/api/health`, { credentials: "omit" });
     health = await res.json();
   } catch {
-    throw new ApiError(0, "unreachable", "Server nicht erreichbar. Stimmt die Adresse?");
+    throw new ApiError(0, "unreachable", t("Server nicht erreichbar. Stimmt die Adresse?"));
   }
-  if (health.server !== "audium") throw new ApiError(0, "not_audium", "Das ist kein audium-Server.");
+  if (health.server !== "audium") throw new ApiError(0, "not_audium", t("Das ist kein audium-Server."));
   saveConnection({ server: base, token: null });
   const res = await post<{ token: string; user: User }>("/auth/app-login", { username, password, device });
   saveConnection({ server: base, token: res.token });
@@ -278,6 +280,10 @@ export type AlbumSort = "title" | "artist" | "year" | "added";
 export type ArtistRole = "album" | "all";
 
 export interface UserSettings {
+  /** "server": the server language (language_default). */
+  language: "server" | Lang;
+  /** What "server" means right now (read-only). */
+  language_default: Lang;
   theme: Theme;
   stream_quality: StreamQuality;
   shortcuts: "on" | "off";
@@ -360,12 +366,12 @@ export async function request<T>(
       const data = await res.json();
       code = data?.error?.code ?? code;
       message = data?.error?.message ?? (typeof data?.detail === "string" ? data.detail : message);
-      if (res.status === 422 && Array.isArray(data?.detail)) message = "Ungültige Eingabe.";
+      if (res.status === 422 && Array.isArray(data?.detail)) message = t("Ungültige Eingabe.");
     } catch {
       /* non-JSON error body */
     }
     if (res.status === 401 && onUnauthorized) onUnauthorized();
-    throw new ApiError(res.status, code, germanMessage(message), Number(res.headers.get("Retry-After")) || undefined, message);
+    throw new ApiError(res.status, code, uiMessage(message), Number(res.headers.get("Retry-After")) || undefined, message);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }

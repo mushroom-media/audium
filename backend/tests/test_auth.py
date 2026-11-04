@@ -5,8 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
 from audium.config import Settings
-from audium.db.schema import app_state, sessions
+from audium.db.schema import app_state, sessions, users
 from audium.db.state import get_state
+from audium.i18n import tr, user_language
 from audium.main import create_app
 from audium.services import auth as auth_service
 from tests.conftest import ADMIN_PW, USER_PW, create_user, login
@@ -15,7 +16,12 @@ from tests.conftest import ADMIN_PW, USER_PW, create_user, login
 
 
 def test_setup_creates_admin_once(client):
-    assert client.get("/api/v1/setup").json() == {"needs_setup": True, "window_open": True, "dialog_pending": True}
+    assert client.get("/api/v1/setup").json() == {
+        "needs_setup": True,
+        "window_open": True,
+        "dialog_pending": True,
+        "language": None,
+    }
     body = {"username": "boss", "password": "long-password"}
 
     r = client.post("/api/v1/setup", json=body)
@@ -24,7 +30,12 @@ def test_setup_creates_admin_once(client):
     assert client.get("/api/v1/auth/me").json()["username"] == "boss"  # logged in via cookie
 
     # The dialog goes on after the account, the account cannot be created twice.
-    assert client.get("/api/v1/setup").json() == {"needs_setup": False, "window_open": False, "dialog_pending": True}
+    assert client.get("/api/v1/setup").json() == {
+        "needs_setup": False,
+        "window_open": False,
+        "dialog_pending": True,
+        "language": None,
+    }
     assert client.post("/api/v1/setup", json=body).status_code == 409
 
 
@@ -319,6 +330,8 @@ def test_user_settings_are_per_user(make_client, admin, db):
     login(a, "admin", ADMIN_PW)
     login(b, "bob", USER_PW)
     defaults = {
+        "language": "server",
+        "language_default": "de",
         "theme": "system",
         "stream_quality": "auto",
         "shortcuts": "on",
@@ -356,3 +369,35 @@ def test_user_settings_are_per_user(make_client, admin, db):
         a.patch("/api/v1/auth/me/settings", json={"artist_images_default": "off"}).json()["artist_images_default"]
         == "on"
     )
+
+
+def test_language_of_the_server_and_of_each_user(make_client, admin, db):
+    create_user(db, "bob", USER_PW)
+    a, b, guest = make_client(), make_client(), make_client()
+    login(a, "admin", ADMIN_PW)
+    login(b, "bob", USER_PW)
+    # Nobody chose yet: the login page follows the browser, everything else is German.
+    assert guest.get("/api/v1/setup").json()["language"] is None
+    assert b.get("/api/v1/auth/me/settings").json()["language_default"] == "de"
+
+    assert a.patch("/api/v1/admin/settings", json={"language": "en"}).status_code == 200
+    assert guest.get("/api/v1/setup").json()["language"] == "en"
+    assert b.get("/api/v1/auth/me/settings").json()["language_default"] == "en"
+    assert b.patch("/api/v1/admin/settings", json={"language": "de"}).status_code == 403
+
+    # A user's own choice wins over the server language.
+    assert b.patch("/api/v1/auth/me/settings", json={"language": "de"}).json()["language"] == "de"
+    assert b.patch("/api/v1/auth/me/settings", json={"language": "fr"}).status_code == 422
+    assert a.get("/api/v1/auth/me/settings").json()["language"] == "server"
+    with db.read() as conn:
+        assert user_language(conn, admin.id) == "en"
+        assert (
+            user_language(conn, conn.execute(select(users.c.id).where(users.c.username == "bob")).scalar_one()) == "de"
+        )
+
+
+def test_tr():
+    assert tr("de", "Oft gehört") == "Oft gehört"
+    assert tr("en", "Oft gehört") == "Played a lot"
+    assert tr("en", "Die {d}er", d=90) == "The 90s"
+    assert tr("en", "something new") == "something new"  # no translation: stays as it is

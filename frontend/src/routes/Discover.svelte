@@ -12,6 +12,7 @@
   import { keepScroll } from "../lib/keepScroll";
   import { href, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   const MAX_GENRE_TILES = 10;
   const isAdmin = $derived(session.user?.role === "admin");
@@ -57,8 +58,8 @@
   // Genre playlists live in the tiles and under "Alle Genres".
   const isGenre = (a: AutoPlaylist) => a.key.startsWith("genre:") || a.key.startsWith("family:");
   const GROUPS: { title: string; test: (a: AutoPlaylist) => boolean }[] = [
-    { title: "Stimmung & Aktivität", test: (a) => a.generator === "rule" },
-    { title: "Mixe aus deiner Bibliothek", test: (a) => a.generator === "cluster" },
+    { title: msg("Stimmung & Aktivität"), test: (a) => a.generator === "rule" },
+    { title: msg("Mixe aus deiner Bibliothek"), test: (a) => a.generator === "cluster" },
     { title: "Klang-Mixe", test: (a) => a.generator === "sound" && !isGenre(a) },
     { title: "Eigene Regeln", test: (a) => a.generator === "custom" },
     { title: "Stile (Klangerkennung)", test: (a) => a.key.startsWith("style:") },
@@ -83,23 +84,23 @@
 <div class="page" use:keepScroll>
   <div class="toolbar">
     <div>
-      <h1>Entdecken</h1>
-      <p class="count">Automatisch zusammengestellt aus deiner Bibliothek – ohne Cloud.</p>
+      <h1>{t("Entdecken")}</h1>
+      <p class="count">{t("Automatisch zusammengestellt aus deiner Bibliothek – ohne Cloud.")}</p>
     </div>
     {#if isAdmin}
-      <a class="btn ghost" href={href("/settings/autoplaylists")}><Icon name="settings" size={18} /> Verwalten</a>
+      <a class="btn ghost" href={href("/settings/autoplaylists")}><Icon name="settings" size={18} /> {t("Verwalten")}</a>
     {/if}
   </div>
 
   {#if rediscover.length}
     <section>
-      <div class="section-head"><h2>Wieder reinhören</h2></div>
+      <div class="section-head"><h2>{t("Wieder reinhören")}</h2></div>
       <div class="row" use:keepScroll={"rediscover"}>
         {#each rediscover as r (`${r.type}:${r.id}`)}
           <a class="card" href={href(r.type === "album" ? `/albums/${r.id}` : `/artists/${r.id}`)}>
             <Cover hash={r.cover} size={256} round={r.type === "artist"} />
             <div class="title">{r.name}</div>
-            <div class="sub">{r.type === "album" ? r.subtitle : "Künstler"} · zuletzt {ago(r.last_played)}</div>
+            <div class="sub">{r.type === "album" ? r.subtitle : t("Künstler|einzeln")} · {t("zuletzt {when}", { when: ago(r.last_played) })}</div>
           </a>
         {/each}
       </div>
@@ -109,9 +110,9 @@
   {#if tiles.length}
     <section>
       <div class="section-head">
-        <h2>Genres</h2>
+        <h2>{t("Genres")}</h2>
         {#if allGenres > tiles.length || genres?.families.some((f) => f.genres.length > 1)}
-          <a href={href("/genres")}>Alle Genres <Icon name="chevron" size={14} /></a>
+          <a href={href("/genres")}>{t("Alle Genres")} <Icon name="chevron" size={14} /></a>
         {/if}
       </div>
       <div class="tiles">
@@ -123,33 +124,35 @@
   {#if lists?.some((a) => !isGenre(a))}
     <label class="filter">
       <Icon name="search" size={16} />
-      <span class="sr-only">Playlists filtern</span>
-      <input type="search" placeholder="Filtern, z. B. Workout oder 90er" bind:value={filter} autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <span class="sr-only">{t("Playlists filtern")}</span>
+      <input type="search" placeholder={t("Filtern, z. B. Workout oder 90er")} bind:value={filter} autocomplete="off" autocapitalize="off" spellcheck="false" />
     </label>
   {/if}
 
   {#if lists === null || genres === null}
-    <p class="empty">Lädt …</p>
+    <p class="empty">{t("Lädt …")}</p>
   {:else if !tiles.length && !lists.length && !rediscover.length}
     <p class="empty">
-      Noch nichts zu entdecken. Genres erscheinen nach dem ersten Scan, Mixe und Stimmungen nach der Audioanalyse{isAdmin ? " – und wenn du sie unter Einstellungen > Auto-Playlists veröffentlichst" : ", sobald der Admin sie veröffentlicht"}.
+      {isAdmin
+        ? t("Noch nichts zu entdecken. Genres erscheinen nach dem ersten Scan, Mixe und Stimmungen nach der Audioanalyse – und wenn du sie unter Einstellungen > Auto-Playlists veröffentlichst.")
+        : t("Noch nichts zu entdecken. Genres erscheinen nach dem ersten Scan, Mixe und Stimmungen nach der Audioanalyse, sobald der Admin sie veröffentlicht.")}
     </p>
   {:else if shown && filter.trim() && !shown.length}
-    <p class="empty">Keine Playlist passt zu „{filter.trim()}“.</p>
+    <p class="empty">{t("Keine Playlist passt zu „{filter}“.", { filter: filter.trim() })}</p>
   {:else if shown?.length}
-    {#each [...GROUPS, { title: "Weitere", test: (a: AutoPlaylist) => !grouped(a) }] as g (g.title)}
+    {#each [...GROUPS, { title: msg("Weitere"), test: (a: AutoPlaylist) => !grouped(a) }] as g (g.title)}
       {@const items = shown.filter(g.test)}
       {#if items.length}
         <section>
-          <div class="section-head"><h2>{g.title}</h2></div>
+          <div class="section-head"><h2>{t(g.title)}</h2></div>
           <div class="grid">
             {#each items as a (a.id)}<AutoCard playlist={a} />{/each}
           </div>
         </section>
       {/if}
     {/each}
-    <ul class="legend" aria-label="Herkunft">
-      {#each Object.values(ORIGINS) as o (o.label)}<li title={o.hint}><Icon name={o.icon} size={14} /> {o.label}</li>{/each}
+    <ul class="legend" aria-label={t("Herkunft")}>
+      {#each Object.values(ORIGINS) as o (o.label)}<li title={t(o.hint)}><Icon name={o.icon} size={14} /> {t(o.label)}</li>{/each}
     </ul>
   {/if}
 </div>

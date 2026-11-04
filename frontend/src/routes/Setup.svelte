@@ -11,6 +11,7 @@
   import { session } from "../lib/session.svelte";
   import { toast } from "../lib/ui.svelte";
   import type { Job } from "./settings/common";
+  import { i18n, type Lang, LANGUAGES, msg, num, setLanguage, t, tn } from "../lib/i18n.svelte";
 
   interface Mount {
     path: string;
@@ -103,7 +104,7 @@
   const isRoot = (path: string) => !!info?.roots.some((r) => r.path === path);
   const hasMusic = $derived(folders.some((f) => (probes[f]?.audio_files ?? 0) > 0) || !!info?.roots.some((r) => r.track_count > 0));
   const canGoOn = $derived(selected.length > 0 || !!info?.roots.length);
-  const envLine = $derived(`AUDIUM_MUSIC_PATH=${/\s/.test(hostPath.trim()) ? `"${hostPath.trim()}"` : hostPath.trim() || "/pfad/zu/deiner/musik"}`);
+  const envLine = $derived(`AUDIUM_MUSIC_PATH=${/\s/.test(hostPath.trim()) ? `"${hostPath.trim()}"` : hostPath.trim() || t("/pfad/zu/deiner/musik")}`);
 
   async function load() {
     try {
@@ -143,7 +144,7 @@
     try {
       browsing = await get<Browse>("/admin/browse", { path });
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     }
   }
 
@@ -165,20 +166,20 @@
       const ok = document.execCommand("copy");
       area.remove();
       if (!ok) {
-        toast("Bitte von Hand kopieren");
+        toast(t("Bitte von Hand kopieren"));
         return;
       }
     }
-    toast("Kopiert");
+    toast(t("Kopiert"));
   }
 
   const mountOf = (path: string) =>
     info?.mounts.filter((m) => path === m.path || path.startsWith(`${m.path}/`)).sort((a, b) => b.path.length - a.path.length)[0];
 
   function summary(p: Probe): string {
-    const at = p.complete ? "" : "mindestens ";
-    const size = p.size_bytes >= 1e9 ? `${(p.size_bytes / 1e9).toLocaleString("de-DE", { maximumFractionDigits: 1 })} GB` : `${Math.ceil(p.size_bytes / 1e6).toLocaleString("de-DE")} MB`;
-    return `${at}${plural(p.audio_files, "Musikdatei", "Musikdateien")} · ${at}${size}`;
+    const size = p.size_bytes >= 1e9 ? `${num(p.size_bytes / 1e9, { maximumFractionDigits: 1 })} GB` : `${num(Math.ceil(p.size_bytes / 1e6))} MB`;
+    const files = plural(p.audio_files, "Musikdatei", "Musikdateien");
+    return p.complete ? `${files} · ${size}` : t("mindestens {files} · mindestens {size}", { files, size });
   }
 
   function formats(p: Probe): string {
@@ -187,11 +188,11 @@
   }
 
   const WARNINGS: Record<string, string> = {
-    no_audio: "Hier liegt keine Musik. Ist das der richtige Ordner?",
-    mostly_other_files: "Hier liegen vor allem andere Dateien als Musik. Ist das der richtige Ordner?",
-    few_tags: "Viele Dateien haben keine Angaben zu Künstler und Titel. audium nimmt dann die Ordner- und Dateinamen.",
-    unreadable: "audium darf diesen Ordner nicht lesen.",
-    unreadable_subfolders: "audium darf einige Unterordner nicht lesen. Sie fehlen dann in der Bibliothek.",
+    no_audio: msg("Hier liegt keine Musik. Ist das der richtige Ordner?"),
+    mostly_other_files: msg("Hier liegen vor allem andere Dateien als Musik. Ist das der richtige Ordner?"),
+    few_tags: msg("Viele Dateien haben keine Angaben zu Künstler und Titel. audium nimmt dann die Ordner- und Dateinamen."),
+    unreadable: msg("audium darf diesen Ordner nicht lesen."),
+    unreadable_subfolders: msg("audium darf einige Unterordner nicht lesen. Sie fehlen dann in der Bibliothek."),
   };
 
   // --- what audium may do ------------------------------------------------------------------------
@@ -207,7 +208,7 @@
       env = e;
       listenBrainz = r.sources.artists.on;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Einstellungen konnten nicht geladen werden");
+      toast(e instanceof ApiError ? e.message : t("Einstellungen konnten nicht geladen werden"));
     }
   }
 
@@ -218,7 +219,7 @@
       server = await patch<ServerSettings>("/admin/settings", changes);
     } catch (e) {
       server = before;
-      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen"));
     }
   }
 
@@ -226,7 +227,7 @@
     try {
       listenBrainz = (await patch<Sources>("/admin/radio/sources", { artists: { on } })).sources.artists.on;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Speichern fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Speichern fehlgeschlagen"));
     }
   }
 
@@ -239,41 +240,41 @@
     if (!info) return out;
     if (info.data_persistent === false)
       out.push({
-        title: "Deine Daten könnten verloren gehen",
-        text: "Konto, Playlists und Favoriten liegen nicht in einem festen Ordner auf dem Server. Wird der Container neu erstellt, sind sie weg. Binde dafür einen Ordner als /data ein, zum Beispiel:",
+        title: t("Deine Daten könnten verloren gehen"),
+        text: t("Konto, Playlists und Favoriten liegen nicht in einem festen Ordner auf dem Server. Wird der Container neu erstellt, sind sie weg. Binde dafür einen Ordner als /data ein, zum Beispiel:"),
         code: "./data:/data",
       });
     if (info.admin_from_env)
       out.push({
-        title: "Passwort aus der .env entfernen",
-        text: "Dein Konto ist angelegt. Die Zeilen AUDIUM_ADMIN_USER und AUDIUM_ADMIN_PASSWORD werden nicht mehr gebraucht und können aus der .env raus.",
+        title: t("Passwort aus der .env entfernen"),
+        text: t("Dein Konto ist angelegt. Die Zeilen AUDIUM_ADMIN_USER und AUDIUM_ADMIN_PASSWORD werden nicht mehr gebraucht und können aus der .env raus."),
       });
     if (info.proxy_not_trusted)
       out.push({
-        title: "Reverse-Proxy noch nicht eingetragen",
-        text: "Deine Anfragen laufen über einen Proxy, dem audium noch nicht vertraut. Login-Sperren treffen dann alle Nutzer gemeinsam. Trage ihn so ein (Adresse anpassen):",
+        title: t("Reverse-Proxy noch nicht eingetragen"),
+        text: t("Deine Anfragen laufen über einen Proxy, dem audium noch nicht vertraut. Login-Sperren treffen dann alle Nutzer gemeinsam. Trage ihn so ein (Adresse anpassen):"),
         code: "AUDIUM_TRUSTED_PROXIES=172.16.0.1",
       });
     if (!info.https)
       out.push({
-        title: "Verbindung ohne HTTPS",
-        text: "Im Heimnetz funktioniert alles. Nur audium als App auf dem Handy installieren geht erst mit HTTPS, und von unterwegs solltest du nie ohne zugreifen. Wie das geht, steht in docs/reverse-proxy.md.",
+        title: t("Verbindung ohne HTTPS"),
+        text: t("Im Heimnetz funktioniert alles. Nur audium als App auf dem Handy installieren geht erst mit HTTPS, und von unterwegs solltest du nie ohne zugreifen. Wie das geht, steht in docs/reverse-proxy.md."),
       });
     if (-new Date().getTimezoneOffset() !== info.utc_offset_minutes)
       out.push({
-        title: "Der Server hat eine andere Zeitzone",
-        text: "Das Zeitfenster der Analyse richtet sich nach der Serverzeit. Stelle bei Bedarf die Zeitzone ein:",
+        title: t("Der Server hat eine andere Zeitzone"),
+        text: t("Das Zeitfenster der Analyse richtet sich nach der Serverzeit. Stelle bei Bedarf die Zeitzone ein:"),
         code: "TZ=Europe/Berlin",
       });
     return out;
   });
 
   const steps = $derived<{ id: Step | "account"; label: string }[]>([
-    { id: "account", label: "Konto" },
-    { id: "music", label: "Musik" },
-    { id: "features", label: "Funktionen" },
-    ...(hints.length ? [{ id: "hints" as const, label: "Hinweise" }] : []),
-    { id: "done", label: "Fertig" },
+    { id: "account", label: t("Konto") },
+    { id: "music", label: t("Musik") },
+    { id: "features", label: t("Funktionen") },
+    ...(hints.length ? [{ id: "hints" as const, label: t("Hinweise") }] : []),
+    { id: "done", label: t("Fertig") },
   ]);
   const current = $derived(steps.findIndex((s) => s.id === step));
 
@@ -299,7 +300,7 @@
       session.setupPending = false;
       go("done");
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     } finally {
       busy = false;
     }
@@ -313,14 +314,31 @@
       session.setupPending = false;
       navigate(info?.pending ? "/" : "/settings/library", { replace: true });
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     } finally {
       busy = false;
     }
   }
 
+  // The language is the first thing to choose: it becomes the server language, which every user
+  // sees unless they pick their own. Until an admin chooses, the one the browser showed counts.
+  async function chooseLanguage(lang: Lang) {
+    setLanguage(lang);
+    try {
+      await patch("/admin/settings", { language: lang });
+      session.settings = { ...session.settings, language_default: lang };
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
+    }
+  }
+
   onMount(() => {
     load();
+    get<{ language: Lang | null }>("/setup")
+      .then((s) => {
+        if (!s.language) chooseLanguage(i18n.lang);
+      })
+      .catch(() => {});
   });
 
   // Looks again while the music is missing: the folder may be mounted any moment now.
@@ -355,7 +373,7 @@
 {#snippet command(text: string)}
   <div class="command">
     <code>{text}</code>
-    <button class="btn small ghost" type="button" onclick={() => copy(text)}>Kopieren</button>
+    <button class="btn small ghost" type="button" onclick={() => copy(text)}>{t("Kopieren")}</button>
   </div>
 {/snippet}
 
@@ -363,49 +381,52 @@
   <main>
     <header>
       <svg viewBox="0 0 64 64" width="32" height="32" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
-      <ol aria-label="Schritte der Einrichtung">
+      <ol aria-label={t("Schritte der Einrichtung")}>
         {#each steps as s, i (s.id)}
           <li class:now={i === current} class:past={i < current} aria-current={i === current ? "step" : undefined}>
             <span class="dot" aria-hidden="true">{i < current ? "✓" : i + 1}</span><span class="name">{s.label}</span>
           </li>
         {/each}
       </ol>
+      <select class="lang" aria-label="Sprache / Language" value={i18n.lang} onchange={(e) => chooseLanguage(e.currentTarget.value as Lang)}>
+        {#each Object.entries(LANGUAGES) as [key, name] (key)}<option value={key}>{name}</option>{/each}
+      </select>
     </header>
 
-    {#if reconnecting}<p class="banner" role="status">audium startet gerade neu … Diese Seite macht gleich von selbst weiter.</p>{/if}
+    {#if reconnecting}<p class="banner" role="status">{t("audium startet gerade neu … Diese Seite macht gleich von selbst weiter.")}</p>{/if}
 
     {#if !info}
-      {#if !reconnecting}<p class="set-note">Lädt …</p>{/if}
+      {#if !reconnecting}<p class="set-note">{t("Lädt …")}</p>{/if}
     {:else if step === "music"}
-      <h1>Wo liegt deine Musik?</h1>
+      <h1>{t("Wo liegt deine Musik?")}</h1>
       {#if hasMusic}
-        <p class="lead">audium hat Musik gefunden. Wähle aus, was in deine Bibliothek soll. Deine Dateien werden nie verändert.</p>
+        <p class="lead">{t("audium hat Musik gefunden. Wähle aus, was in deine Bibliothek soll. Deine Dateien werden nie verändert.")}</p>
       {:else if probing > 0 && !folders.some((f) => probes[f])}
-        <p class="lead">audium sucht nach Musik …</p>
+        <p class="lead">{t("audium sucht nach Musik …")}</p>
       {:else}
-        <p class="lead"><strong>audium sieht noch keine Musik.</strong> Es läuft in einem Docker-Container und sieht nur Ordner, die du ihm freigibst. Du hast zwei Möglichkeiten. Diese Seite merkt von selbst, wenn es geklappt hat.</p>
+        <p class="lead"><strong>{t("audium sieht noch keine Musik.")}</strong> {t("Es läuft in einem Docker-Container und sieht nur Ordner, die du ihm freigibst. Du hast zwei Möglichkeiten. Diese Seite merkt von selbst, wenn es geklappt hat.")}</p>
         <div class="set-card help">
           <div class="set-row">
             <div class="set-label">
-              <strong>Am einfachsten: Musik in den Ordner „music“ legen</strong>
-              <small>Wenn du nichts weiter eingestellt hast, gibt es neben der Datei <code>docker-compose.yml</code> einen Ordner <code>music</code>. Kopiere deine Musik einfach dorthin.</small>
+              <strong>{t("Am einfachsten: Musik in den Ordner „music“ legen")}</strong>
+              <small>{t("Wenn du nichts weiter eingestellt hast, gibt es neben der Datei")} <code>{t("docker-compose.yml")}</code> {t("einen Ordner")} <code>{t("music")}</code>{t(". Kopiere deine Musik einfach dorthin.")}</small>
             </div>
           </div>
           <div class="set-row host">
             <div class="set-label">
-              <strong>Oder: einen vorhandenen Ordner freigeben</strong>
-              <small>Wo liegt deine Musik auf dem Server?</small>
-              <input bind:value={hostPath} placeholder="/pfad/zu/deiner/musik" aria-label="Musikordner auf dem Server" autocomplete="off" autocapitalize="none" spellcheck="false" />
+              <strong>{t("Oder: einen vorhandenen Ordner freigeben")}</strong>
+              <small>{t("Wo liegt deine Musik auf dem Server?")}</small>
+              <input bind:value={hostPath} placeholder={t(t("/pfad/zu/deiner/musik"))} aria-label={t("Musikordner auf dem Server")} autocomplete="off" autocapitalize="none" spellcheck="false" />
               <details open>
-                <summary>Mit docker compose</summary>
+                <summary>{t("Mit docker compose")}</summary>
                 <ol class="howto">
-                  <li>Trage diese Zeile in die Datei <code>.env</code> neben <code>docker-compose.yml</code> ein: {@render command(envLine)}</li>
-                  <li>Starte audium im selben Ordner neu: {@render command("docker compose up -d")}</li>
+                  <li>{t("Trage diese Zeile in die Datei")} <code>{t(".env")}</code> {t("neben")} <code>{t("docker-compose.yml")}</code> {t("ein:")} {@render command(envLine)}</li>
+                  <li>{t("Starte audium im selben Ordner neu:")} {@render command("docker compose up -d")}</li>
                 </ol>
               </details>
               <details>
-                <summary>Mit Portainer, Unraid oder Synology</summary>
-                <p class="note">Bearbeite den audium-Container und ergänze bei den Volumes oder Ordnern: Pfad auf dem Server <code>{hostPath.trim() || "/pfad/zu/deiner/musik"}</code>, Pfad im Container <code>/music/main</code>, nur lesen. Starte ihn danach neu.</p>
+                <summary>{t("Mit Portainer, Unraid oder Synology")}</summary>
+                <p class="note">{t("Bearbeite den audium-Container und ergänze bei den Volumes oder Ordnern:")} {t("Pfad auf dem Server")} <code>{hostPath.trim() || t("/pfad/zu/deiner/musik")}</code>, {t("Pfad im Container")} <code>/music/main</code>, {t("nur lesen. Starte ihn danach neu.")}</p>
               </details>
             </div>
           </div>
@@ -421,7 +442,7 @@
               <div class="set-row">
                 <input
                   type="checkbox"
-                  aria-label="{path} in die Bibliothek"
+                  aria-label={t("{path} in die Bibliothek", { path })}
                   checked={isRoot(path) || selected.includes(path)}
                   disabled={isRoot(path) || (!!p && !p.readable)}
                   onchange={(e) => toggle(path, e.currentTarget.checked)}
@@ -431,13 +452,13 @@
                   {#if probeErrors[path]}
                     <small class="set-warn">{probeErrors[path]}</small>
                   {:else if !p}
-                    <small>Wird geprüft …</small>
+                    <small>{t("Wird geprüft …")}</small>
                   {:else if p.readable}
                     <small>
-                      {#if isRoot(path)}Schon in der Bibliothek. {/if}
+                      {#if isRoot(path)}{t("Schon in der Bibliothek.")} {/if}
                       {#if p.audio_files}
                         {summary(p)}<br />{formats(p)}<br />
-                        {plural(p.folders_with_music, "Ordner", "Ordner")} mit Musik, davon {p.folders_with_cover} mit Coverbild
+                        {t("{folders} mit Musik, davon {covers} mit Coverbild", { folders: plural(p.folders_with_music, "Ordner", "Ordner"), covers: p.folders_with_cover })}
                       {/if}
                     </small>
                   {/if}
@@ -445,36 +466,36 @@
               </div>
               {#if p?.warnings.length || (mount && (mount.network || !mount.read_only))}
                 <ul class="warnings">
-                  {#each p?.warnings ?? [] as w (w)}<li class="set-warn">{WARNINGS[w] ?? w}</li>{/each}
-                  {#if mount?.network}<li>Das ist eine Netzwerkfreigabe. Der erste Scan kann etwas länger dauern.</li>{/if}
+                  {#each p?.warnings ?? [] as w (w)}<li class="set-warn">{WARNINGS[w] ? t(WARNINGS[w]) : w}</li>{/each}
+                  {#if mount?.network}<li>{t("Das ist eine Netzwerkfreigabe. Der erste Scan kann etwas länger dauern.")}</li>{/if}
                   {#if mount && !mount.read_only}
-                    <li>audium könnte in diesen Ordner schreiben. Es tut das nie, aber sicherer ist es, ihn nur zum Lesen freizugeben (<code>:ro</code> am Ende der Volume-Zeile).</li>
+                    <li>{t("audium könnte in diesen Ordner schreiben. Es tut das nie, aber sicherer ist es, ihn nur zum Lesen freizugeben (")}<code>{t(":ro")}</code> {t("am Ende der Volume-Zeile).")}</li>
                   {/if}
                 </ul>
               {/if}
               {#if p && !p.readable}
                 <details class="more">
-                  <summary>Details und Lösung</summary>
+                  <summary>{t("Details und Lösung")}</summary>
                   <p class="note">
-                    audium läuft als Nutzer <code>{p.container_user ?? "1000:1000"}</code>, der Ordner gehört <code>{p.owner ?? "?"}</code> (Rechte <code>{p.mode ?? "?"}</code>). Das hier gibt allen Lesezugriff. Führe es auf dem Server aus, mit deinem Ordner statt des Beispielpfads:
+                    {t("audium läuft als Nutzer")} <code>{p.container_user ?? "1000:1000"}</code>{t(", der Ordner gehört")} <code>{p.owner ?? "?"}</code> {t("(Rechte")} <code>{p.mode ?? "?"}</code>{t("). Das hier gibt allen Lesezugriff. Führe es auf dem Server aus, mit deinem Ordner statt des Beispielpfads:")}
                   </p>
-                  {@render command(`sudo chmod -R a+rX ${hostPath.trim() || "/pfad/zu/deiner/musik"}`)}
+                  {@render command(`sudo chmod -R a+rX ${hostPath.trim() || t("/pfad/zu/deiner/musik")}`)}
                 </details>
               {/if}
               {#if p?.unreadable_examples.length}
                 <details class="more">
-                  <summary>{plural(p.unreadable_folders, "Unterordner", "Unterordner")} nicht lesbar</summary>
+                  <summary>{t("{folders} nicht lesbar", { folders: plural(p.unreadable_folders, "Unterordner", "Unterordner") })}</summary>
                   <ul class="samples">{#each p.unreadable_examples as u (u)}<li class="set-mono">{u}</li>{/each}</ul>
                 </details>
               {/if}
               {#if p?.samples.length}
                 <details class="more">
-                  <summary>Beispiele ansehen</summary>
+                  <summary>{t("Beispiele ansehen")}</summary>
                   <ul class="samples">
                     {#each p.samples as s (s.path)}
                       <li>
                         {#if s.tagged}<strong>{s.artist}</strong> – {s.title}{#if s.album} <span class="muted">({s.album})</span>{/if}
-                        {:else}<span class="set-mono">{s.path}</span> <span class="muted">(keine Angaben)</span>{/if}
+                        {:else}<span class="set-mono">{s.path}</span> <span class="muted">{t("(keine Angaben)")}</span>{/if}
                       </li>
                     {/each}
                   </ul>
@@ -485,67 +506,67 @@
         </div>
       {/if}
 
-      <button class="btn ghost other" onclick={() => browse()}><Icon name="folder" size={16} /> Anderen Ordner wählen</button>
+      <button class="btn ghost other" onclick={() => browse()}><Icon name="folder" size={16} /> {t("Anderen Ordner wählen")}</button>
 
       <footer>
-        <button class="btn ghost" disabled={busy} onclick={skip}>{info.pending ? "Überspringen" : "Schließen"}</button>
-        <button class="btn primary" disabled={!canGoOn} onclick={() => go("features")}>Weiter</button>
+        <button class="btn ghost" disabled={busy} onclick={skip}>{info.pending ? t("Überspringen") : t("Schließen")}</button>
+        <button class="btn primary" disabled={!canGoOn} onclick={() => go("features")}>{t("Weiter")}</button>
       </footer>
     {:else if step === "features"}
-      <h1>Was soll audium tun?</h1>
-      <p class="lead">Die Voreinstellungen passen für die meisten. Du kannst alles später unter Einstellungen ändern.</p>
+      <h1>{t("Was soll audium tun?")}</h1>
+      <p class="lead">{t("Die Voreinstellungen passen für die meisten. Du kannst alles später unter Einstellungen ändern.")}</p>
       {#if !server || !env}
-        <p class="set-note">Lädt …</p>
+        <p class="set-note">{t("Lädt …")}</p>
       {:else}
         <section class="set-group">
-          <h2>Audioanalyse</h2>
+          <h2>{t("Audioanalyse")}</h2>
           <div class="set-card">
             {#if info.analysis_available}
               <label class="set-row">
                 <span class="set-label">
-                  <strong>Musik analysieren</strong>
-                  <small>Erkennt Tempo, Stimmung und Klang für Radio, Mixe und „Ähnliche Titel“. Läuft im Hintergrund mit niedriger Priorität, Musikhören geht immer vor. Große Sammlungen brauchen dafür Tage.</small>
+                  <strong>{t("Musik analysieren")}</strong>
+                  <small>{t("Erkennt Tempo, Stimmung und Klang für Radio, Mixe und „Ähnliche Titel“. Läuft im Hintergrund mit niedriger Priorität, Musikhören geht immer vor. Große Sammlungen brauchen dafür Tage.")}</small>
                 </span>
                 <input type="checkbox" class="toggle" checked={server.analysis_paused === "off"} onchange={(e) => save({ analysis_paused: e.currentTarget.checked ? "off" : "on" })} />
               </label>
               {#if server.analysis_paused === "off"}
                 <div class="set-row">
-                  <div class="set-label"><strong>Gleichzeitige Analysen</strong><small>Jede nutzt einen CPU-Kern. Der Server hat {info.cpus} {info.cpus === 1 ? "Kern" : "Kerne"}. Mehr geht schneller, macht den Server aber lauter.</small></div>
-                  <select aria-label="Gleichzeitige Analysen" value={server.analysis_workers} onchange={(e) => save({ analysis_workers: e.currentTarget.value })}>
-                    <option value="default">Standard</option>
+                  <div class="set-label"><strong>{t("Gleichzeitige Analysen")}</strong><small>{tn(info.cpus, "Jede nutzt einen CPU-Kern. Der Server hat {n} Kern. Mehr geht schneller, macht den Server aber lauter.", "Jede nutzt einen CPU-Kern. Der Server hat {n} Kerne. Mehr geht schneller, macht den Server aber lauter.")}</small></div>
+                  <select aria-label={t("Gleichzeitige Analysen")} value={server.analysis_workers} onchange={(e) => save({ analysis_workers: e.currentTarget.value })}>
+                    <option value="default">{t("Standard")}</option>
                     {#each workerChoices as n (n)}<option value={n}>{n}</option>{/each}
                   </select>
                 </div>
                 <label class="set-row">
-                  <span class="set-label"><strong>Nur nachts</strong><small>Von {Number(server.analysis_from)} bis {Number(server.analysis_until)} Uhr, wenn der Server sonst nichts zu tun hat.</small></span>
+                  <span class="set-label"><strong>{t("Nur nachts")}</strong><small>{t("Von {from} bis {until} Uhr, wenn der Server sonst nichts zu tun hat.", { from: Number(server.analysis_from), until: Number(server.analysis_until) })}</small></span>
                   <input type="checkbox" class="toggle" checked={server.analysis_schedule === "window"} onchange={(e) => save({ analysis_schedule: e.currentTarget.checked ? "window" : "always" })} />
                 </label>
               {/if}
             {:else}
               <div class="set-row"><span class="set-label">
-                <strong>Auf diesem Server nicht verfügbar</strong>
-                <small>Die Audioanalyse gibt es nur für x86_64-Prozessoren. Auto-Playlists nach Genre und Jahrzehnt und das Radio nach Genre und Jahr funktionieren trotzdem.</small>
+                <strong>{t("Auf diesem Server nicht verfügbar")}</strong>
+                <small>{t("Die Audioanalyse gibt es nur für x86_64-Prozessoren. Auto-Playlists nach Genre und Jahrzehnt und das Radio nach Genre und Jahr funktionieren trotzdem.")}</small>
               </span></div>
             {/if}
           </div>
         </section>
 
         <section class="set-group">
-          <h2>Verbindungen nach außen</h2>
+          <h2>{t("Verbindungen nach außen")}</h2>
           <div class="set-card">
             {#if info.analysis_available}
               <label class="set-row">
                 <span class="set-label">
-                  <strong>Modelle für die Klangerkennung laden</strong>
-                  <small>Lädt einmalig rund 20 MB von essentia.upf.edu, für Stilrichtungen und „klingt ähnlich“. Dabei wird nichts über dich gesendet. Die Modelle sind nur für nicht-kommerzielle Nutzung freigegeben (CC BY-NC-SA).</small>
+                  <strong>{t("Modelle für die Klangerkennung laden")}</strong>
+                  <small>{t("Lädt einmalig rund 20 MB von essentia.upf.edu, für Stilrichtungen und „klingt ähnlich“. Dabei wird nichts über dich gesendet. Die Modelle sind nur für nicht-kommerzielle Nutzung freigegeben (CC BY-NC-SA).")}</small>
                 </span>
                 <input type="checkbox" class="toggle" disabled={!env.model_download_available} checked={env.model_download_available && server.model_download === "on"} onchange={(e) => save({ model_download: e.currentTarget.checked ? "on" : "off" })} />
               </label>
             {/if}
             <label class="set-row">
               <span class="set-label">
-                <strong>Ähnliche Künstler von ListenBrainz</strong>
-                <small>Verbessert das Radio. Gesendet werden nur Künstlernamen oder MusicBrainz-IDs, nichts über die Nutzer.</small>
+                <strong>{t("Ähnliche Künstler von ListenBrainz")}</strong>
+                <small>{t("Verbessert das Radio. Gesendet werden nur Künstlernamen oder MusicBrainz-IDs, nichts über die Nutzer.")}</small>
               </span>
               <input type="checkbox" class="toggle" checked={listenBrainz} onchange={(e) => saveListenBrainz(e.currentTarget.checked)} />
             </label>
@@ -553,14 +574,14 @@
         </section>
 
         <section class="set-group">
-          <h2>Apps</h2>
+          <h2>{t("Apps")}</h2>
           <div class="set-card">
             <label class="set-row">
-              <span class="set-label"><strong>audium-Apps</strong><small>Die audium-Apps für Desktop und Handy.</small></span>
+              <span class="set-label"><strong>{t("audium-Apps")}</strong><small>{t("Die audium-Apps für Desktop und Handy.")}</small></span>
               <input type="checkbox" class="toggle" checked={server.app_access === "on"} onchange={(e) => save({ app_access: e.currentTarget.checked ? "on" : "off" })} />
             </label>
             <label class="set-row">
-              <span class="set-label"><strong>Andere Musik-Apps (Subsonic)</strong><small>Zum Beispiel Symfonium, Amperfy oder Feishin.</small></span>
+              <span class="set-label"><strong>{t("Andere Musik-Apps (Subsonic)")}</strong><small>{t("Zum Beispiel Symfonium, Amperfy oder Feishin.")}</small></span>
               <input type="checkbox" class="toggle" disabled={!env.subsonic_available} checked={env.subsonic_available && server.subsonic_api === "on"} onchange={(e) => save({ subsonic_api: e.currentTarget.checked ? "on" : "off" })} />
             </label>
           </div>
@@ -568,16 +589,16 @@
       {/if}
 
       <footer>
-        <button class="btn ghost" onclick={() => go("music")}>Zurück</button>
+        <button class="btn ghost" onclick={() => go("music")}>{t("Zurück")}</button>
         {#if hints.length}
-          <button class="btn primary" onclick={() => go("hints")}>Weiter</button>
+          <button class="btn primary" onclick={() => go("hints")}>{t("Weiter")}</button>
         {:else}
-          <button class="btn primary" disabled={busy} onclick={finish}>Einrichtung abschließen</button>
+          <button class="btn primary" disabled={busy} onclick={finish}>{t("Einrichtung abschließen")}</button>
         {/if}
       </footer>
     {:else if step === "hints"}
-      <h1>Gut zu wissen</h1>
-      <p class="lead">Das musst du nicht jetzt erledigen. audium funktioniert auch so.</p>
+      <h1>{t("Gut zu wissen")}</h1>
+      <p class="lead">{t("Das musst du nicht jetzt erledigen. audium funktioniert auch so.")}</p>
       <div class="set-card">
         {#each hints as h (h.title)}
           <div class="set-row">
@@ -590,52 +611,52 @@
         {/each}
       </div>
       <footer>
-        <button class="btn ghost" onclick={() => go("features")}>Zurück</button>
-        <button class="btn primary" disabled={busy} onclick={finish}>Einrichtung abschließen</button>
+        <button class="btn ghost" onclick={() => go("features")}>{t("Zurück")}</button>
+        <button class="btn primary" disabled={busy} onclick={finish}>{t("Einrichtung abschließen")}</button>
       </footer>
     {:else}
-      <h1>Fertig!</h1>
+      <h1>{t("Fertig!")}</h1>
       {#if chose}
         {#if scanning}
-          <p class="lead">audium liest jetzt deine Musik ein. Du kannst schon loslegen, neue Titel erscheinen nach und nach.</p>
+          <p class="lead">{t("audium liest jetzt deine Musik ein. Du kannst schon loslegen, neue Titel erscheinen nach und nach.")}</p>
         {:else}
-          <p class="lead">audium hat deine Musik eingelesen.</p>
+          <p class="lead">{t("audium hat deine Musik eingelesen.")}</p>
         {/if}
         <div class="set-card">
           <div class="set-row">
             <div class="set-label">
-              <strong>{(stats?.tracks ?? 0).toLocaleString("de-DE")} Titel · {(stats?.albums ?? 0).toLocaleString("de-DE")} Alben · {(stats?.artists ?? 0).toLocaleString("de-DE")} Künstler</strong>
+              <strong>{plural(stats?.tracks ?? 0, "Titel", "Titel")} · {plural(stats?.albums ?? 0, "Album", "Alben")} · {plural(stats?.artists ?? 0, "Künstler", "Künstler")}</strong>
               {#if scanning && job}
-                <small>{job.progress.toLocaleString("de-DE")} Dateien geprüft</small>
+                <small>{t("{n} Dateien geprüft", { n: job.progress })}</small>
                 <div class="set-progress" role="progressbar"><div class="indeterminate" style:width="100%"></div></div>
               {:else if job?.status === "failed"}
-                <small class="set-warn">Der Scan ist fehlgeschlagen: {job.error}</small>
+                <small class="set-warn">{t("Der Scan ist fehlgeschlagen: {error}", { error: job.error ?? "" })}</small>
               {/if}
             </div>
           </div>
         </div>
       {:else}
-        <p class="lead">Es ist noch keine Musik eingebunden. Das kannst du jederzeit unter Einstellungen → Musikordner nachholen.</p>
+        <p class="lead">{t("Es ist noch keine Musik eingebunden. Das kannst du jederzeit unter Einstellungen → Musikordner nachholen.")}</p>
       {/if}
 
       <section class="set-group next">
-        <h2>Als Nächstes</h2>
+        <h2>{t("Als Nächstes")}</h2>
         <div class="set-card">
-          <a class="set-row link" href={href("/settings/users")}><span class="set-label"><strong>Andere einladen</strong><small>Familie und Freunde bekommen eigene Konten und Playlists.</small></span><Icon name="chevron" size={16} /></a>
-          <a class="set-row link" href={href("/settings/apps")}><span class="set-label"><strong>Apps verbinden</strong><small>Musik auf dem Handy oder am Desktop hören.</small></span><Icon name="chevron" size={16} /></a>
+          <a class="set-row link" href={href("/settings/users")}><span class="set-label"><strong>{t("Andere einladen")}</strong><small>{t("Familie und Freunde bekommen eigene Konten und Playlists.")}</small></span><Icon name="chevron" size={16} /></a>
+          <a class="set-row link" href={href("/settings/apps")}><span class="set-label"><strong>{t("Apps verbinden")}</strong><small>{t("Musik auf dem Handy oder am Desktop hören.")}</small></span><Icon name="chevron" size={16} /></a>
         </div>
-        <p class="set-note">Denk an Backups: Sichere den Ordner <code>data</code>, darin liegen Konten, Playlists und Favoriten. Besonders wichtig sind <code>audium.db</code> und <code>secret.key</code>.</p>
+        <p class="set-note">{t("Denk an Backups: Sichere den Ordner")} <code>{t("data")}</code>{t(", darin liegen Konten, Playlists und Favoriten. Besonders wichtig sind")} <code>{t("audium.db")}</code> {t("und")} <code>{t("secret.key")}</code>.</p>
       </section>
       <footer>
         <span></span>
-        <button class="btn primary" onclick={() => navigate("/", { replace: true })}>Zur Musik</button>
+        <button class="btn primary" onclick={() => navigate("/", { replace: true })}>{t("Zur Musik")}</button>
       </footer>
     {/if}
   </main>
 </div>
 
 {#if browsing}
-  <Modal title="Ordner wählen" width={560} onclose={() => (browsing = null)}>
+  <Modal title={t("Ordner wählen")} width={560} onclose={() => (browsing = null)}>
     <div class="crumb set-mono">{browsing.path}</div>
     <ul class="picker">
       {#if browsing.parent}
@@ -644,13 +665,13 @@
       {#each browsing.folders as f (f.path)}
         <li><button class="pick" onclick={() => browse(f.path)}><Icon name="folder" size={16} /> {f.name}</button></li>
       {:else}
-        <li class="set-note">Keine Unterordner.</li>
+        <li class="set-note">{t("Keine Unterordner.")}</li>
       {/each}
     </ul>
-    <p class="set-note">audium sieht nur Ordner, die dem Container freigegeben sind.</p>
+    <p class="set-note">{t("audium sieht nur Ordner, die dem Container freigegeben sind.")}</p>
     <div class="modal-buttons">
-      <button class="btn ghost" onclick={() => (browsing = null)}>Abbrechen</button>
-      <button class="btn primary" onclick={() => addFolder(browsing!.path)}>Diesen Ordner prüfen</button>
+      <button class="btn ghost" onclick={() => (browsing = null)}>{t("Abbrechen")}</button>
+      <button class="btn primary" onclick={() => addFolder(browsing!.path)}>{t("Diesen Ordner prüfen")}</button>
     </div>
   </Modal>
 {/if}
@@ -673,8 +694,13 @@
     gap: 16px;
     margin-bottom: 28px;
   }
-  header > svg {
+  header > svg,
+  header .lang {
     flex: none;
+  }
+  header .lang {
+    align-self: flex-start;
+    width: auto;
   }
   header ol {
     display: flex;

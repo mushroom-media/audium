@@ -16,6 +16,7 @@
   import { radioPath, type RadioKind } from "../lib/radio";
   import { recallEntry, rememberEntry } from "../lib/router.svelte";
   import { toast } from "../lib/ui.svelte";
+  import { msg, t } from "../lib/i18n.svelte";
 
   // Only part of the station is shown, its last two rows fading out, so the list seems to go on.
   // While it plays, the rows after the current track are revealed one by one. Fewer rows than the
@@ -35,15 +36,15 @@
   let mix = $state(0);
 
   const KINDS: Record<string, { api: string; label: string }> = {
-    track: { api: "tracks", label: "Radio zu einem Titel" },
-    album: { api: "albums", label: "Radio zu einem Album" },
-    artist: { api: "artists", label: "Radio zu einem Künstler" },
+    track: { api: "tracks", label: msg("Radio zu einem Titel") },
+    album: { api: "albums", label: msg("Radio zu einem Album") },
+    artist: { api: "artists", label: msg("Radio zu einem Künstler") },
   };
   const k = $derived(KINDS[kind]);
 
   $effect(() => {
     if (!k) {
-      error = "Diese Seite gibt es nicht.";
+      error = t("Diese Seite gibt es nicht.");
       return;
     }
     const ctrl = new AbortController();
@@ -54,7 +55,7 @@
         else seed = { name: (s as Track | AlbumDetail).title, by: (s as Track | AlbumDetail).artist, cover: s.cover };
       })
       .catch((e) => {
-        if (e.name !== "AbortError") error = e instanceof ApiError && e.status === 404 ? "Das gibt es nicht (mehr)." : String(e);
+        if (e.name !== "AbortError") error = e instanceof ApiError && e.status === 404 ? t("Das gibt es nicht (mehr).") : String(e);
       });
     return () => ctrl.abort();
   });
@@ -66,7 +67,7 @@
     get<Track[]>(`/${k.api}/${id}/radio`, { limit: RADIO_BATCH }, ctrl.signal)
       .then((t) => (tracks = t))
       .catch((e) => {
-        if (e.name !== "AbortError") error = "Radio konnte nicht erstellt werden.";
+        if (e.name !== "AbortError") error = t("Radio konnte nicht erstellt werden.");
       });
     return () => ctrl.abort();
   });
@@ -104,7 +105,7 @@
     const track = shown?.[index];
     if (!track) return;
     const saved = post("/radio/dislikes", { track_id: track.id, station: `${kind}:${id}` }).catch(() => {
-      toast("Konnte nicht gespeichert werden");
+      toast(t("Konnte nicht gespeichert werden"));
     });
     if (live) {
       if (index === player.queue.pos) player.next();
@@ -148,7 +149,7 @@
 {#if error}
   <div class="page"><p class="empty">{error}</p></div>
 {:else}
-  <VirtualList {count} rowHeight={56} label="Titel" keep="radio:{kind}:{id}">
+  <VirtualList {count} rowHeight={56} label={t("Titel")} keep="radio:{kind}:{id}">
     {#snippet header()}
       <header class="hero">
         <div class="art">
@@ -156,18 +157,18 @@
           <span class="badge" aria-hidden="true"><Icon name="radio" size={30} /></span>
         </div>
         <div class="info">
-          <p class="kind"><Icon name="radio" size={13} /> {k?.label}</p>
+          <p class="kind"><Icon name="radio" size={13} /> {k ? t(k.label) : ""}</p>
           <h1 use:pageTitle={seed ? `Radio: ${seed.name}` : ""}>{seed ? `Radio: ${seed.name}` : " "}</h1>
           {#if seed?.by}<p class="by">{seed.by}</p>{/if}
           <!-- No count or length: a station has no end, it keeps adding tracks while it plays. -->
-          <p class="by">{live ? "Läuft gerade" : tracks ? "Endlos, mischt beim Hören weiter" : "Wird gemischt …"}</p>
+          <p class="by">{live ? t("Läuft gerade") : tracks ? t("Endlos, mischt beim Hören weiter") : t("Wird gemischt …")}</p>
           <div class="actions">
             <PlayToggle ref="radio:{kind}:{id}" disabled={!tracks?.length} start={() => play(0)} />
-            <button class="btn" disabled={!live && !tracks} onclick={remix}><Icon name="shuffle" size={18} /> Neu mischen</button>
+            <button class="btn" disabled={!live && !tracks} onclick={remix}><Icon name="shuffle" size={18} /> {t("Neu mischen")}</button>
           </div>
         </div>
       </header>
-      {#if !live && tracks && !tracks.length}<p class="empty">Für dieses Radio wurden keine Titel gefunden.</p>{/if}
+      {#if !live && tracks && !tracks.length}<p class="empty">{t("Für dieses Radio wurden keine Titel gefunden.")}</p>{/if}
     {/snippet}
     {#snippet row(i)}
       <div class="pad" class:fade-from={more && i === count - 2} class:fade-out={more && i === count - 1}>

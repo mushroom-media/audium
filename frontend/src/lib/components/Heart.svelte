@@ -1,6 +1,7 @@
 <script lang="ts">
   import { mine, toggleFavoriteOf, type FavoriteKind } from "../mine.svelte";
   import { toast } from "../ui.svelte";
+  import { t } from "../i18n.svelte";
 
   /** A track's heart (Lieblingssongs) or, with `kind="album"`, an album's (Lieblingsalben). */
   let { track, id, kind = "track", size = 18 }: { track?: { id: number }; id?: number; kind?: FavoriteKind; size?: number } = $props();
@@ -8,8 +9,8 @@
   const on = $derived((kind === "album" ? mine.favoriteAlbums : mine.favoriteTracks).has(itemId));
   const label = $derived(
     kind === "album"
-      ? on ? "Aus Lieblingsalben entfernen" : "Zu Lieblingsalben"
-      : on ? "Aus Lieblingssongs entfernen" : "Zu Lieblingssongs",
+      ? on ? t("Aus Lieblingsalben entfernen") : t("Zu Lieblingsalben")
+      : on ? t("Aus Lieblingssongs entfernen") : t("Zu Lieblingssongs"),
   );
 
   async function click(e: MouseEvent) {
@@ -17,7 +18,7 @@
     try {
       await toggleFavoriteOf(kind, itemId);
     } catch {
-      toast("Konnte Favorit nicht speichern");
+      toast(t("Konnte Favorit nicht speichern"));
     }
   }
 </script>

@@ -1,6 +1,7 @@
 import { get, type AlbumDetail, type Track } from "./api";
 import { player } from "./player.svelte";
 import { toast } from "./ui.svelte";
+import { t } from "./i18n.svelte";
 
 export type RadioKind = "track" | "album" | "artist";
 
@@ -36,6 +37,6 @@ export async function startGroupRadio(kind: "albums" | "artists", id: number, na
     if (!first) throw new Error("empty");
     play(first, name, kind === "albums" ? "album" : "artist", id);
   } catch {
-    toast("Radio konnte nicht gestartet werden");
+    toast(t("Radio konnte nicht gestartet werden"));
   }
 }

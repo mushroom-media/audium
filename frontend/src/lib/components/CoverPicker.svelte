@@ -6,6 +6,7 @@
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
   import PlaylistCover from "./PlaylistCover.svelte";
+  import { t } from "../i18n.svelte";
 
   let { playlist, onchange, onclose }: { playlist: Playlist; onchange: (p: Playlist) => void; onclose: () => void } =
     $props();
@@ -22,7 +23,7 @@
       toast(done);
       onclose();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Fehlgeschlagen");
+      toast(e instanceof ApiError ? e.message : t("Fehlgeschlagen"));
     } finally {
       busy = false;
     }
@@ -50,7 +51,7 @@
   }
 </script>
 
-<Modal title="Cover ändern" onclose={onclose} width={520}>
+<Modal title={t("Cover ändern")} onclose={onclose} width={520}>
   <div class="grid">
     {#each COVER_PRESETS as preset, i (preset.name)}
       {@const n = i + 1}
@@ -58,10 +59,10 @@
         class="choice"
         class:on={playlist.cover_preset === n}
         disabled={busy}
-        title={preset.name}
-        aria-label="Cover „{preset.name}“"
+        title={t(preset.name)}
+        aria-label={t("Cover „{name}“", { name: t(preset.name) })}
         aria-pressed={playlist.cover_preset === n}
-        onclick={() => save(() => put<Playlist>(`/playlists/${playlist.id}/cover`, { preset: n }), "Cover geändert")}
+        onclick={() => save(() => put<Playlist>(`/playlists/${playlist.id}/cover`, { preset: n }), t("Cover geändert"))}
       >
         <PlaylistCover playlist={{ cover: null, cover_preset: n }} />
       </button>
@@ -69,10 +70,10 @@
   </div>
 
   <div class="actions">
-    <button class="btn" disabled={busy} onclick={() => fileInput.click()}><Icon name="upload" size={18} /> Eigenes Bild</button>
+    <button class="btn" disabled={busy} onclick={() => fileInput.click()}><Icon name="upload" size={18} /> {t("Eigenes Bild")}</button>
     {#if playlist.cover_source !== "auto"}
-      <button class="btn ghost" disabled={busy} onclick={() => save(() => put<Playlist>(`/playlists/${playlist.id}/cover`, { preset: null }), "Cover zurückgesetzt")}>
-        Cover des ersten Titels
+      <button class="btn ghost" disabled={busy} onclick={() => save(() => put<Playlist>(`/playlists/${playlist.id}/cover`, { preset: null }), t("Cover zurückgesetzt"))}>
+        {t("Cover des ersten Titels")}
       </button>
     {/if}
     <input bind:this={fileInput} type="file" accept="image/*" hidden onchange={onFile} />

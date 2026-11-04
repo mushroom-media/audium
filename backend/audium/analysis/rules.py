@@ -14,6 +14,7 @@ from audium.analysis.genres import slug as genre_slug
 from audium.analysis.styles import MIN_STYLE_PROB
 from audium.db.schema import albums, genres, styles, track_features, track_genres, track_styles, tracks
 from audium.errors import BadRequest
+from audium.i18n import tr
 from audium.util import now_ms
 
 MAX_LIMIT = 1000
@@ -28,7 +29,7 @@ TEXT_OPS = ("is", "is_not", "contains")
 @dataclass(frozen=True)
 class Field:
     name: str
-    label: str  # German UI label
+    label: str  # UI label, German (translated in field_definitions)
     kind: str  # number | text | enum | scale (0..1 feature)
     ops: tuple[str, ...]
     options: tuple[str, ...] = ()
@@ -71,9 +72,9 @@ def _num(value, field: Field) -> float:
     try:
         x = float(value)
     except (TypeError, ValueError) as exc:
-        raise BadRequest(f"{field.label}: a number is required") from exc
+        raise BadRequest(f"{field.name}: a number is required") from exc
     if field.kind == "scale" and not 0 <= x <= 1:
-        raise BadRequest(f"{field.label}: value must be between 0 and 1")
+        raise BadRequest(f"{field.name}: value must be between 0 and 1")
     return x
 
 
@@ -98,22 +99,22 @@ def validate(rule: dict) -> dict:
             raise BadRequest(f"unknown field {c.get('field')!r}")
         op = c.get("op")
         if op not in field.ops:
-            raise BadRequest(f"{field.label}: operator must be one of {', '.join(field.ops)}")
+            raise BadRequest(f"{field.name}: operator must be one of {', '.join(field.ops)}")
         value = c.get("value")
         if op == "between":
             if not isinstance(value, list | tuple) or len(value) != 2:
-                raise BadRequest(f"{field.label}: 'between' needs two values")
+                raise BadRequest(f"{field.name}: 'between' needs two values")
             lo, hi = sorted((_num(value[0], field), _num(value[1], field)))
             value = [lo, hi]
         elif field.kind in ("number", "scale"):
             value = _num(value, field)
         elif field.kind == "enum":
             if value not in field.options:
-                raise BadRequest(f"{field.label}: value must be one of {', '.join(field.options)}")
+                raise BadRequest(f"{field.name}: value must be one of {', '.join(field.options)}")
         else:
             value = str(value or "").strip()[:200]
             if not value:
-                raise BadRequest(f"{field.label}: a value is required")
+                raise BadRequest(f"{field.name}: a value is required")
         clean.append({"field": field.name, "op": op, "value": value})
     limit = rule.get("limit", DEFAULT_LIMIT)
     try:
@@ -225,11 +226,11 @@ def uses_analysis(rule: dict) -> bool:
     return any(FIELDS[c["field"]].needs_analysis for c in rule["conditions"])
 
 
-def field_definitions() -> list[dict]:
+def field_definitions(lang: str = "de") -> list[dict]:
     return [
         {
             "name": f.name,
-            "label": f.label,
+            "label": tr(lang, f.label),
             "kind": f.kind,
             "ops": list(f.ops),
             "options": list(f.options),

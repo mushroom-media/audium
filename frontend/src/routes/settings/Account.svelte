@@ -2,6 +2,7 @@
   import Icon from "../../lib/components/Icon.svelte";
   import { navigate } from "../../lib/router.svelte";
   import { logout, session } from "../../lib/session.svelte";
+  import { t } from "../../lib/i18n.svelte";
 
   async function doLogout() {
     await logout();
@@ -21,8 +22,8 @@
       </div>
     </div>
     <div class="set-row">
-      <div class="set-label"><strong>Abmelden</strong></div>
-      <button class="btn" onclick={doLogout}><Icon name="logout" size={18} /> Abmelden</button>
+      <div class="set-label"><strong>{t("Abmelden")}</strong></div>
+      <button class="btn" onclick={doLogout}><Icon name="logout" size={18} /> {t("Abmelden")}</button>
     </div>
   </div>
 </section>
