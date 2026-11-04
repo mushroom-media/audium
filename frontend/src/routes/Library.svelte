@@ -70,7 +70,16 @@
 
   // Sorting and the artist list belong to the account (Einstellungen > Bibliothek), on every device.
   const trackSort = $derived<TrackSort>(session.settings.track_sort);
-  const albumSort = $derived<AlbumSort>(session.settings.album_sort);
+  // A link may ask for a sort just for this view (?sort=added from "Alle Alben" on the start page);
+  // picking one in the menu saves it and drops the link's.
+  const linkSort = $derived(router.route.query.get("sort"));
+  const albumSort = $derived<AlbumSort>(
+    linkSort && linkSort in ALBUM_SORTS ? (linkSort as AlbumSort) : session.settings.album_sort,
+  );
+  function pickAlbumSort(sort: AlbumSort) {
+    if (linkSort) setParams({ sort: "" });
+    keep({ album_sort: sort });
+  }
   const artistRole = $derived<ArtistRole>(session.settings.artist_role);
   const keep = (changes: Parameters<typeof saveSettings>[0]) => saveSettings(changes).catch(() => {});
 
@@ -207,7 +216,7 @@
               {#each Object.entries(TRACK_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
             </select>
           {:else if tab === "albums"}
-            <select value={albumSort} onchange={(e) => keep({ album_sort: e.currentTarget.value as AlbumSort })}>
+            <select value={albumSort} onchange={(e) => pickAlbumSort(e.currentTarget.value as AlbumSort)}>
               {#each Object.entries(ALBUM_SORTS) as [key, label] (key)}<option value={key}>{label}</option>{/each}
             </select>
           {:else}

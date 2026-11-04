@@ -92,7 +92,7 @@
 
   <div class="section-head">
     <h2>Neu hinzugefügt</h2>
-    <a href={href("/library?tab=albums")}>Alle Alben</a>
+    <a href={href("/library?tab=albums&sort=added")}>Alle Alben</a>
   </div>
   {#if recent && recent.length === 0}
     <p class="empty">
