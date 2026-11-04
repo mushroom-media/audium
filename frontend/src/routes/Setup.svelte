@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The first-run dialog (docs/setup-wizard.md): the admin account exists already (Auth.svelte or
+  // The first-run dialog: the admin account exists already (Auth.svelte or
   // AUDIUM_ADMIN_*); this page finds the music and asks what audium may do. Written for people who
   // do not know Docker: plain words first, the technical detail folded away.
   import { onMount } from "svelte";

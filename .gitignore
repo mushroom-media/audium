@@ -12,3 +12,4 @@ frontend/dist/
 
 # local AI tooling
 .claude/
+notes/

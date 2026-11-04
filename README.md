@@ -2,7 +2,7 @@
 
 Self-hosted music streaming for your own library: one Docker container, built for large collections (100,000+ tracks) on a home server or NAS. No cloud, no telemetry, works offline in your LAN.
 
-> **Status: 0.1, first release.** The features below work; expect rough edges. Roadmap and design: [docs/plan.md](docs/plan.md).
+> **Status: 0.1, first release.** The features below work; expect rough edges.
 
 ## Quickstart
 
@@ -65,7 +65,7 @@ Health check: `GET /api/health` (used by the Docker `HEALTHCHECK`). Logs are JSO
 
 ## Development
 
-See [docs/development.md](docs/development.md). Design decisions: [docs/decisions.md](docs/decisions.md).
+See [docs/development.md](docs/development.md).
 
 ## License
 

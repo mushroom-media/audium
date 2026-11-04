@@ -4,7 +4,7 @@
 // Near-gapless: a second element preloads the next track shortly before the current one ends;
 // on "ended" the elements swap and the already-buffered next track starts at once. That removes
 // the loading gap (typically 100-500 ms over a network). Sample-exact gapless playback (live
-// albums) would need Web Audio/MSE with encoder-delay trimming; see docs/decisions.md D26.
+// albums) would need Web Audio/MSE with encoder-delay trimming.
 //
 // Crossfade (a user setting) uses the same two elements: the spare one starts that many seconds
 // before the end and both volumes cross over. Only for tracks that follow on their own, not skips.
