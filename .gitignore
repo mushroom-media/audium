@@ -9,3 +9,6 @@ node_modules/
 frontend/dist/
 .env
 .deploy
+
+# local AI tooling
+.claude/
