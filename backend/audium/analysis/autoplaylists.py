@@ -29,7 +29,7 @@ from collections import Counter
 import numpy as np
 from sqlalchemy import Connection, delete, func, insert, select, update
 
-from audium.analysis import explain, rules, sources
+from audium.analysis import explain, genre_covers, rules, sources
 from audium.analysis import genres as genre_norm
 from audium.analysis.similarity import embedding_matrix, feature_matrix
 from audium.analysis.styles import MIN_STYLE_PROB
@@ -50,6 +50,7 @@ from audium.db.schema import (
 from audium.db.state import get_state
 from audium.i18n import server_language, tr
 from audium.logging import get_logger
+from audium.scanner.covers import CoverStore
 from audium.util import now_ms
 
 log = get_logger(__name__)
@@ -594,13 +595,13 @@ def _store(conn: Connection, spec: dict, ts: int) -> str:
     items = [(t, reason) for t, reason in items if t in durations]
     track_ids = [t for t, _ in items]
     stats = (len(track_ids), sum(durations[t] or 0 for t in track_ids))
-    cover = (
-        conn.execute(
+    # Genre and style playlists keep the cover made for them once (genre_covers); a new one shows
+    # its first track's cover until genre_covers.refresh has made its own.
+    cover = genre_covers.stored(conn, spec["key"]) if genre_covers.is_genre_key(spec["key"]) else None
+    if cover is None and track_ids:
+        cover = conn.execute(
             select(covers.c.hash).join(tracks, tracks.c.cover_id == covers.c.id).where(tracks.c.id == track_ids[0])
         ).scalar()
-        if track_ids
-        else None
-    )
     detected = (
         conn.execute(
             select(func.count(func.distinct(track_genres.c.track_id))).where(
@@ -708,8 +709,9 @@ def _remove_gone(conn: Connection, produced: set[str]) -> int:
     return removed
 
 
-def generate(conn: Connection) -> dict:
-    """Recompute all auto-playlists in one transaction (the worker uses generate_in)."""
+def generate(conn: Connection, store: CoverStore | None = None) -> dict:
+    """Recompute all auto-playlists in one transaction (the worker uses generate_in).
+    With `store`, genre and style playlists also get their own cover (genre_covers)."""
     ts = now_ms()
     src, analyzed, specs = _specs(conn)
     stats = {"created": 0, "updated": 0, "skipped": 0}
@@ -717,11 +719,13 @@ def generate(conn: Connection) -> dict:
         stats[_store(conn, spec, ts)] += 1
     stats["removed"] = _remove_gone(conn, {s["key"] for s in specs})
     stats["smart"] = refresh_smart_playlists(conn)
+    if store is not None:
+        stats["covers"] = genre_covers.refresh(conn, store)
     log.info("autoplaylists.generated", source=src, analyzed=analyzed, **stats)
     return stats
 
 
-def generate_in(db: Database) -> dict:
+def generate_in(db: Database, store: CoverStore | None = None) -> dict:
     """Recompute all auto-playlists. Runs in the analysis worker after scans and analysis.
     Computes in a read snapshot and writes in short transactions: with a big library the
     computation takes a while, and holding the write lock that long made requests that write
@@ -747,6 +751,8 @@ def generate_in(db: Database) -> dict:
             present = set(conn.execute(select(tracks.c.id).where(tracks.c.id.in_(track_ids))).scalars())
             if store_smart_items(conn, playlist_id, [t for t in track_ids if t in present]):
                 stats["smart"] += 1
+    if store is not None:
+        stats["covers"] = genre_covers.refresh_in(db, store)
     log.info("autoplaylists.generated", source=src, analyzed=analyzed, **stats)
     return stats
 

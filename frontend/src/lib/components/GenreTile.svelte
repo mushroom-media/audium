@@ -1,12 +1,13 @@
 <script lang="ts">
-  // A broad genre as a wide tile: its name on the colours of a cover from it (blurred), so the
-  // genres stand apart from the playlist cards below.
+  // A broad genre as a wide tile: its name on the genre's own cover, so the genres stand apart
+  // from the playlist cards below. The server makes that cover already blurred, with a gradient
+  // (analysis/genre_covers.py), and it is the same one the start page and the playlist page show.
   import { coverUrl, type AutoPlaylist } from "../api";
   import { plural } from "../format";
   import { href } from "../router.svelte";
 
   let { playlist, label = playlist.name }: { playlist: AutoPlaylist; label?: string } = $props();
-  const bg = $derived(coverUrl(playlist.cover, 64));
+  const bg = $derived(coverUrl(playlist.cover, 256));
   // Without a cover: a gradient of its own, the same for a genre every time.
   const hue = $derived([...playlist.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7));
   const fallback = $derived(`linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 40) % 360} 60% 24%))`);
@@ -36,12 +37,10 @@
   }
   .bg {
     position: absolute;
-    inset: -20%;
+    inset: 0;
     z-index: -2;
     background-size: cover;
     background-position: center;
-    filter: blur(18px) saturate(1.4);
-    transform: scale(1.1);
     transition: transform 0.3s ease;
   }
   .tile::after {
@@ -52,7 +51,7 @@
     background: linear-gradient(160deg, rgb(0 0 0 / 0.05), rgb(0 0 0 / 0.55));
   }
   .tile:hover .bg {
-    transform: scale(1.18);
+    transform: scale(1.06);
   }
   .name {
     font-size: 1.15rem;

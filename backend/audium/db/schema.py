@@ -517,6 +517,17 @@ auto_playlist_items = Table(
     Index(None, "track_id"),
 )
 
+# The cover made once per genre or style playlist (analysis/genre_covers.py), by playlist key:
+# it stays when the playlist's tracks change, or when the playlist goes and comes back.
+# Only the image files exist in the cover store; there is no row in `covers` for it.
+auto_playlist_covers = Table(
+    "auto_playlist_covers",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("hash", Text, nullable=False),
+    Column("created_at", BigInteger, nullable=False),
+)
+
 auto_playlist_access = Table(
     "auto_playlist_access",
     metadata,

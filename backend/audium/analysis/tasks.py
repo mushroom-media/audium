@@ -30,6 +30,7 @@ from audium.i18n import server_language, tr
 from audium.jobs import queue as jobq
 from audium.jobs.worker import JobContext
 from audium.logging import get_logger
+from audium.scanner.covers import CoverStore
 from audium.scanner.scan import genre_id, refresh_genre_counts
 from audium.services import auth as auth_service
 from audium.services.server_settings import server_setting
@@ -373,7 +374,7 @@ def make_handlers(db: Database, settings: Settings):
         with db.write() as conn:
             ctx.progress(0, 1, tr(server_language(conn), "Auto-Playlists werden erzeugt"))
             refresh_detected_genres(conn)
-        return autoplaylists.generate_in(db)
+        return autoplaylists.generate_in(db, CoverStore(settings.covers_dir))
 
     def backfill(ctx: JobContext, payload: dict) -> dict:
         return run_genre_backfill(ctx, db)
