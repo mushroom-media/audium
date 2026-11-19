@@ -5,7 +5,7 @@
   // not saveable as a playlist: a playing radio keeps growing, so there is no fixed list.
   import { untrack } from "svelte";
   import { ApiError, get, post, type AlbumDetail, type Artist, type Track } from "../lib/api";
-  import Cover from "../lib/components/Cover.svelte";
+  import RadioCover from "../lib/components/RadioCover.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import PlayToggle from "../lib/components/PlayToggle.svelte";
   import TrackRow from "../lib/components/TrackRow.svelte";
@@ -153,8 +153,7 @@
     {#snippet header()}
       <header class="hero">
         <div class="art">
-          <Cover hash={seed?.cover ?? null} size={256} />
-          <span class="badge" aria-hidden="true"><Icon name="radio" size={30} /></span>
+          <RadioCover hash={seed?.cover} name={seed?.name ?? ""} />
         </div>
         <div class="info">
           <p class="kind"><Icon name="radio" size={13} /> {k ? t(k.label) : ""}</p>
@@ -199,23 +198,6 @@
     flex: none;
     box-shadow: 0 18px 44px rgb(0 0 0 / 0.3);
     border-radius: var(--radius-sm);
-  }
-  .badge {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 30%;
-    min-width: 44px;
-    max-width: 64px;
-    aspect-ratio: 1;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: rgb(0 0 0 / 0.6);
-    color: #fff;
-    backdrop-filter: blur(4px);
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
   }
   .info {
     min-width: 0;

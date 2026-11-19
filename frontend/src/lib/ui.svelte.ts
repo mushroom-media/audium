@@ -4,7 +4,8 @@ import type { Track } from "./api";
 import { t } from "./i18n.svelte";
 
 export const ui = $state({
-  menu: null as null | { x: number; y: number; tracks: Track[]; label: string },
+  /** `dislike`: radio stations, the track doesn't fit (an entry of its own in the menu). */
+  menu: null as null | { x: number; y: number; tracks: Track[]; label: string; dislike?: () => void },
   prompt: null as null | { title: string; value: string; confirm: string; resolve: (v: string | null) => void },
   toast: null as null | { text: string; id: number },
   share: null as null | { playlistId: number },
@@ -23,7 +24,7 @@ export function toast(text: string) {
 }
 
 /** Opens the "…" menu for one or more tracks next to the clicked element. */
-export function openTrackMenu(e: MouseEvent, tracks: Track[], label = "") {
+export function openTrackMenu(e: MouseEvent, tracks: Track[], label = "", dislike?: () => void) {
   e.preventDefault();
   e.stopPropagation();
   const r = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect();
@@ -32,6 +33,7 @@ export function openTrackMenu(e: MouseEvent, tracks: Track[], label = "") {
     y: r ? r.bottom + 4 : e.clientY,
     tracks,
     label: label || (tracks.length === 1 ? tracks[0].title : t("{n} Titel", { n: tracks.length })),
+    dislike,
   };
 }
 

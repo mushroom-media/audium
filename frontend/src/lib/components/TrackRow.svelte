@@ -105,7 +105,7 @@
     class:active
     class:unavailable
     title={unavailable ? t("Datei fehlt gerade in der Bibliothek") : undefined}
-    oncontextmenu={(e) => openTrackMenu(e, [track])}
+    oncontextmenu={(e) => openTrackMenu(e, [track], "", ondislike)}
     class:no-album={!showAlbum}
     class:has-count={count != null}
     role="button"
@@ -135,7 +135,7 @@
     <div class="dur">{duration(track.duration_ms)}</div>
     <div class="actions">
       {#if ondislike}
-        <button class="icon-btn" title={t("Mag ich nicht")} aria-label={t("{title}: Mag ich nicht", { title: track.title })} onclick={(e) => (e.stopPropagation(), ondislike())}>
+        <button class="icon-btn dislike" title={t("Mag ich nicht")} aria-label={t("{title}: Mag ich nicht", { title: track.title })} onclick={(e) => (e.stopPropagation(), ondislike())}>
           <Icon name="dislike" size={17} />
         </button>
       {/if}
@@ -145,7 +145,7 @@
           <Icon name="close" size={16} />
         </button>
       {/if}
-      <button class="icon-btn" title={t("Mehr")} aria-label={t("Mehr zu {title}", { title: track.title })} onclick={(e) => openTrackMenu(e, [track])}>
+      <button class="icon-btn" title={t("Mehr")} aria-label={t("Mehr zu {title}", { title: track.title })} onclick={(e) => openTrackMenu(e, [track], "", ondislike)}>
         <Icon name="more" size={18} />
       </button>
     </div>
@@ -372,7 +372,8 @@
     .actions > :global(*) {
       opacity: 1;
     }
-    .actions :global(.heart:not(.on)) {
+    .actions :global(.heart:not(.on)),
+    .actions .dislike {
       display: none;
     }
     .row.no-album .num {

@@ -56,8 +56,8 @@
 
   {#if played.length}
     <div class="section-head"><h2>{t("Zuletzt gehört")}</h2></div>
-    <div class="grid">
-      {#each played as item (`${item.type}:${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
+    <div class="grid played">
+      {#each played as item (`${item.type}:${item.radio_of}:${item.id}`)}<RecentCard {item} compact />{/each}
     </div>
   {/if}
 
@@ -197,7 +197,8 @@
       gap: 14px;
       padding: 0 16px 20px;
     }
-    .lists {
+    .lists,
+    .grid.played {
       grid-template-columns: 1fr 1fr;
       padding: 0 16px 20px;
       gap: 8px;

@@ -193,6 +193,12 @@
     <button role="menuitem" onclick={() => (sub = true)}>
       <Icon name="plus" {size} /> {t("Zu Playlist hinzufügen")} <span class="chev">›</span>
     </button>
+    {#if m.dislike}
+      {@const dislike = m.dislike}
+      <button role="menuitem" onclick={() => { dislike(); done(); }}>
+        <Icon name="dislike" {size} /> {t("Mag ich nicht")}
+      </button>
+    {/if}
     {#if single}
       <button role="menuitem" onclick={() => go(radioPath("track", single.id))}>
         <Icon name="radio" {size} /> {t("Zum Radio")}

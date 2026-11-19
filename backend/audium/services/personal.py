@@ -204,18 +204,17 @@ def recent_albums(conn: Connection, user_id: int, limit: int) -> list[dict]:
 
 def recently_played(conn: Connection, user: User, limit: int) -> list[dict]:
     """What was played recently, one entry per source, newest first: the album, playlist or radio
-    the tracks were played from. Tracks played from elsewhere (search, an artist) count for their album;
-    sources that are gone or no longer visible are skipped."""
+    the tracks were played from. Tracks played on their own (search, an artist, shuffled favorite
+    albums) have no source and are left out; sources that are gone or no longer visible are skipped."""
     rows = conn.execute(
-        select(play_history.c.context, tracks.c.album_id)
-        .join(tracks, tracks.c.id == play_history.c.track_id)
-        .where(play_history.c.user_id == user.id)
+        select(play_history.c.context)
+        .where(play_history.c.user_id == user.id, play_history.c.context.is_not(None))
         .order_by(play_history.c.played_at.desc(), play_history.c.id.desc())
         .limit(RECENT_SCAN)
     )
     out, seen = [], set()
     for r in rows:
-        key = r.context or f"album:{r.album_id}"
+        key = r.context
         if key in seen:
             continue
         seen.add(key)

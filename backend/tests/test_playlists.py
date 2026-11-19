@@ -515,7 +515,6 @@ def test_recently_played_shows_sources(world):
         assert r.status_code == 200, r.text
 
     album_id = alice.get(f"/api/v1/tracks/{t[0]}").json()["album_id"]
-    play(alice, t[0])  # no source (e.g. search): counts for the album
     play(alice, t[1], f"radio:track:{t[0]}")
     play(alice, t[2], f"radio:track:{t[0]}")
     play(alice, t[0], f"playlist:{pl}")
@@ -530,6 +529,10 @@ def test_recently_played_shows_sources(world):
     ]
     assert recent[2]["name"] == "Road Trip" and recent[3]["name"] == "Song 1"
     assert alice.post("/api/v1/history", json={"track_id": t[0], "played_ms": 1, "context": "x:1"}).status_code == 422
+
+    # a track played on its own (search, shuffled favorite albums) has no source and is left out
+    play(bob, t[0])
+    assert bob.get("/api/v1/history/recent").json() == []
 
     # a playlist bob can no longer see disappears from his list
     play(bob, t[0], f"playlist:{pl}")

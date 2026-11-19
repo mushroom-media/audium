@@ -1,6 +1,7 @@
 <script lang="ts">
-  // A "recently played" entry: an album, a playlist or a radio station. Playlists and radios
-  // carry a large centred badge on the cover so they stand apart from albums at a glance.
+  // A "recently played" entry: an album, a playlist or a radio station. Playlists carry a large
+  // centred badge on the cover and radios a cover of their own (RadioCover), so both stand apart
+  // from albums at a glance.
   import { get, type AlbumDetail, type AutoItem, type Page, type PlaylistItem, type RecentItem, type Track } from "../api";
   import { player } from "../player.svelte";
   import { radioPath, startGroupRadio, startRadio } from "../radio";
@@ -8,8 +9,10 @@
   import CardPlay from "./CardPlay.svelte";
   import Icon from "./Icon.svelte";
   import PlaylistCover from "./PlaylistCover.svelte";
+  import RadioCover from "./RadioCover.svelte";
 
-  let { item }: { item: RecentItem } = $props();
+  /** `compact`: on phones a small row like the playlist links instead of a card. */
+  let { item, compact = false }: { item: RecentItem; compact?: boolean } = $props();
 
   const path = $derived.by(() => {
     const { type, id, radio_of } = item;
@@ -19,7 +22,7 @@
     if (type === "radio" && id !== null) return radioPath(radio_of ?? "album", id);
     return `/albums/${id}`;
   });
-  const badge = $derived(item.type === "radio" ? "radio" : item.type === "album" ? null : "list");
+  const badge = $derived(item.type === "radio" || item.type === "album" ? null : "list");
 
   // What this entry plays under: a station's ref also says what it is the radio of (see radio.ts).
   const ref = $derived.by(() => {
@@ -52,20 +55,24 @@
   }
 </script>
 
-<a class="card" href={href(path)} title={item.name}>
+<a class="card" class:compact href={href(path)} title={item.name}>
   <div class="art">
     {#if item.type === "favorites"}
       <div class="fav" aria-hidden="true"><Icon name="heart" size={48} filled /></div>
+    {:else if item.type === "radio"}
+      <RadioCover hash={item.cover} name={item.name} />
     {:else}
       <PlaylistCover playlist={item} alt="" />
     {/if}
     {#if badge}
-      <span class="badge" title={item.type === "radio" ? "Radio" : "Playlist"}><Icon name={badge} size={30} /></span>
+      <span class="badge" title="Playlist"><Icon name={badge} size={30} /></span>
     {/if}
-    <CardPlay {ref} name={item.name} start={play} />
+    <span class="play"><CardPlay {ref} name={item.name} start={play} /></span>
   </div>
-  <div class="title">{item.name}</div>
-  <div class="sub">{item.subtitle ?? ""}</div>
+  <div class="text">
+    <div class="title">{item.name}</div>
+    <div class="sub">{item.subtitle ?? ""}</div>
+  </div>
 </a>
 
 <style>
@@ -119,5 +126,51 @@
     backdrop-filter: blur(4px);
     box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
     pointer-events: none;
+  }
+  .play {
+    display: contents;
+  }
+
+  /* Phones: a row like the playlist links on the start page. */
+  @media (max-width: 560px) {
+    .compact {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px;
+      border-radius: var(--radius-sm);
+      background: var(--surface-1);
+    }
+    .compact:active {
+      background: var(--surface-2);
+    }
+    .compact .art {
+      width: 48px;
+      flex: none;
+    }
+    .compact .fav :global(svg) {
+      width: 22px;
+      height: 22px;
+    }
+    .compact .badge {
+      width: 24px;
+      min-width: 0;
+      backdrop-filter: none;
+      box-shadow: none;
+    }
+    .compact .badge :global(svg) {
+      width: 14px;
+      height: 14px;
+    }
+    .compact .play {
+      display: none;
+    }
+    .compact .text {
+      min-width: 0;
+    }
+    .compact .title {
+      margin-top: 0;
+      font-size: inherit;
+    }
   }
 </style>
