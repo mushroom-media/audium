@@ -178,7 +178,9 @@ def me(user: User = Depends(current_user)):
 @router.patch("/auth/me", response_model=UserOut)
 def update_me(body: MeUpdate, user: User = Depends(current_user), db: Database = Depends(get_db)):
     with db.write() as conn:
-        updated = user_service.update_user(conn, user, user.id, display_name=body.display_name)
+        updated = user_service.update_own_profile(
+            conn, user, username=body.username, display_name=body.display_name, avatar_color=body.avatar_color
+        )
     return _user_out(updated)
 
 

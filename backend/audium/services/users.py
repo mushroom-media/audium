@@ -13,6 +13,8 @@ from audium.util import now_ms
 
 ROLES = ("admin", "user")
 STATUSES = ("active", "disabled")
+# Background of the round initial that stands for a user; the web UI maps each name to its colors.
+AVATAR_COLORS = ("red", "orange", "amber", "green", "teal", "blue", "indigo", "violet", "pink", "slate")
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 
 
@@ -25,6 +27,7 @@ class User:
     status: str
     created_at: int
     last_login_at: int | None
+    avatar_color: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -39,6 +42,7 @@ _USER_COLS = (
     users.c.status,
     users.c.created_at,
     users.c.last_login_at,
+    users.c.avatar_color,
 )
 
 
@@ -51,6 +55,7 @@ def user_from_row(row) -> User:
         status=row.status,
         created_at=row.created_at,
         last_login_at=row.last_login_at,
+        avatar_color=row.avatar_color,
     )
 
 
@@ -170,6 +175,36 @@ def update_user(
         if values.get("status") == "disabled":
             conn.execute(api_tokens.delete().where(api_tokens.c.user_id == user_id))
     return get_user(conn, user_id)
+
+
+def update_own_profile(
+    conn: Connection,
+    user: User,
+    *,
+    username: str | None = None,
+    display_name: str | None = None,
+    avatar_color: str | None = None,
+) -> User:
+    """A user edits their own account. Sessions and tokens stay valid: they hang on the id, not the name.
+    avatar_color "" goes back to the accent color."""
+    values: dict = {}
+    if username is not None:
+        u = validate_username(username)
+        if u != user.username:
+            if find_by_username(conn, u) is not None:
+                raise Conflict("username already taken")
+            values["username"] = u
+    if display_name is not None:
+        values["display_name"] = display_name.strip()[:64] or values.get("username", user.username)
+    if avatar_color is not None:
+        if avatar_color and avatar_color not in AVATAR_COLORS:
+            raise BadRequest(f"avatar_color must be one of {', '.join(AVATAR_COLORS)}")
+        values["avatar_color"] = avatar_color or None
+    if not values:
+        return user
+    values["updated_at"] = now_ms()
+    conn.execute(users.update().where(users.c.id == user.id).values(**values))
+    return get_user(conn, user.id)
 
 
 # --- Invites -------------------------------------------------------------------------------

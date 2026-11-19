@@ -15,6 +15,7 @@
   import { disconnectEvents, loadMine, mine, newPlaylistFlow } from "./lib/mine.svelte";
   import { loadRecentSearches, rememberSearch } from "./lib/recentSearches.svelte";
   import { session, startSession } from "./lib/session.svelte";
+  import { avatarInitial, avatarStyle } from "./lib/avatar";
   import { ui } from "./lib/ui.svelte";
   import { headerTitle } from "./lib/headerTitle.svelte";
   import RuleEditor from "./lib/components/RuleEditor.svelte";
@@ -247,7 +248,7 @@
   const lift = $derived(phone && overlay && !backTo ? Math.min(pageScroll, topHeight) : 0);
   // Pages without a watched heading turn solid as soon as anything scrolls under the bar.
   const solid = $derived(headerTitle.text ? headerTitle.shown : pageScroll > 4);
-  const initial = $derived((session.user?.display_name ?? "?").trim().charAt(0).toUpperCase());
+  const initial = $derived(avatarInitial(session.user?.display_name));
 
   const active = (name: string) =>
     router.route.name === name ||
@@ -347,7 +348,7 @@
       <p class="top-title" class:shown={headerTitle.shown} aria-hidden="true">{headerTitle.text}</p>
       <div class="top-end">
         {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label={t("Einstellungen")} title={t("Einstellungen")}><Icon name="settings" /></a>{/if}
-        <a class="me" class:active={active("profile")} href={href("/profile")} aria-label={t("Profil")} title={session.user.display_name}>{initial}</a>
+        <a class="me" class:active={active("profile")} href={href("/profile")} aria-label={t("Profil")} title={session.user.display_name} style={avatarStyle(session.user.avatar_color)}>{initial}</a>
       </div>
     </header>
 

@@ -2,6 +2,7 @@
   import { ApiError, del, get, patch, post, serverUrl, type User } from "../../lib/api";
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
+  import { avatarStyle } from "../../lib/avatar";
   import { session } from "../../lib/session.svelte";
   import { promptText, toast } from "../../lib/ui.svelte";
   import { fmtDate } from "./common";
@@ -83,7 +84,7 @@
   <div class="set-card">
     {#each users as u (u.id)}
       <div class="set-row">
-        <span class="avatar" class:off={u.status === "disabled"} aria-hidden="true">{initial(u)}</span>
+        <span class="avatar" class:off={u.status === "disabled"} style={avatarStyle(u.avatar_color)} aria-hidden="true">{initial(u)}</span>
         <div class="set-label">
           <strong>
             {u.display_name} <span class="handle">@{u.username}</span>

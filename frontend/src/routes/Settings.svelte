@@ -40,7 +40,7 @@
     { id: "appearance", title: msg("Darstellung"), short: msg("Sprache, Farbschema, Hintergrund"), icon: "palette", component: Appearance },
     { id: "shortcuts", title: msg("Tastenkürzel"), short: msg("Steuerung per Tastatur"), icon: "keyboard", component: Shortcuts },
     { id: "devices", title: msg("Geräte"), short: msg("Name dieses Geräts"), icon: "devices", component: Devices },
-    { id: "account", title: msg("Konto"), short: msg("Profil, Abmelden"), icon: "user", component: Account },
+    { id: "account", title: msg("Konto"), short: msg("Profil, Passwort, Abmelden"), icon: "user", component: Account },
     { id: "apps", title: msg("Apps verbinden"), short: msg("Symfonium, Amperfy & Co."), icon: "phone", component: Apps },
     { id: "library", title: msg("Musikordner"), short: msg("Ordner, Scan, Statistik"), icon: "folder", admin: true, component: Library },
     { id: "analysis", title: msg("Audioanalyse"), short: msg("Fortschritt, Klangerkennung"), icon: "wave", admin: true, component: Analysis },

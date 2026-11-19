@@ -39,6 +39,7 @@ class UserOut(BaseModel):
     status: Literal["active", "disabled"]
     created_at: int
     last_login_at: int | None
+    avatar_color: str | None = Field(None, description="Background of the avatar, null = the accent color")
 
 
 class LoginIn(BaseModel):
@@ -81,7 +82,9 @@ class RegisterIn(BaseModel):
 
 
 class MeUpdate(BaseModel):
-    display_name: str = Field(max_length=64)
+    display_name: str | None = Field(None, max_length=64)
+    username: str | None = Field(None, max_length=64, description="Also the login name in apps")
+    avatar_color: str | None = Field(None, max_length=16, description='A preset color, "" for the accent color')
 
 
 class PasswordChange(BaseModel):

@@ -268,6 +268,8 @@ export interface User {
   display_name: string;
   role: "admin" | "user";
   status: "active" | "disabled";
+  /** A name from AVATAR_COLORS (lib/avatar.ts); null: the accent color. */
+  avatar_color?: string | null;
 }
 
 export type Theme = "system" | "dark" | "light";

@@ -207,6 +207,7 @@ users = Table(
     Column("id", Integer, primary_key=True),
     Column("username", Text, nullable=False, unique=True),  # stored lower-case
     Column("display_name", Text, nullable=False),
+    Column("avatar_color", Text),  # one of users.AVATAR_COLORS, NULL = the accent color
     Column("password_hash", Text),  # NULL for future external (OIDC) accounts
     Column("role", Text, nullable=False),  # admin | user
     Column("status", Text, nullable=False),  # active | disabled

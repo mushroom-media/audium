@@ -190,6 +190,28 @@ def test_change_password_logs_out_other_sessions(make_client, admin):
     login(b, "admin", "new-password-1")
 
 
+def test_edit_own_profile(make_client, admin, db):
+    create_user(db, "bob", USER_PW)
+    a = make_client()
+    login(a, "admin", ADMIN_PW)
+
+    r = a.patch("/api/v1/auth/me", json={"display_name": "  Die Chefin ", "avatar_color": "teal"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["display_name"], r.json()["avatar_color"]) == ("Die Chefin", "teal")
+    assert a.patch("/api/v1/auth/me", json={"avatar_color": "plaid"}).status_code == 400
+    assert a.patch("/api/v1/auth/me", json={"avatar_color": ""}).json()["avatar_color"] is None
+
+    # A new username: taken or invalid ones are refused, the session stays, the old name no longer logs in.
+    assert a.patch("/api/v1/auth/me", json={"username": "Bob"}).status_code == 409
+    assert a.patch("/api/v1/auth/me", json={"username": "x"}).status_code == 400
+    r = a.patch("/api/v1/auth/me", json={"username": "Chefin"})
+    assert r.json()["username"] == "chefin"
+    assert a.get("/api/v1/auth/me").json()["display_name"] == "Die Chefin"
+    other = make_client()
+    assert other.post("/api/v1/auth/login", json={"username": "admin", "password": ADMIN_PW}).status_code == 401
+    login(other, "chefin", ADMIN_PW)
+
+
 def test_sessions_list_and_revoke(make_client, admin):
     a, b = make_client(), make_client()
     login(a, "admin", ADMIN_PW)

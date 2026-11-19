@@ -12,6 +12,7 @@
   import { keepScroll } from "../lib/keepScroll";
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
+  import { avatarInitial, avatarStyle } from "../lib/avatar";
   import { locale, msg, t } from "../lib/i18n.svelte";
 
   const PERIODS = [
@@ -102,7 +103,7 @@
 
   const own = $derived(mine.playlists.filter((p) => p.role === "owner"));
   const shared = $derived(mine.playlists.filter((p) => p.role !== "owner"));
-  const initial = $derived((session.user?.display_name ?? "?").trim().charAt(0).toUpperCase());
+  const initial = $derived(avatarInitial(session.user?.display_name));
 
   async function newPlaylist() {
     const pl = await newPlaylistFlow();
@@ -122,7 +123,7 @@
 
 <div class="page" use:keepScroll>
   <header class="profile">
-    <span class="avatar" aria-hidden="true">{initial}</span>
+    <span class="avatar" style={avatarStyle(session.user?.avatar_color)} aria-hidden="true">{initial}</span>
     <div>
       <p class="kind">{t("Profil")}</p>
       <h1>{session.user?.display_name}</h1>
