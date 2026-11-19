@@ -24,9 +24,11 @@
   const ROW_H = 52; // .row-h
 
   let { id }: { id: string } = $props();
-  const kept = untrack(() => recallEntry<{ artist: Artist; albums: Album[] }>(`artist:${id}`));
+  const kept = untrack(() => recallEntry<{ artist: Artist; albums: Album[]; appears: Album[] }>(`artist:${id}`));
   let artist = $state<Artist | null>(kept?.artist ?? null);
   let albums = $state<Album[]>(kept?.albums ?? []);
+  // Albums of other artists with tracks by this one: features, compilations
+  let appears = $state<Album[]>(kept?.appears ?? []);
   // Track lists of the own albums, fetched in the track view as they come near the screen
   let details = $state<Record<string, AlbumDetail>>(untrack(() => recallEntry(`artist:${id}:details`)) ?? {});
   let error = $state<string | null>(null);
@@ -56,11 +58,13 @@
     Promise.all([
       get<Artist>(`/artists/${id}`, undefined, ctrl.signal),
       get<Page<Album>>("/albums", { artist_id: id, sort: "year", limit: 500 }, ctrl.signal),
+      get<Page<Album>>("/albums", { appears_on: id, sort: "year", order: "desc", limit: 200 }, ctrl.signal),
     ])
-      .then(([a, own]) => {
+      .then(([a, own, other]) => {
         artist = a;
         albums = own.items;
-        rememberEntry(`artist:${id}`, { artist: a, albums: own.items });
+        appears = other.items;
+        rememberEntry(`artist:${id}`, { artist: a, albums: own.items, appears: other.items });
       })
       .catch((e) => e.name !== "AbortError" && (error = e.message));
     return () => ctrl.abort();
@@ -161,10 +165,21 @@
   {/if}
 {/snippet}
 
+{#snippet appearsOn()}
+  {#if appears.length}
+    <section class="appears">
+      <h2 class="section">{t("Mitgewirkt auf")}</h2>
+      <div class="shelf">
+        {#each appears as album (album.id)}<AlbumCard {album} showYear />{/each}
+      </div>
+    </section>
+  {/if}
+{/snippet}
+
 {#if artist && !error && albums.length && view === "covers"}
   <!-- An artist can have hundreds of albums (Various Artists): only those in view are drawn. -->
   <div class="fill">
-    <VirtualGrid count={albums.length} header={head} keep="artist:{id}">
+    <VirtualGrid count={albums.length} header={head} footer={appearsOn} keep="artist:{id}">
       {#snippet cell(i)}<AlbumCard album={albums[i]} showYear />{/snippet}
     </VirtualGrid>
   </div>
@@ -207,6 +222,7 @@
           {/each}
         </div>
       {/if}
+      {@render appearsOn()}
     {/if}
   </div>
 {/if}
@@ -304,7 +320,31 @@
   .row-h {
     height: 52px;
   }
+  .appears {
+    padding-bottom: 32px;
+  }
+  .appears .section {
+    margin: 28px 24px 14px;
+  }
+  /* One row that scrolls sideways, so a guest on many albums doesn't push the page long. */
+  .shelf {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 168px;
+    gap: 20px;
+    padding: 0 24px 6px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
   @media (max-width: 560px) {
+    .appears .section {
+      margin: 24px 16px 12px;
+    }
+    .shelf {
+      grid-auto-columns: 140px;
+      gap: 14px;
+      padding: 0 16px 6px;
+    }
     .hero {
       flex-direction: column;
       align-items: flex-start;

@@ -13,6 +13,7 @@
     cell,
     onrange,
     header,
+    footer,
     letters,
     keep,
   }: {
@@ -23,6 +24,7 @@
     cell: Snippet<[number]>;
     onrange?: (start: number, end: number) => void;
     header?: Snippet;
+    footer?: Snippet;
     /** A-Z index by item position; mapped to grid rows here. */
     letters?: Letter[] | null;
     /** See VirtualList; the position is kept per column count. */
@@ -46,6 +48,7 @@
       {rowHeight}
       overscan={2}
       {header}
+      {footer}
       keep={keep && `${keep}:${cols}`}
       label={t("Raster")}
       letters={rowLetters}

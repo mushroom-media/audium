@@ -16,6 +16,7 @@
     row,
     onrange,
     header,
+    footer,
     label = "Liste",
     letters,
     keep,
@@ -26,6 +27,8 @@
     row: Snippet<[number]>;
     onrange?: (start: number, end: number) => void;
     header?: Snippet;
+    /** Below the last row, scrolling with the list. */
+    footer?: Snippet;
     label?: string;
     /** A-Z index: the row each initial starts at (alphabetically sorted lists only). */
     letters?: Letter[] | null;
@@ -87,6 +90,7 @@
         </div>
       {/each}
     </div>
+    {#if footer}{@render footer()}{/if}
   </div>
   {#if letters && letters.length > 1 && count >= MIN_INDEXED_ROWS}
     <LetterIndex {letters} current={Math.floor(listTop / rowHeight)} onjump={scrollToIndex} />

@@ -2,6 +2,7 @@
   // "Info" from the track menu: tags, file, genres, the audio analysis and the own plays.
   import { get, type TrackInfo } from "../api";
   import { ago, duration } from "../format";
+  import ArtistLinks from "./ArtistLinks.svelte";
   import Modal from "./Modal.svelte";
   import { locale, msg, num, t } from "../i18n.svelte";
 
@@ -66,7 +67,7 @@
     {@const a = info.analysis}
     <dl>
       <dt>{t("Künstler|einzeln")}</dt>
-      <dd>{tr.artist}</dd>
+      <dd><ArtistLinks track={tr} onfollow={onclose} /></dd>
       <dt>{t("Album")}</dt>
       <dd>{tr.album}{#if tr.track_no}&ensp;·&ensp;{t("Titel {n}", { n: tr.track_no })}{#if tr.disc_no && tr.disc_no > 1}, {t("CD {n}", { n: tr.disc_no })}{/if}{/if}</dd>
       {#if tr.date || tr.year}<dt>{t("Erschienen")}</dt><dd>{tr.date ?? tr.year}</dd>{/if}

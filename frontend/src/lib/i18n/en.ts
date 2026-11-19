@@ -312,6 +312,7 @@ export const en: Record<string, string> = {
   "Cover mit Titeln": "Covers with tracks",
   "Alle abspielen": "Play all",
   "Alben": "Albums",
+  "Mitgewirkt auf": "Appears on",
   "Ansicht der Alben": "Album view",
   "Zu viele Versuche. Bitte in {s} Sekunden erneut versuchen.": "Too many attempts. Please try again in {s} seconds.",
   "Benutzername oder Passwort falsch.": "Wrong username or password.",
