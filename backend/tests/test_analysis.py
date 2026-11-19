@@ -1261,8 +1261,15 @@ def test_similar_artists_from_listenbrainz(library, db, users):
         got = similar_artists.similar_to(conn, [ids["Alpha"]])
     assert [(a, round(s, 2)) for a, s, _ in got] == [(ids["Beta"], 1.0), (ids["Gamma"], 0.5)]
 
+    # "Ask again" makes every artist due, and keeps the old answers until the new ones are in.
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    assert bob_c.post("/api/v1/admin/similar-artists/refresh").status_code == 403
+    assert admin_c.post("/api/v1/admin/similar-artists/refresh").status_code == 202
+    with db.read() as conn:
+        assert similar_artists.count_pending(conn) == 4
+        assert len(similar_artists.similar_to(conn, [ids["Alpha"]])) == 2
+
     # Only this source on: Alpha's radio is Alpha plus their fans' artists, and says so.
-    admin_c = users["admin"][1]
     admin_c.patch("/api/v1/admin/radio/sources", json={"sound": {"on": False}, "features": {"on": False}})
     admin_c.patch("/api/v1/admin/radio/sources", json={"genre": {"on": False}})
     station = admin_c.get(f"/api/v1/artists/{ids['Alpha']}/radio", params={"limit": 9}).json()
@@ -1272,6 +1279,9 @@ def test_similar_artists_from_listenbrainz(library, db, users):
     # Nobody has no similar artists: genre & year stand in rather than an empty station.
     station = admin_c.get(f"/api/v1/artists/{ids['Nobody']}/radio", params={"limit": 6}).json()
     assert all(t["reason"] == "Vom Künstler" or t["reason"].startswith("Ersatz") for t in station)
+
+    admin_c.patch("/api/v1/admin/radio/sources", json={"artists": {"on": False}, "genre": {"on": True}})
+    assert admin_c.post("/api/v1/admin/similar-artists/refresh").status_code == 409
 
 
 def test_mbid_of_tag_values():

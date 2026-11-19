@@ -19,7 +19,7 @@ from audium.db.engine import Database
 from audium.db.pagination import fetch_ordered
 from audium.db.schema import artist_similar, genres, library_roots, styles, track_artists, track_features, tracks
 from audium.db.state import set_state
-from audium.errors import NotFound
+from audium.errors import Conflict, NotFound
 from audium.i18n import tr, user_language
 from audium.services import auto as auto_service
 from audium.services import discover as discover_service
@@ -515,6 +515,20 @@ def admin_analysis(
 def admin_analysis_start(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
     with db.write() as conn:
         enqueue_analysis(conn)
+    return Ok()
+
+
+@admin.post(
+    "/similar-artists/refresh",
+    response_model=Ok,
+    status_code=202,
+    summary="Ask ListenBrainz again for every artist (only while the source 'artists' is on)",
+)
+def admin_similar_artists_refresh(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+    with db.write() as conn:
+        if not similar_artists.enabled(conn):
+            raise Conflict("similar artists from ListenBrainz are switched off")
+        similar_artists.refresh_all(conn)
     return Ok()
 
 

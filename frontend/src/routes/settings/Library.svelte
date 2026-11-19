@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError, del, get, patch, post } from "../../lib/api";
+  import { ApiError, del, get, patch, post, type AnalysisStatus } from "../../lib/api";
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
   import { plural } from "../../lib/format";
@@ -35,10 +35,15 @@
     missing_tracks: number;
   }
 
-  let roots = $state<Root[]>([]);
+  // null until the first answer: the page shows placeholders of the same height instead of jumping.
+  let roots = $state<Root[] | null>(null);
   let excludes = $state<Record<number, Exclude[]>>({});
   let stats = $state<Stats | null>(null);
   let job = $state<Job | null>(null);
+  let jobLoaded = $state(false);
+  // For the further options: pending analysis, and whether similar artists are on at all.
+  let analysis = $state<AnalysisStatus | null>(null);
+  let similarOn = $state(false);
   let browsing = $state<Browse | null>(null);
   let reload = $state(0);
 
@@ -59,10 +64,10 @@
   $effect(() => {
     void reload;
     get<Root[]>("/admin/roots").then(async (r) => {
-      roots = r;
-      const ex: Record<number, Exclude[]> = {};
-      for (const root of r) if (root.exclude_count) ex[root.id] = await get<Exclude[]>(`/admin/roots/${root.id}/excludes`);
-      excludes = ex;
+      const withEx = r.filter((root) => root.exclude_count);
+      const lists = await Promise.all(withEx.map((root) => get<Exclude[]>(`/admin/roots/${root.id}/excludes`)));
+      excludes = Object.fromEntries(withEx.map((root, i) => [root.id, lists[i]]));
+      roots = r; // together with the excludes, so the rows don't grow afterwards
     });
   });
 
@@ -74,6 +79,7 @@
       try {
         const [j, s] = await Promise.all([get<{ items: Job[] }>("/admin/jobs", { queue: "scan", limit: 1 }), get<Stats>("/admin/stats")]);
         job = j.items[0] ?? null;
+        jobLoaded = true;
         stats = s;
         if (wasRunning && !running) reload++; // track counts per folder changed
         wasRunning = running;
@@ -83,6 +89,12 @@
     };
     tick();
     return () => clearTimeout(timer);
+  });
+
+  $effect(() => {
+    void reload;
+    get<AnalysisStatus>("/admin/analysis").then((a) => (analysis = a), () => {});
+    get<{ sources: Record<string, { on: boolean }> }>("/admin/radio/sources").then((r) => (similarOn = r.sources.artists?.on ?? false), () => {});
   });
 
   async function scan(body: object, done: string) {
@@ -105,14 +117,15 @@
   }
 </script>
 
-{#if stats}
-  <div class="tiles">
-    <div class="tile"><strong>{stats.tracks.toLocaleString(locale())}</strong><span>{t("Titel")}</span></div>
-    <div class="tile"><strong>{stats.albums.toLocaleString(locale())}</strong><span>{t("Alben")}</span></div>
-    <div class="tile"><strong>{stats.artists.toLocaleString(locale())}</strong><span>{t("Künstler")}</span></div>
-  </div>
-  {#if stats.missing_tracks}<p class="set-note">{tn(stats.missing_tracks, "{n} Titel fehlt gerade (Ordner nicht erreichbar?). Er wird nach einigen Tagen entfernt.", "{n} Titel fehlen gerade (Ordner nicht erreichbar?). Sie werden nach einigen Tagen entfernt.")}</p>{/if}
-{/if}
+<div class="tiles">
+  {#each [[stats?.tracks, t("Titel")], [stats?.albums, t("Alben")], [stats?.artists, t("Künstler")]] as [n, label] (label)}
+    <div class="tile">
+      {#if n == null}<strong class="bar" aria-hidden="true"></strong>{:else}<strong>{n.toLocaleString(locale())}</strong>{/if}
+      <span>{label}</span>
+    </div>
+  {/each}
+</div>
+{#if stats?.missing_tracks}<p class="set-note">{tn(stats.missing_tracks, "{n} Titel fehlt gerade (Ordner nicht erreichbar?). Er wird nach einigen Tagen entfernt.", "{n} Titel fehlen gerade (Ordner nicht erreichbar?). Sie werden nach einigen Tagen entfernt.")}</p>{/if}
 
 <section class="set-group">
   <h2>{t("Scan")}</h2>
@@ -131,7 +144,8 @@
         <div class="set-label">
           <strong>{t("Bibliothek scannen")}</strong>
           <small>
-            {#if job?.status === "failed"}<span class="set-warn">{t("Letzter Scan fehlgeschlagen: {error}", { error: job.error ?? "" })}</span>
+            {#if !jobLoaded}<span class="bar line" aria-hidden="true"></span>
+            {:else if job?.status === "failed"}<span class="set-warn">{t("Letzter Scan fehlgeschlagen: {error}", { error: job.error ?? "" })}</span>
             {:else if job?.result}
               {t("Zuletzt {date}: {added} neu, {updated} geändert, {missing} fehlend, {errors} nicht lesbar", {
                 date: fmtDate(job.finished_at),
@@ -140,22 +154,63 @@
                 missing: job.result.missing ?? 0,
                 errors: job.result.errors ?? 0,
               })}
-            {:else}{t("Neue und geänderte Dateien einlesen.")}{/if}
+            {:else}{t("Noch kein Scan gelaufen.")}{/if}
           </small>
+          <small>{t("Liest neue und geänderte Dateien aller aktiven Ordner ein und erkennt gelöschte. Danach werden neue Titel analysiert und die Auto-Playlists aktualisiert.")}</small>
         </div>
         <div class="btns">
-          <button class="btn primary" onclick={() => scan({}, "Scan gestartet")}>{t("Jetzt scannen")}</button>
-          <button class="btn ghost" title={t("Liest auch die Tags unveränderter Dateien neu")} onclick={() => scan({ force: true }, t("Vollständiger Scan gestartet"))}>{t("Alles neu einlesen")}</button>
+          <button class="btn primary" disabled={!jobLoaded} onclick={() => scan({}, t("Scan gestartet"))}>{t("Jetzt scannen")}</button>
         </div>
       {/if}
     </div>
+    <details class="set-row more">
+      <summary><Icon name="chevron" size={14} /> {t("Weitere Optionen")}</summary>
+      <div class="set-row">
+        <div class="set-label">
+          <strong>{t("Alles neu einlesen")}</strong>
+          <small>{t("Liest Tags und Cover aller Dateien neu, auch unveränderter. Hilft, wenn audium etwas falsch übernommen hat. Dauert deutlich länger.")}</small>
+        </div>
+        <button class="btn small" disabled={!jobLoaded || running} onclick={() => scan({ force: true }, t("Vollständiger Scan gestartet"))}>{t("Alles neu einlesen")}</button>
+      </div>
+      {#if analysis && analysis.backend !== "none"}
+        <div class="set-row">
+          <div class="set-label">
+            <strong>{t("Audioanalyse")}</strong>
+            <small>
+              {analysis.pending ? t("{n} Titel ausstehend.", { n: analysis.pending.toLocaleString(locale()) }) : t("Alle Titel sind analysiert.")}
+              {t("Läuft sonst von selbst im Hintergrund.")}
+              <a href={href("/settings/analysis")}>{t("Einstellungen")}</a>
+            </small>
+          </div>
+          <button class="btn small" disabled={!analysis.pending} onclick={() => guard(() => post("/admin/analysis/start"), t("Analyse gestartet"))}>{t("Jetzt analysieren")}</button>
+        </div>
+      {/if}
+      {#if similarOn}
+        <div class="set-row">
+          <div class="set-label">
+            <strong>{t("Ähnliche Künstler")}</strong>
+            <small>{t("Fragt ListenBrainz für alle Künstler neu ab, etwa einen pro Sekunde. Sonst geschieht das alle 90 Tage von selbst. Bisherige Ergebnisse bleiben bis dahin erhalten.")}</small>
+          </div>
+          <button class="btn small" onclick={() => guard(() => post("/admin/similar-artists/refresh"), t("Ähnliche Künstler werden neu abgefragt"))}>{t("Neu abfragen")}</button>
+        </div>
+      {/if}
+      <div class="set-row">
+        <small class="set-note hint">{t("Einen einzelnen Ordner scannst du unten in der Ordnerliste. Musikdateien werden nie verändert.")}</small>
+      </div>
+    </details>
   </div>
 </section>
 
 <section class="set-group">
   <h2>{t("Ordner")}</h2>
   <div class="set-card">
-    {#each roots as r (r.id)}
+    {#if !roots}
+      <div class="set-row root" aria-hidden="true">
+        <span class="set-dot"></span>
+        <div class="set-label"><strong class="bar path"></strong><small class="bar line"></small></div>
+      </div>
+    {/if}
+    {#each roots ?? [] as r (r.id)}
       <div class="set-row root">
         <span class="set-dot {!r.enabled ? '' : r.status === 'online' ? 'ok' : r.status === 'offline' ? 'bad' : ''}" title={r.status}></span>
         <div class="set-label">
@@ -176,12 +231,12 @@
         </div>
         <div class="btns">
           <button class="btn small ghost" onclick={() => addExclude(r)}>{t("Unterordner ausschließen")}</button>
-          <button class="btn small ghost" onclick={() => scan({ root_ids: [r.id] }, "Scan gestartet")}>{t("Scannen")}</button>
+          <button class="btn small ghost" title={t("Nur diesen Ordner scannen")} onclick={() => scan({ root_ids: [r.id] }, t("Scan gestartet"))}>{t("Scannen")}</button>
           <label class="switch"><input type="checkbox" class="toggle" checked={r.enabled} onchange={(e) => guard(() => patch(`/admin/roots/${r.id}`, { enabled: e.currentTarget.checked }))} /> {t("aktiv")}</label>
         </div>
       </div>
     {:else}
-      <div class="set-row"><span class="set-label"><small>{t("Noch keine Bibliotheksordner.")}</small></span></div>
+      {#if roots}<div class="set-row"><span class="set-label"><small>{t("Noch keine Bibliotheksordner.")}</small></span></div>{/if}
     {/each}
     <div class="set-row">
       <button class="btn" onclick={() => browse()}><Icon name="plus" size={16} /> {t("Ordner hinzufügen")}</button>
@@ -244,6 +299,57 @@
   .tile span {
     color: var(--text-muted);
     font-size: 0.82rem;
+  }
+  /* Placeholders while loading, as tall as the text they stand for. */
+  .bar {
+    display: block;
+    border-radius: 4px;
+    background: var(--surface-2);
+  }
+  .tile strong.bar {
+    width: 3.5em;
+    height: 1.2em;
+    margin: 0.15em 0;
+  }
+  .bar.line {
+    width: min(22em, 90%);
+    height: 0.8em;
+    margin: 0.3em 0;
+  }
+  .bar.path {
+    width: min(14em, 70%);
+    height: 0.95em;
+    margin: 0.2em 0;
+  }
+  .more {
+    display: block;
+    min-height: 0;
+    padding: 0;
+  }
+  .more summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+  .more summary::-webkit-details-marker {
+    display: none;
+  }
+  .more summary :global(svg) {
+    transition: transform 0.15s;
+  }
+  .more[open] summary :global(svg) {
+    transform: rotate(90deg);
+  }
+  .more > .set-row {
+    border-top: 1px solid var(--line);
+  }
+  .hint {
+    margin: 0;
   }
   .scan .set-progress {
     margin-top: 10px;

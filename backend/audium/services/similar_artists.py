@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
-from sqlalchemy import Connection, delete, func, insert, or_, select
+from sqlalchemy import Connection, delete, func, insert, or_, select, update
 
 from audium import __version__
 from audium.analysis import sources
@@ -190,6 +190,12 @@ def run_batch(
 
 def enabled(conn: Connection) -> bool:
     return sources.load(conn)["artists"].on
+
+
+def refresh_all(conn: Connection) -> None:
+    """Ask for every artist again; the last good answers stay until the new ones are in."""
+    conn.execute(update(artist_similar_status).values(fetched_at=0))
+    enqueue(conn)
 
 
 def enqueue(conn: Connection, delay_ms: int = 0) -> int:
