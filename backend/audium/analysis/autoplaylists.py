@@ -81,12 +81,13 @@ BUILTIN_RULES: dict[str, tuple[str, str, dict, tuple[str, ...]]] = {
         ("bpm", "energy"),
     ),
     "chill": (
+        # Energy alone: it already counts notes and beat, and calm music often has no steady
+        # beat at all (no BPM), which a tempo condition would leave out.
         "Zum Entspannen", "Ruhig und langsam.",
         {"match": "all", "conditions": [
-            {"field": "energy", "op": "<=", "value": 0.45},
-            {"field": "bpm", "op": "<=", "value": 105},
+            {"field": "energy", "op": "<=", "value": 0.4},
         ]},
-        ("bpm", "energy"),
+        ("energy", "bpm"),
     ),
     "party": (
         "Party", "Tanzbar mit Druck.",

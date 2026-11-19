@@ -170,6 +170,7 @@ export const en: Record<string, string> = {
   "Umrandet: von der Audioanalyse erkannt, die anderen stehen in den Tags.": "Outlined: detected by the audio analysis, the others are in the tags.",
   "Keine.": "None.",
   "Erkannte Stilrichtungen": "Detected styles",
+  "Keine eindeutige Stilrichtung.": "No clear style.",
   "Audioanalyse": "Audio analysis",
   "Noch nicht analysiert.": "Not analyzed yet.",
   "Die Analyse ist für diesen Titel fehlgeschlagen.": "The analysis failed for this track.",

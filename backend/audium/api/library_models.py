@@ -206,7 +206,8 @@ class AnalysisInfo(BaseModel):
 class TrackInfo(BaseModel):
     track: TrackDetail
     genres: list[GenreInfo]
-    styles: list[StyleInfo] = Field(description="Detected styles, most likely first")
+    styles: list[StyleInfo] = Field(description="Detected styles the model is fairly sure of, most likely first")
+    styles_unclear: bool = Field(description="Styles were detected, but none clearly enough to show")
     analysis: AnalysisInfo | None
     plays: int = Field(description="How often the viewer played it")
     last_played: int | None

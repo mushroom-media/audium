@@ -130,6 +130,19 @@ def test_explain():
     assert explain.describe(f, ("energy", "key", "brightness"), "en") == "high energy · A minor · warm sound"
 
 
+def test_tempo_needs_a_steady_beat_and_fixes_double_time():
+    assert features._tempo(155.0, 0.2, 1.8) is None  # rubato piano: no beat to count
+    assert features._tempo(120.0, 3.7, 4.0) == 120.0
+    assert features._tempo(154.0, 2.0, 1.2) == 77.0  # far fewer notes than beats
+    assert features._tempo(174.0, 3.5, 6.0) == 174.0  # fast and busy stays fast
+
+
+def test_energy_is_not_just_loudness():
+    calm_but_loud = features._energy(rms_db=-10, onset_rate=1.8, flatness=0.0005, beat_confidence=0.2)
+    driving_but_quiet = features._energy(rms_db=-20, onset_rate=4.0, flatness=0.09, beat_confidence=3.7)
+    assert calm_but_loud < 0.35 < 0.65 < driving_but_quiet
+
+
 # --- analysis ------------------------------------------------------------------------------
 
 

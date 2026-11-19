@@ -21,7 +21,7 @@ from audium.logging import get_logger
 
 log = get_logger(__name__)
 
-ANALYZER_VERSION = 1
+ANALYZER_VERSION = 2  # 2: energy from more than loudness, no tempo without a steady beat
 # Audio fingerprints and styles (Discogs-EffNet). A track is re-analysed when this changes.
 EMBEDDING_MODEL = "discogs-effnet-bs64-1"
 # EffNet sees the middle of the analysed window only: ~2 s per minute of audio on a CPU, and a
@@ -140,33 +140,37 @@ def analyze(path: str, duration_ms: int, models_dir: Path | None = None) -> dict
     essentia.log.warningActive = False
     audio = decode(path, duration_ms)
 
-    bpm, _beats, _confidence, _estimates, _intervals = es.RhythmExtractor2013(method="multifeature")(audio)
+    bpm, _beats, beat_confidence, _estimates, _intervals = es.RhythmExtractor2013(method="multifeature")(audio)
     key, scale, _strength = es.KeyExtractor(profileType="edma")(audio)
     dynamic_complexity, loudness_db = es.DynamicComplexity()(audio)
     rms = float(es.RMS()(audio))
     danceability, _dfa = es.Danceability()(audio)
+    _onsets, onset_rate = es.OnsetRate()(audio)
 
-    # Spectral centroid, weighted by frame energy: silent frames (centroid 0) must not pull
-    # sparse music towards "dark".
+    # Spectral centroid and flatness, weighted by frame energy: silent frames (centroid 0) must
+    # not pull sparse music towards "dark".
     window = es.Windowing(type="hann")
     spectrum = es.Spectrum()
     centroid = es.Centroid(range=SAMPLE_RATE / 2)
-    values, weights = [], []
+    flatness = es.Flatness()
+    centroids, flats, weights = [], [], []
     for frame in es.FrameGenerator(audio, frameSize=2048, hopSize=4096):
         energy = float(np.dot(frame, frame))
         if energy > 1e-6:
-            values.append(centroid(spectrum(window(frame))))
+            spec = spectrum(window(frame))
+            centroids.append(centroid(spec))
+            flats.append(flatness(spec * spec + 1e-20))
             weights.append(energy)
-    centroid_hz = float(np.average(values, weights=weights)) if values else 0.0
+    centroid_hz = float(np.average(centroids, weights=weights)) if centroids else 0.0
+    flat = float(np.average(flats, weights=weights)) if flats else 0.0
 
     rms_db = 20 * math.log10(rms) if rms > 0 else -90.0
     result = {
-        "bpm": round(float(bpm), 1) if 30 <= bpm <= 260 else None,
+        "bpm": _tempo(float(bpm), float(beat_confidence), float(onset_rate)),
         "key": _KEY_ALIASES.get(key, key) if key in KEYS or key in _KEY_ALIASES else None,
         "mode": scale if scale in ("major", "minor") else None,
         "loudness": round(float(loudness_db), 2),
-        # -40 dBFS RMS (very quiet) .. -8 dBFS (brickwall-mastered)
-        "energy": round(_clip((rms_db + 40) / 32), 4),
+        "energy": round(_energy(rms_db, float(onset_rate), flat, float(beat_confidence)), 4),
         # Essentia's dynamic complexity is roughly 0 (constant) .. 10+ (classical)
         "dynamics": round(_clip(float(dynamic_complexity) / 10), 4),
         # Essentia's danceability is roughly 0 .. 3
@@ -183,6 +187,33 @@ def analyze(path: str, duration_ms: int, models_dir: Path | None = None) -> dict
         if effnet:
             result.update(_effnet(audio16, models_dir))
     return result
+
+
+# Below this RhythmExtractor confidence (0 .. ~5.3) there is no steady beat to count, e.g. rubato
+# piano or ambient: the number would be a guess, often at double speed.
+MIN_BEAT_CONFIDENCE = 1.0
+
+
+def _tempo(bpm: float, confidence: float, onset_rate: float) -> float | None:
+    """BPM, or None without a steady beat. A fast tempo with far fewer notes than beats is the
+    common double-time error and is halved."""
+    if confidence < MIN_BEAT_CONFIDENCE or not 30 <= bpm <= 260:
+        return None
+    if bpm > 140 and onset_rate * 60 < bpm / 2:
+        bpm /= 2
+    return round(bpm, 1)
+
+
+def _energy(rms_db: float, onset_rate: float, flatness: float, beat_confidence: float) -> float:
+    """How driving a track feels, 0..1. Loudness is only one part: a loudly mastered piano ballad
+    stays calm, a quietly mastered rock song stays energetic. The other parts are how many notes
+    and hits there are, how noisy the sound is (drums, distorted guitars; a piano or a voice is
+    tonal) and how strong the beat is."""
+    loud = _clip((rms_db + 40) / 32)  # -40 dBFS RMS (very quiet) .. -8 dBFS (brickwall-mastered)
+    density = _clip((onset_rate - 1) / 5)  # 1 onset/s (sparse) .. 6/s (dense)
+    noise = _clip((math.log10(max(flatness, 1e-6)) + 3) / 2.3) if flatness > 0 else 0.0  # 0.001 tonal .. 0.2 noisy
+    beat = _clip(beat_confidence / 4)
+    return 0.2 * loud + 0.3 * density + 0.25 * noise + 0.25 * beat
 
 
 def _moods(audio16, models: dict[str, Path]) -> dict:

@@ -97,6 +97,9 @@
           </li>
         {/each}
       </ul>
+    {:else if info.styles_unclear}
+      <p class="sub">{t("Erkannte Stilrichtungen")}</p>
+      <p class="muted">{t("Keine eindeutige Stilrichtung.")}</p>
     {/if}
 
     <h3>{t("Audioanalyse")}</h3>

@@ -165,6 +165,7 @@ export interface TrackInfo {
   };
   genres: { name: string; detected: boolean; weight: number }[];
   styles: { name: string; parent: string; prob: number }[];
+  styles_unclear: boolean;
   analysis: null | {
     status: "ok" | "failed";
     analyzed_at: number;
