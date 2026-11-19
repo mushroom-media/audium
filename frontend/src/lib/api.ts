@@ -443,7 +443,7 @@ export const del = <T>(path: string) => request<T>("DELETE", path);
 export interface RuleCondition {
   field: string;
   op: string;
-  value: string | number | [number, number];
+  value: string | number | [number, number] | string[];
 }
 
 export interface Rule {

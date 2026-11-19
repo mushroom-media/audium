@@ -88,6 +88,7 @@ EN: dict[str, str] = {
     "von {name}": "by {name}",
     # Discover (services/discover.py)
     "Künstler": "Artist",
+    "In Richtung von": "In the direction of",
     # rule fields (analysis/rules.py)
     "Genre": "Genre",
     "Stil (erkannt)": "Style (detected)",

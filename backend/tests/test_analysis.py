@@ -102,6 +102,8 @@ def test_genre_backfill_job(library, db, settings):
         {"conditions": [{"field": "bpm", "op": "between", "value": [1]}]},
         {"conditions": [{"field": "mode", "op": "is", "value": "lydian"}]},
         {"conditions": [{"field": "artist", "op": "is", "value": "  "}]},
+        {"conditions": [{"field": "genre", "op": "is", "value": ["", " "]}]},
+        {"conditions": [{"field": "artist", "op": "is", "value": ["a", "b"]}]},
         {"conditions": [{"field": "year", "op": ">", "value": 1990}], "limit": 0},
         {"conditions": [{"field": "year", "op": ">", "value": 1990}], "order": "loudest"},
         {"match": "some", "conditions": [{"field": "year", "op": ">", "value": 1990}]},
@@ -120,6 +122,8 @@ def test_rule_validation_normalizes():
         "limit": 200,
         "order": "random",
     }
+    r = rules.validate({"conditions": [{"field": "genre", "op": "is", "value": [" Rock", "Pop", "Rock", ""]}]})
+    assert r["conditions"] == [{"field": "genre", "op": "is", "value": ["Rock", "Pop"]}]
 
 
 def test_explain():
@@ -522,6 +526,62 @@ def test_rule_fields_cover_genre_and_text(analysed, db, users):
     assert count == min(expected, 1000)
     genre_list = bob_c.get("/api/v1/genres").json()
     assert genre_list[0]["name"] == top
+
+    # several genres in one condition: tracks with any of them
+    two = [g["name"] for g in genre_list[:2]]
+    rule = {"conditions": [{"field": "genre", "op": "is", "value": two}], "limit": 1000}
+    count = bob_c.post("/api/v1/rules/preview", json={"rule": rule}).json()["count"]
+    with db.read() as conn:
+        expected = conn.execute(
+            select(func.count(func.distinct(track_genres.c.track_id)))
+            .select_from(track_genres.join(genres, genres.c.id == track_genres.c.genre_id))
+            .where(genres.c.name.in_(two))
+        ).scalar_one()
+    assert count == min(expected, 1000)
+
+
+def _primary(db, artist_id: int) -> set[int]:
+    with db.read() as conn:
+        return set(conn.execute(select(tracks.c.id).where(tracks.c.artist_id == artist_id)).scalars())
+
+
+def test_rule_in_the_direction_of_an_artist(analysed, db, users):
+    bob_c = users["bob"][1]
+
+    def matching(name: str) -> set[int]:
+        rule = {"conditions": [{"field": "like_artist", "op": "is", "value": [name]}], "limit": 1000}
+        r = bob_c.post("/api/v1/rules/preview", json={"rule": rule}).json()
+        assert r["count"] < 1000
+        with db.read() as conn:
+            return set(conn.execute(rules.query(rules.validate(rule))).scalars())
+
+    def tracks_of(artist_id: int) -> set[int]:  # also as a guest
+        with db.read() as conn:
+            guest = select(track_artists.c.track_id).where(track_artists.c.artist_id == artist_id)
+            stmt = select(tracks.c.id).where((tracks.c.artist_id == artist_id) | tracks.c.id.in_(guest))
+            return set(conn.execute(stmt).scalars())
+
+    with db.read() as conn:
+        a, b = conn.execute(select(artists.c.id, artists.c.name).order_by(artists.c.id).limit(2)).all()
+        styled = conn.execute(
+            select(func.count())
+            .select_from(track_styles.join(tracks, tracks.c.id == track_styles.c.track_id))
+            .where(tracks.c.artist_id == a.id, track_styles.c.prob >= styles.MIN_STYLE_PROB)
+        ).scalar()
+    # No similar artists known: the artist's own tracks and tracks in their styles.
+    alone = matching(a.name.upper())
+    assert tracks_of(a.id) <= alone
+    assert (len(alone) > len(tracks_of(a.id))) == bool(styled)
+    # Primary-artist tracks of the similar one; guest appearances of it don't count.
+    b_own = _primary(db, b.id)
+    try:
+        with db.write() as conn:
+            conn.execute(artist_similar.insert().values(artist_id=a.id, similar_id=b.id, score=1.0))
+        # Known similar artists: their tracks instead of the styles.
+        assert matching(a.name) == tracks_of(a.id) | b_own
+    finally:
+        with db.write() as conn:
+            conn.execute(delete(artist_similar).where(artist_similar.c.artist_id == a.id))
 
 
 # --- similar & radio -----------------------------------------------------------------------

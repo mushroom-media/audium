@@ -1,4 +1,6 @@
 """Track rules: {"match": "all"|"any", "conditions": [{"field", "op", "value"}], "limit", "order"}.
+A genre or style condition may name several: {"field": "genre", "op": "is", "value": ["Rock", "Pop"]}
+matches tracks with any of them.
 
 Used by the built-in auto-playlists, by admin rule playlists and by users' smart playlists.
 Fields and operators are a whitelist; values are validated; the result is a SQLAlchemy query,
@@ -12,14 +14,27 @@ from sqlalchemy import Select, and_, exists, func, not_, or_, select
 from audium.analysis.features import KEYS
 from audium.analysis.genres import slug as genre_slug
 from audium.analysis.styles import MIN_STYLE_PROB
-from audium.db.schema import albums, genres, styles, track_features, track_genres, track_styles, tracks
+from audium.db.schema import (
+    albums,
+    artist_similar,
+    artists,
+    genres,
+    styles,
+    track_artists,
+    track_features,
+    track_genres,
+    track_styles,
+    tracks,
+)
 from audium.errors import BadRequest
 from audium.i18n import tr
-from audium.util import now_ms
+from audium.util import norm, now_ms
 
 MAX_LIMIT = 1000
 DEFAULT_LIMIT = 200
 MAX_CONDITIONS = 20
+SIMILAR_PER_ARTIST = 10  # "in the direction of": how many similar artists of each one count
+STYLES_PER_ARTIST = 2  # ... and how many styles, for an artist without similar artists known
 ORDERS = ("random", "added", "year", "title", "bpm", "energy")
 
 NUM_OPS = ("=", "!=", "<", "<=", ">", ">=", "between")
@@ -43,6 +58,7 @@ FIELDS: dict[str, Field] = {
         Field("genre", "Genre", "text", ("is", "is_not")),
         Field("style", "Stil (erkannt)", "text", ("is", "is_not"), needs_analysis=True),
         Field("artist", "Künstler", "text", TEXT_OPS),
+        Field("like_artist", "In Richtung von", "text", ("is",)),
         Field("album", "Album", "text", TEXT_OPS),
         Field("title", "Titel", "text", ("contains",)),
         Field("year", "Jahr", "number", NUM_OPS),
@@ -111,8 +127,14 @@ def validate(rule: dict) -> dict:
         elif field.kind == "enum":
             if value not in field.options:
                 raise BadRequest(f"{field.name}: value must be one of {', '.join(field.options)}")
+        elif isinstance(value, list) and field.name in ("genre", "style", "like_artist"):
+            # several genres: a track matches if it has any of them
+            names = (str(v or "").strip()[:200] for v in value)
+            value = list(dict.fromkeys(n for n in names if n))[:MAX_CONDITIONS]
+            if not value:
+                raise BadRequest(f"{field.name}: a value is required")
         else:
-            value = str(value or "").strip()[:200]
+            value = "" if isinstance(value, list | dict) else str(value or "").strip()[:200]
             if not value:
                 raise BadRequest(f"{field.name}: a value is required")
         clean.append({"field": field.name, "op": op, "value": value})
@@ -153,11 +175,12 @@ def _condition(c: dict):
         is_enum = field in ("key", "mode")
         cond = (col == value if op == "is" else col != value) if is_enum else _compare(col, op, value)
         return and_(track_features.c.status == "ok", cond)
+    names = value if isinstance(value, list) else [value]
     if field == "genre":
         has = exists().where(
             track_genres.c.track_id == tracks.c.id,
             track_genres.c.genre_id == genres.c.id,
-            or_(func.lower(genres.c.name) == value.lower(), genres.c.slug == genre_slug(value)),
+            or_(*(or_(func.lower(genres.c.name) == n.lower(), genres.c.slug == genre_slug(n)) for n in names)),
         )
         return has if op == "is" else not_(has)
     if field == "style":
@@ -165,9 +188,11 @@ def _condition(c: dict):
             track_styles.c.track_id == tracks.c.id,
             track_styles.c.style_id == styles.c.id,
             track_styles.c.prob >= MIN_STYLE_PROB,
-            or_(func.lower(styles.c.name) == value.lower(), styles.c.slug == genre_slug(value)),
+            or_(*(or_(func.lower(styles.c.name) == n.lower(), styles.c.slug == genre_slug(n)) for n in names)),
         )
         return has if op == "is" else not_(has)
+    if field == "like_artist":
+        return _like_artists(names)
     if field in ("artist", "title"):
         col = tracks.c.artist_name if field == "artist" else tracks.c.title
         return _text(col, op, value)
@@ -183,6 +208,41 @@ def _condition(c: dict):
         cutoff = now_ms() - int(value * 86_400_000)
         return tracks.c.added_at >= cutoff if op == "<=" else tracks.c.added_at < cutoff
     raise BadRequest(f"unsupported field {field}")  # pragma: no cover - validate() prevents this
+
+
+def _like_artists(names: list[str]):
+    """Tracks in the direction of these artists: their own (also as a guest), those of their closest
+    similar artists (services/similar_artists.py), and for an artist without similar artists known,
+    tracks in the styles detected most often in theirs."""
+    named = select(artists.c.id).where(artists.c.name_norm.in_([norm(n) for n in names]))
+    ranked = (
+        select(
+            artist_similar.c.similar_id,
+            func.row_number()
+            .over(partition_by=artist_similar.c.artist_id, order_by=artist_similar.c.score.desc())
+            .label("rank"),
+        )
+        .where(artist_similar.c.artist_id.in_(named))
+        .subquery()
+    )
+    similar = select(ranked.c.similar_id).where(ranked.c.rank <= SIMILAR_PER_ARTIST)
+    without_similar = named.where(~exists().where(artist_similar.c.artist_id == artists.c.id))
+    theirs = tracks.alias("theirs")
+    top_styles = (
+        select(track_styles.c.style_id)
+        .join(theirs, theirs.c.id == track_styles.c.track_id)
+        .where(theirs.c.artist_id.in_(without_similar), track_styles.c.prob >= MIN_STYLE_PROB)
+        .group_by(track_styles.c.style_id)
+        .order_by(func.count().desc())
+        .limit(STYLES_PER_ARTIST)
+    )
+    in_style = exists().where(
+        track_styles.c.track_id == tracks.c.id,
+        track_styles.c.prob >= MIN_STYLE_PROB,
+        track_styles.c.style_id.in_(top_styles),
+    )
+    as_guest = select(track_artists.c.track_id).where(track_artists.c.artist_id.in_(named))
+    return or_(tracks.c.artist_id.in_(named), tracks.c.id.in_(as_guest), tracks.c.artist_id.in_(similar), in_style)
 
 
 def _text(col, op: str, value: str):
