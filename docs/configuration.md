@@ -80,6 +80,8 @@ To avoid the download, set `AUDIUM_ANALYSIS_DOWNLOAD_MODELS=false` and put `disc
 
 New auto-playlists appear as **suggestions** that only the admin sees (Entdecken → Vorschläge) until they are published.
 
+**Genre playlists need variety.** A genre gets a playlist of its own only with at least 30 tracks, at least 5 artists, and no artist holding more than 40 % of its tracks. A smaller or one-artist genre counts for the genre above it instead: Krautrock for Rock, Shoegaze for Indie (and Indie, if too small itself, for Rock). Finer tag names are placed by the style table of the sound recognition and by the words in their name. In genre and broad-genre playlists one artist fills at most a tenth of the list (at least 5 tracks). The admin changes both limits under Einstellungen > Auto-Playlists.
+
 In Entdecken the admin can switch the source to **Nur Klangerkennung**: suggestions then come only from the sound recognition, as detected styles plus "Klang-Mixe" (k-means over the sound fingerprints, named after their most common styles). Genre, decade, "Stimmung & Aktivität" and the feature mixes are no longer suggested; published playlists and own rule playlists stay. Switching back to **Alle Quellen** restores them on the next generation.
 
 ### Radio and mix sources

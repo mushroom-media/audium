@@ -2,6 +2,7 @@ import os
 import random
 import subprocess
 import time
+from collections import Counter
 
 import numpy as np
 import pytest
@@ -1151,6 +1152,85 @@ def test_discover_genres_puts_your_genres_first(analysed, db, users):
         (f["playlist"]["track_count"] for f in carol), reverse=True
     )
     assert bob.id
+
+
+@pytest.mark.parametrize(
+    ("genre", "family", "parent"),
+    [
+        ("Rock", "Rock", None),
+        ("Hard Rock", "Rock", "Rock"),
+        ("Indie", "Rock", "Rock"),
+        ("Shoegaze", "Rock", "Indie"),  # style table: a rock style counted for Indie
+        ("Krautrock", "Rock", "Rock"),  # compound word
+        ("Garage Rock", "Rock", "Rock"),
+        ("Folk Rock", "Rock", "Rock"),  # the style table says Folk, but the family is Rock
+        ("Neofolk", "Folk & Country", "Folk"),
+        ("Hardbop", "Jazz", "Jazz"),
+        ("Synthpop", "Pop", "Pop"),
+        ("Deutschrap", "Hip-Hop", "Hip-Hop"),
+        ("Soul", "R&B & Soul", None),
+        ("Lo-Fi", None, None),  # rock style or lo-fi hip-hop: no guess
+        ("Audiobook", None, None),
+    ],
+)
+def test_genre_parents(genre, family, parent):
+    from audium.analysis import genres as genre_norm
+
+    assert genre_norm.family(genre) == family
+    assert genre_norm.parent(genre) == parent
+
+
+def test_genre_playlists_need_variety(analysed, db, users):
+    """A genre of one artist counts for its parent genre; a varied one keeps its playlist; no
+    artist fills a genre playlist."""
+    with db.write() as conn:
+        rows = conn.execute(select(tracks.c.id, tracks.c.artist_id).order_by(tracks.c.id)).all()
+        artist_ids = sorted({r.artist_id for r in rows})
+        kraut, shoe = [r.id for r in rows[:35]], [r.id for r in rows[100:160]]
+        conn.execute(update(tracks).where(tracks.c.id.in_(kraut)).values(artist_id=artist_ids[0]))
+        for i, t in enumerate(shoe):
+            conn.execute(update(tracks).where(tracks.c.id == t).values(artist_id=artist_ids[1 + i % 6]))
+        for name, ids in (("Krautrock", kraut), ("Shoegaze", shoe)):
+            gid = conn.execute(genres.insert().values(name=name, slug=name.lower(), track_count=len(ids)))
+            gid = gid.inserted_primary_key[0]
+            conn.execute(track_genres.insert(), [{"track_id": t, "genre_id": gid} for t in ids])
+        autoplaylists.generate(conn)
+        lists = {r.key: r for r in conn.execute(select(auto_playlists))}
+
+        def reasons(key):
+            return [
+                (t, reason)
+                for t, reason in conn.execute(
+                    select(
+                        autoplaylists.auto_playlist_items.c.track_id, autoplaylists.auto_playlist_items.c.reason
+                    ).where(autoplaylists.auto_playlist_items.c.auto_playlist_id == lists[key].id)
+                )
+            ]
+
+        assert "genre:krautrock" not in lists
+        assert "genre:shoegaze" in lists and "Shoegaze" in lists["genre:shoegaze"].description
+        rock = reasons("genre:rock")
+        assert any(r == "Krautrock" for _, r in rock)  # one artist's Krautrock counts for Rock
+        assert "Krautrock" in lists["genre:rock"].description
+        artist_of = dict(conn.execute(select(tracks.c.id, tracks.c.artist_id)).all())
+        for key in lists:
+            if key.startswith(("genre:", "family:")):
+                items = reasons(key)
+                per_artist = Counter(artist_of[t] for t, _ in items)
+                assert max(per_artist.values()) <= autoplaylists._artist_cap(10_000), key
+
+    # The admin lets every genre have its own playlist.
+    admin_c, bob_c = users["admin"][1], users["bob"][1]
+    rules_ = {"min_artists": 1, "max_artist_share": 1.0}
+    assert bob_c.put("/api/v1/admin/autoplaylists/genre-rules", json=rules_).status_code == 403
+    bad = {"min_artists": 4, "max_artist_share": 1.0}
+    assert admin_c.put("/api/v1/admin/autoplaylists/genre-rules", json=bad).status_code == 400
+    assert admin_c.put("/api/v1/admin/autoplaylists/genre-rules", json=rules_).json() == rules_
+    assert admin_c.get("/api/v1/admin/autoplaylists/genre-rules").json() == rules_
+    with db.write() as conn:
+        autoplaylists.generate(conn)
+        keys = set(conn.execute(select(auto_playlists.c.key)).scalars())
+    assert "genre:krautrock" in keys
 
 
 def test_rediscover_finds_what_you_stopped_playing(analysed, db, users):

@@ -33,7 +33,10 @@ def genre_overview(conn: Connection, user: User) -> dict:
         for a in auto_service.list_auto(conn, user)
         if a.get("status", "published") == "published" and a["key"].startswith(("family:", "genre:"))
     ]
-    family_of_slug = {r.slug: genre_norm.family(r.name) for r in conn.execute(select(genres.c.slug, genres.c.name))}
+    # A genre playlist may gather smaller genres under a genre nobody tagged ("Rock" from
+    # "Krautrock" and "Classic Rock"): those are canonical names.
+    family_of_slug = {genre_norm.slug(n): genre_norm.family(n) for n in genre_norm.CANONICAL}
+    family_of_slug |= {r.slug: genre_norm.family(r.name) for r in conn.execute(select(genres.c.slug, genres.c.name))}
     family_by_slug = {genre_norm.slug(f): f for f in genre_norm.FAMILIES}
 
     since = now_ms() - GENRE_PLAYS_DAYS * DAY_MS

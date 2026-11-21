@@ -52,6 +52,7 @@ EN: dict[str, str] = {
     "Klassik": "Classical",
     "{names} und mehr.": "{names} and more.",
     "Alles aus dem Genre {name}.": "Everything from the genre {name}.",
+    "{name}, dazu {names}.": "{name}, plus {names}.",
     "Die {d}er": "The {d}s",
     "{name} der {d}er": "{name} of the {d}s",
     "Musik aus den Jahren {start} bis {end}.": "Music from the years {start} to {end}.",

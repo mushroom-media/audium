@@ -3,6 +3,8 @@
   import { setUnauthorizedHandler } from "./lib/api";
   import Icon, { type IconName } from "./lib/components/Icon.svelte";
   import PlaylistCover from "./lib/components/PlaylistCover.svelte";
+  import Cover from "./lib/components/Cover.svelte";
+  import { sideCover, toggleSideCover } from "./lib/sideCover.svelte";
   import Overlays from "./lib/components/Overlays.svelte";
   import NowPlaying from "./lib/components/NowPlaying.svelte";
   import PlayerBar from "./lib/components/PlayerBar.svelte";
@@ -310,6 +312,15 @@
           </a>
         {/each}
       </div>
+      {#if sideCover.open && player.current}
+        {@const now = player.current}
+        <div class="side-cover">
+          <a href={href(`/albums/${now.album_id}`)} title={now.album} aria-label={t("Album {album} öffnen", { album: now.album ?? "" })}><Cover hash={now.cover} size={600} /></a>
+          <button class="cover-hide" onclick={toggleSideCover} title={t("Großes Cover ausblenden")} aria-label={t("Großes Cover ausblenden")}>
+            <Icon name="chevron-down" size={16} />
+          </button>
+        </div>
+      {/if}
     </nav>
 
     <header
@@ -461,6 +472,42 @@
     overflow-y: auto;
     margin: 0 -4px 8px;
     padding: 0 4px;
+  }
+  /* The playing track's cover, as wide as the sidebar, below the playlists. */
+  .side-cover {
+    position: relative;
+    flex: none;
+    margin: 0 -4px;
+  }
+  .side .side-cover a {
+    display: block;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.3);
+  }
+  .cover-hide {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgb(0 0 0 / 0.7);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .side-cover:hover .cover-hide,
+  .cover-hide:focus-visible {
+    opacity: 1;
+  }
+  .cover-hide:hover {
+    transform: scale(1.08);
   }
   .side a.pl {
     padding: 6px 8px;

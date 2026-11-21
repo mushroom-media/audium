@@ -12,6 +12,7 @@
   import Heart from "./Heart.svelte";
   import Icon from "./Icon.svelte";
   import RemoteStrip from "./RemoteStrip.svelte";
+  import { sideCover, toggleSideCover } from "../sideCover.svelte";
   import { t } from "../i18n.svelte";
 
   const track = $derived(player.current);
@@ -130,7 +131,20 @@
         <div class="strip" bind:this={strip}>
           {#each slides as s (s.key)}
             <div class="slide" style:--offset={s.offset} inert={s.offset !== 0}>
-              <a class="art" href={href(`/albums/${s.track.album_id}`)} title={s.track.album} aria-label={t("Album {album} öffnen", { album: s.track.album ?? "" })}><Cover hash={s.track.cover} size={64} /></a>
+              <div class="art">
+                <a href={href(`/albums/${s.track.album_id}`)} title={s.track.album} aria-label={t("Album {album} öffnen", { album: s.track.album ?? "" })}><Cover hash={s.track.cover} size={64} /></a>
+                {#if !isPhone}
+                  <button
+                    class="cover-toggle"
+                    onclick={toggleSideCover}
+                    title={sideCover.open ? t("Großes Cover ausblenden") : t("Cover groß anzeigen")}
+                    aria-label={sideCover.open ? t("Großes Cover ausblenden") : t("Cover groß anzeigen")}
+                    aria-pressed={sideCover.open}
+                  >
+                    <Icon name={sideCover.open ? "chevron-down" : "chevron-up"} size={14} />
+                  </button>
+                {/if}
+              </div>
               <div class="meta">
                 <button class="title" title={s.track.title} onclick={openNowPlaying}>{s.track.title}</button>
                 <div class="artist"><ArtistLinks track={s.track} /></div>
@@ -237,9 +251,38 @@
     min-width: 0;
   }
   .art {
+    position: relative;
     display: block;
     width: 52px;
     flex: none;
+  }
+  .art > a {
+    display: block;
+  }
+  /* Top right on the cover, only while the pointer is over it (or it has the focus). */
+  .cover-toggle {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgb(0 0 0 / 0.7);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .art:hover .cover-toggle,
+  .cover-toggle:focus-visible {
+    opacity: 1;
+  }
+  .cover-toggle:hover {
+    transform: scale(1.08);
   }
   .meta {
     min-width: 0;

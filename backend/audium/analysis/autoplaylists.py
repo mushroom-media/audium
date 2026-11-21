@@ -23,6 +23,8 @@ A "dismissed" playlist is never recreated.
 """
 
 import json
+import math
+import random
 import zlib
 from collections import Counter
 
@@ -69,6 +71,16 @@ MIN_RULE_TRACKS = 15
 MIX_SIZE = 200
 SOURCE_STATE = "autoplaylists.source"
 SOURCES = ("all", "sound")  # the first one is the default
+# A genre gets a playlist of its own only with variety: at least `min_artists` artists, and the
+# biggest one has at most `max_artist_share` of its tracks. Otherwise its tracks count for its
+# parent genre ("Krautrock" -> "Rock"). The admin can change both (Einstellungen > Auto-Playlists).
+GENRE_RULES_STATE = "autoplaylists.genre_rules"
+GENRE_RULES_DEFAULT = {"min_artists": 5, "max_artist_share": 0.4}
+MIN_ARTISTS_CHOICES = (1, 3, 5, 8, 12)
+MAX_SHARE_CHOICES = (0.3, 0.4, 0.5, 1.0)  # 1.0 = no limit
+# In genre and family playlists one artist fills at most this share (but always a few tracks).
+ARTIST_CAP_SHARE = 0.1
+MIN_ARTIST_CAP = 5
 
 # Built-in rule playlists: key -> (name, description, rule, explain fields)
 BUILTIN_RULES: dict[str, tuple[str, str, dict, tuple[str, ...]]] = {
@@ -146,6 +158,20 @@ def source(conn: Connection) -> str:
     return value if value in SOURCES else SOURCES[0]
 
 
+def genre_rules(conn: Connection) -> dict:
+    """{"min_artists": int, "max_artist_share": float}; values outside the choices fall back."""
+    try:
+        stored = json.loads(get_state(conn, GENRE_RULES_STATE) or "{}")
+    except ValueError:
+        stored = {}
+    out = dict(GENRE_RULES_DEFAULT)
+    if stored.get("min_artists") in MIN_ARTISTS_CHOICES:
+        out["min_artists"] = stored["min_artists"]
+    if stored.get("max_artist_share") in MAX_SHARE_CHOICES:
+        out["max_artist_share"] = float(stored["max_artist_share"])
+    return out
+
+
 def seed_of(key: str) -> int:
     return zlib.crc32(key.encode())
 
@@ -182,6 +208,80 @@ def _with_reasons(conn: Connection, ids: list[int], fields: tuple[str, ...] | No
     return [(t, explain.describe(rows[t], fields, lang) if t in rows else fixed) for t in ids]
 
 
+def _artist_cap(total: int) -> int:
+    return max(MIN_ARTIST_CAP, math.ceil(ARTIST_CAP_SHARE * min(total, MAX_ITEMS)))
+
+
+def _capped(rows, total: int) -> list[tuple[int, str]]:
+    """(track, artist, reason) rows in playing order -> up to MAX_ITEMS (track, reason), each
+    artist at most _artist_cap(total) times and each track once."""
+    cap = _artist_cap(total)
+    per_artist: Counter[int] = Counter()
+    picked: dict[int, str] = {}
+    for track_id, artist_id, reason in rows:
+        if track_id in picked or per_artist[artist_id] >= cap:
+            continue
+        per_artist[artist_id] += 1
+        picked[track_id] = reason
+        if len(picked) >= MAX_ITEMS:
+            break
+    return list(picked.items())
+
+
+def _varied(artists: list[int], rules_: dict, min_tracks: int) -> bool:
+    """Enough tracks (one artist id per track) from enough artists, none dominating."""
+    if len(artists) < min_tracks:
+        return False
+    counts = Counter(artists)
+    return len(counts) >= rules_["min_artists"] and counts.most_common(1)[0][1] <= rules_["max_artist_share"] * len(
+        artists
+    )
+
+
+def _genre_groups(conn: Connection, rules_: dict) -> list[dict]:
+    """The genre playlists: genres with enough variety, each with the too-small genres below it
+    folded in (deepest first: "Shoegaze" -> "Indie" -> "Rock"). A group is named after its genre,
+    which need not be a tag of its own. Returns, biggest first, {"name", "tracks": {track: (artist,
+    year, genre name)}, "names": genre names in it, own first}."""
+    by_genre: dict[str, dict[int, tuple[int, int, str]]] = {}
+    for track_id, artist_id, year, name in conn.execute(
+        select(tracks.c.id, tracks.c.artist_id, tracks.c.year, genres.c.name)
+        .join(track_genres, track_genres.c.track_id == tracks.c.id)
+        .join(genres, genres.c.id == track_genres.c.genre_id)
+        .where(_present())
+    ):
+        by_genre.setdefault(name, {})[track_id] = (artist_id, year, name)
+    groups = {name: dict(members) for name, members in by_genre.items()}
+    names = {name: [name] for name in groups}
+
+    def ok(name: str) -> bool:
+        return _varied([a for a, _, _ in groups[name].values()], rules_, MIN_GENRE_TRACKS)
+
+    def depth(name: str, seen: frozenset = frozenset()) -> int:
+        up = genre_norm.parent(name)
+        return 0 if up is None or up in seen else 1 + depth(up, seen | {name})
+
+    by_depth: dict[int, list[str]] = {}
+    for name in groups:
+        by_depth.setdefault(depth(name), []).append(name)
+    for d in range(max(by_depth, default=0), -1, -1):  # a parent joins the next level up
+        for name in sorted(by_depth.get(d, [])):
+            if name not in groups or ok(name):
+                continue
+            up = genre_norm.parent(name)
+            if up is None:
+                continue
+            if up not in groups:
+                groups[up], names[up] = {}, [up]
+                by_depth.setdefault(d - 1, []).append(up)
+            for track_id, member in groups.pop(name).items():
+                groups[up].setdefault(track_id, member)  # a track keeps its first genre as reason
+            names[up] += names.pop(name)
+    out = [{"name": n, "tracks": groups[n], "names": names[n]} for n in groups if ok(n)]
+    out.sort(key=lambda g: -len(g["tracks"]))
+    return out
+
+
 def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
     """One playlist per broad genre with enough tracks; each track's reason is its own genre.
     `detected_only`: only genres the sound recognition found (source "sound")."""
@@ -199,7 +299,9 @@ def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
         where = [track_genres.c.genre_id.in_(list(ids)), _present()]
         if detected_only:
             where.append(track_genres.c.source == "detected")
-        base = select(tracks.c.id, track_genres.c.genre_id).join(track_genres, track_genres.c.track_id == tracks.c.id)
+        base = select(tracks.c.id, tracks.c.artist_id, track_genres.c.genre_id).join(
+            track_genres, track_genres.c.track_id == tracks.c.id
+        )
         total = conn.execute(
             select(func.count(func.distinct(tracks.c.id)))
             .select_from(tracks.join(track_genres, track_genres.c.track_id == tracks.c.id))
@@ -207,11 +309,11 @@ def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
         ).scalar_one()
         if total < MIN_GENRE_TRACKS:
             continue
-        picked: dict[int, str] = {}  # a track with two genres of the family counts once
-        for track_id, genre_id in conn.execute(base.where(*where).order_by(rules.shuffle_key(seed_of(key)))):
-            picked.setdefault(track_id, ids[genre_id])
-            if len(picked) >= MAX_ITEMS:
-                break
+        # A track with two genres of the family counts once; no artist takes over the family.
+        rows = conn.execute(base.where(*where).order_by(rules.shuffle_key(seed_of(key))))
+        items = _capped(((t, a, ids[g]) for t, a, g in rows), total)
+        if len(items) < MIN_GENRE_TRACKS:  # mostly one or two artists: not much of a broad genre
+            continue
         names = sorted(set(ids.values()), key=lambda n: (n != fam, n))
         listed = ", ".join(names[:5])
         description, description_en = (
@@ -225,43 +327,48 @@ def _family_specs(conn: Connection, detected_only: bool) -> list[dict]:
                 "name_en": tr("en", fam),
                 "description": description,
                 "description_en": description_en,
-                "items": list(picked.items()),
+                "items": items,
                 "status": "published",
             }
         )
     return specs
 
 
+def _shuffled_members(members: dict[int, tuple], key: str) -> list[int]:
+    order = sorted(members)
+    random.Random(seed_of(key)).shuffle(order)
+    return order
+
+
 def _tag_specs(conn: Connection) -> list[dict]:
     specs = []
-    genre_rows = conn.execute(
-        select(genres.c.id, genres.c.name, genres.c.slug, genres.c.track_count)
-        .where(genres.c.track_count >= MIN_GENRE_TRACKS)
-        .order_by(genres.c.track_count.desc())
-    ).all()
-    for g in genre_rows:
-        key = f"genre:{g.slug}"
-        stmt = (
-            select(tracks.c.id)
-            .join(track_genres, track_genres.c.track_id == tracks.c.id)
-            .where(track_genres.c.genre_id == g.id, _present())
-        )
-        ids = [r[0] for r in conn.execute(_shuffled(stmt, key))]
-        description, description_en = _both("Alles aus dem Genre {name}.", name=g.name)
+    rules_ = genre_rules(conn)
+    groups = _genre_groups(conn, rules_)
+    for g in groups:
+        key = f"genre:{genre_norm.slug(g['name'])}"
+        members = g["tracks"]
+        order = _shuffled_members(members, key)
+        items = _capped(((t, members[t][0], members[t][2]) for t in order), len(members))
+        others = [n for n in g["names"] if n != g["name"]]
+        if others:
+            listed = ", ".join(sorted(others, key=lambda n: -sum(1 for m in members.values() if m[2] == n))[:4])
+            description, description_en = _both("{name}, dazu {names}.", name=g["name"], names=listed)
+        else:
+            description, description_en = _both("Alles aus dem Genre {name}.", name=g["name"])
         specs.append(
             {
                 "key": key,
                 "generator": "tag",
-                "name": g.name,
-                "name_en": tr("en", g.name),
+                "name": g["name"],
+                "name_en": tr("en", g["name"]),
                 "description": description,
                 "description_en": description_en,
-                "items": [(t, g.name) for t in ids],
+                "items": items,
                 "status": "published",
             }
         )
 
-    specs += _style_specs(conn, {g.name for g in genre_rows})
+    specs += _style_specs(conn, {g["name"] for g in groups})
 
     decade = (tracks.c.year // 10) * 10
     decade_rows = conn.execute(
@@ -288,30 +395,24 @@ def _tag_specs(conn: Connection) -> list[dict]:
             }
         )
 
-    combo_rows = conn.execute(
-        select(genres.c.id, genres.c.name, genres.c.slug, decade.label("d"), func.count().label("n"))
-        .select_from(
-            track_genres.join(tracks, tracks.c.id == track_genres.c.track_id).join(
-                genres, genres.c.id == track_genres.c.genre_id
-            )
-        )
-        .where(_present(), tracks.c.year >= 1900)
-        .group_by(genres.c.id, decade)
-        .having(func.count() >= MIN_COMBO_TRACKS)
-        .order_by(func.count().desc())
-        .limit(MAX_COMBOS)
-    ).all()
-    for c in combo_rows:
-        key = f"genre-decade:{c.slug}:{c.d}"
-        stmt = (
-            select(tracks.c.id, tracks.c.year)
-            .join(track_genres, track_genres.c.track_id == tracks.c.id)
-            .where(track_genres.c.genre_id == c.id, _present(), tracks.c.year.between(c.d, c.d + 9))
-        )
-        rows = conn.execute(stmt.order_by(rules.shuffle_key(seed_of(key))).limit(MAX_ITEMS)).all()
-        name, name_en = _both("{name} der {d}er", name=c.name, d=_short(c.d))
+    # Genre x decade over the same genre groups, with the same variety rule.
+    combos = []
+    for g in groups:
+        per_decade: dict[int, dict[int, tuple]] = {}
+        for track_id, member in g["tracks"].items():
+            if member[1] >= 1900:
+                per_decade.setdefault(member[1] // 10 * 10, {})[track_id] = member
+        for d, members in per_decade.items():
+            if _varied([m[0] for m in members.values()], rules_, MIN_COMBO_TRACKS):
+                combos.append((g["name"], d, members))
+    combos.sort(key=lambda c: -len(c[2]))
+    for genre_name, d, members in combos[:MAX_COMBOS]:
+        key = f"genre-decade:{genre_norm.slug(genre_name)}:{d}"
+        order = _shuffled_members(members, key)
+        rows = _capped(((t, members[t][0], f"{genre_name} · {members[t][1]}") for t in order), len(members))
+        name, name_en = _both("{name} der {d}er", name=genre_name, d=_short(d))
         description, description_en = _both(
-            "{name} aus den Jahren {start} bis {end}.", name=c.name, start=c.d, end=c.d + 9
+            "{name} aus den Jahren {start} bis {end}.", name=genre_name, start=d, end=d + 9
         )
         specs.append(
             {
@@ -321,7 +422,7 @@ def _tag_specs(conn: Connection) -> list[dict]:
                 "name_en": name_en,
                 "description": description,
                 "description_en": description_en,
-                "items": [(r.id, f"{c.name} · {r.year}") for r in rows],
+                "items": rows,
             }
         )
     return specs

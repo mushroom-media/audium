@@ -64,6 +64,7 @@ def fold(s: str) -> str:
 
 
 ALIASES: dict[str, str] = {fold(alias): canon for canon, aliases in _ALIASES_RAW.items() for alias in [canon, *aliases]}
+CANONICAL: frozenset[str] = frozenset(_ALIASES_RAW)
 
 _NOT_GENRES = {"", "other", "unknown", "misc", "genre", "none", "various", "sonstige", "unbekannt", "default"}
 
@@ -152,12 +153,42 @@ _FAMILY_OF: dict[str, str | None] = {
 # (words, family): the first entry with a word in the genre name decides.
 _FAMILY_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("metal", "metalcore", "deathcore", "grindcore", "doom", "sludge", "djent"), "Metal"),
-    (("trip hop", "triphop", "synthwave", "electropop", "idm", "breakbeat", "garage", "jungle"), "Electronic"),
-    (("rock", "punk", "grunge", "shoegaze", "emo", "post hardcore", "stoner", "britpop", "new wave"), "Rock"),
+    (("trip hop", "triphop", "synthwave", "electropop", "idm", "breakbeat", "jungle"), "Electronic"),
+    (
+        (
+            "rock",
+            "punk",
+            "grunge",
+            "shoegaze",
+            "emo",
+            "post hardcore",
+            "stoner",
+            "britpop",
+            "new wave",
+            "indie",
+            "alternative",
+            "darkwave",
+            "gothic",
+        ),
+        "Rock",
+    ),
     (("hip hop", "hiphop", "rap", "trap", "grime", "drill"), "Hip-Hop"),
     (("reggae", "ska", "dub", "dancehall", "rocksteady"), "Reggae"),
     (
-        ("house", "techno", "trance", "electro", "edm", "dubstep", "drum", "bass", "ambient", "downtempo", "dance"),
+        (
+            "house",
+            "techno",
+            "trance",
+            "electro",
+            "edm",
+            "dubstep",
+            "drum",
+            "bass",
+            "ambient",
+            "downtempo",
+            "dance",
+            "garage",
+        ),
         "Electronic",
     ),
     (("jazz", "swing", "bebop", "bop", "big band"), "Jazz"),
@@ -171,8 +202,47 @@ _FAMILY_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("classical", "baroque", "opera", "symphon", "orchestr", "chamber", "romantic era", "choral"), "Klassik"),
     (("soundtrack", "score", "film", "musical"), "Soundtrack"),
     (("schlager", "volksmusik"), "Schlager"),
-    (("pop", "synthpop", "disco", "chanson", "schlager pop"), "Pop"),
+    (("pop", "synthpop", "disco", "chanson", "schlager pop", "neue deutsche welle", "ndw"), "Pop"),
 )
+
+# The genre that stands for a family when a finer genre falls back to it.
+_FAMILY_GENRE = {
+    "Rock": "Rock",
+    "Metal": "Metal",
+    "Pop": "Pop",
+    "Hip-Hop": "Hip-Hop",
+    "Electronic": "Electronic",
+    "R&B & Soul": "Soul",
+    "Jazz": "Jazz",
+    "Blues": "Blues",
+    "Folk & Country": "Folk",
+    "Reggae": "Reggae",
+    "Latin & World": "World",
+    "Klassik": "Classical",
+    "Soundtrack": "Soundtrack",
+    "Schlager": "Schlager",
+}
+
+
+def _family_by_words(genre: str) -> str | None:
+    name = " ".join(re.split(r"[\s/,\-]+", genre.casefold()))
+    words = set(re.split(r"[\s&]+", name))
+    for keys, fam in _FAMILY_WORDS:
+        for key in keys:
+            # Phrases ("hip hop", "r&b") anywhere; words whole, longer ones also as a prefix
+            # ("symphonic", "electronica"); short ones not ("dub" is no "dubstep"). Compounds end
+            # in the telling word ("Krautrock", "Synthpop", "Hardbop"), so whole words also count
+            # as a suffix.
+            if not key.isalnum():
+                if key in name:
+                    return fam
+            elif (
+                key in words
+                or (len(key) > 4 and any(w.startswith(key) for w in words))
+                or any(w.endswith(key) and len(w) > len(key) + 1 for w in words)
+            ):
+                return fam
+    return None
 
 
 @functools.lru_cache(maxsize=8192)  # pure, and the Discover page asks for every genre each time
@@ -180,15 +250,30 @@ def family(genre: str) -> str | None:
     """The broad genre ("Rock") a genre ("Post-Punk") belongs to, or None (spoken word, unknown)."""
     if genre in _FAMILY_OF:
         return _FAMILY_OF[genre]
-    name = " ".join(re.split(r"[\s/,\-]+", genre.casefold()))
-    words = set(re.split(r"[\s&]+", name))
-    for keys, fam in _FAMILY_WORDS:
-        for key in keys:
-            # Phrases ("hip hop", "r&b") anywhere; words whole, longer ones also as a prefix
-            # ("symphonic", "electronica"); short ones not ("dub" is no "dubstep").
-            if not key.isalnum():
-                if key in name:
-                    return fam
-            elif key in words or (len(key) > 4 and any(w.startswith(key) for w in words)):
-                return fam
-    return None
+    if fam := _family_by_words(genre):
+        return fam
+    # Names without a telling word ("Shoegaze" has one, "Britpop" too, "Neofolk" not): the style
+    # table of the sound recognition knows many of them.
+    from audium.analysis.styles import genre_of_style  # styles imports this module
+
+    style_genre = genre_of_style(genre)
+    return _FAMILY_OF.get(style_genre) if style_genre else None
+
+
+@functools.lru_cache(maxsize=8192)
+def parent(genre: str) -> str | None:
+    """The genre a finer one falls back to when it is too small for a playlist of its own:
+    "Shoegaze" -> "Indie", "Krautrock" -> "Rock", "Indie" -> "Rock". The genres of the alias table
+    fall back to their family's genre (none for the family genres themselves); unknown ones have none.
+    Always in the same family as the genre itself."""
+    fam = family(genre)
+    if fam is None:
+        return None
+    if genre not in CANONICAL:
+        from audium.analysis.styles import genre_of_style
+
+        style_genre = genre_of_style(genre)
+        if style_genre and style_genre != genre and _FAMILY_OF.get(style_genre) == fam:
+            return style_genre
+    up = _FAMILY_GENRE[fam]
+    return None if up == genre else up

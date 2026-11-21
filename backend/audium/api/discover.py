@@ -1,5 +1,6 @@
 """Auto-playlists, rules, similar tracks and radio."""
 
+import json
 from typing import Literal
 
 import numpy as np
@@ -19,7 +20,7 @@ from audium.db.engine import Database
 from audium.db.pagination import fetch_ordered
 from audium.db.schema import artist_similar, genres, library_roots, styles, track_artists, track_features, tracks
 from audium.db.state import set_state
-from audium.errors import Conflict, NotFound
+from audium.errors import BadRequest, Conflict, NotFound
 from audium.i18n import tr, user_language
 from audium.services import auto as auto_service
 from audium.services import discover as discover_service
@@ -118,6 +119,11 @@ class AutoCreate(BaseModel):
     description: str | None = Field(None, max_length=2000)
     rule: dict
     access: str = "all"
+
+
+class GenreRules(BaseModel):
+    min_artists: int = Field(description="A genre playlist needs at least this many artists")
+    max_artist_share: float = Field(description="The biggest artist has at most this share of a genre (1 = no limit)")
 
 
 class AutoSource(BaseModel):
@@ -455,6 +461,25 @@ def admin_set_source(body: AutoSource, _admin: User = Depends(require_admin), db
     with db.write() as conn:
         if autoplaylists.source(conn) != body.source:
             set_state(conn, autoplaylists.SOURCE_STATE, body.source)
+            enqueue_autoplaylists(conn)
+    return body
+
+
+@admin.get("/autoplaylists/genre-rules", response_model=GenreRules, summary="When a genre gets its own playlist")
+def admin_genre_rules(_admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+    with db.read() as conn:
+        return GenreRules(**autoplaylists.genre_rules(conn))
+
+
+@admin.put("/autoplaylists/genre-rules", response_model=GenreRules, summary="Change the genre rules and regenerate")
+def admin_set_genre_rules(body: GenreRules, _admin: User = Depends(require_admin), db: Database = Depends(get_db)):
+    if body.min_artists not in autoplaylists.MIN_ARTISTS_CHOICES:
+        raise BadRequest(f"min_artists: one of {autoplaylists.MIN_ARTISTS_CHOICES}")
+    if body.max_artist_share not in autoplaylists.MAX_SHARE_CHOICES:
+        raise BadRequest(f"max_artist_share: one of {autoplaylists.MAX_SHARE_CHOICES}")
+    with db.write() as conn:
+        if autoplaylists.genre_rules(conn) != body.model_dump():
+            set_state(conn, autoplaylists.GENRE_RULES_STATE, json.dumps(body.model_dump()))
             enqueue_autoplaylists(conn)
     return body
 

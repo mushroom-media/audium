@@ -14,6 +14,7 @@ detected genres are smoothed with its album (half track, half album average), so
 does not get its own genre and an album does not spread over many.
 """
 
+import functools
 from collections import defaultdict
 
 from sqlalchemy import Connection, delete, func, select, update
@@ -154,6 +155,30 @@ def genre_of(label: str) -> str | None:
     parent, name = split_label(label)
     default, exceptions = _TABLE.get(parent, (None, {}))
     return exceptions.get(name, default)
+
+
+# Style names that mean different things in different Discogs genres or in tags ("Lo-Fi" is a
+# rock style there, but in tags mostly lo-fi hip-hop): no genre by name.
+_AMBIGUOUS_NAMES = {"lofi", "hardcore", "industrial", "acoustic"}
+
+
+@functools.cache
+def _genre_by_style_name() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for parent, (default, exceptions) in _TABLE.items():
+        if default:
+            out[genre_norm.fold(parent)] = default
+        for name, genre in exceptions.items():
+            if genre:
+                out[genre_norm.fold(name)] = genre
+    for name in _AMBIGUOUS_NAMES:
+        out.pop(name, None)
+    return out
+
+
+def genre_of_style(name: str) -> str | None:
+    """The genre a style name ("Shoegaze", "Neofolk") counts for, also when it comes from a tag."""
+    return _genre_by_style_name().get(genre_norm.fold(name))
 
 
 def top_styles(labels: list[str], probs) -> list[tuple[str, float]]:

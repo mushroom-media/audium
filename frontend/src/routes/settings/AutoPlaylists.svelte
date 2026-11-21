@@ -59,6 +59,22 @@
     setTimeout(() => reload++, 4000);
   }
 
+  // When a genre gets a playlist of its own; smaller ones count for their parent genre.
+  type GenreRules = { min_artists: number; max_artist_share: number };
+  let genreRules = $state<GenreRules | null>(null);
+  $effect(() => {
+    get<GenreRules>("/admin/autoplaylists/genre-rules").then((r) => (genreRules = r));
+  });
+
+  async function setGenreRules(change: Partial<GenreRules>) {
+    if (!genreRules) return;
+    const next = { ...genreRules, ...change };
+    await put("/admin/autoplaylists/genre-rules", next);
+    genreRules = next;
+    toast(t("Genre-Regeln geändert – wird neu erzeugt"));
+    setTimeout(() => reload++, 4000);
+  }
+
   async function setStatus(a: AutoPlaylist, status: Status, e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -105,6 +121,30 @@
         </select>
       {/if}
     </div>
+    {#if genreRules}
+      <div class="set-row">
+        <div class="set-label">
+          <strong>{t("Eigenes Genre ab")}</strong>
+          <small>{t("Ein Genre bekommt nur dann eine eigene Playlist, wenn so viele Künstler darin vorkommen. Kleinere zählen zum übergeordneten Genre, z. B. Krautrock zu Rock.")}</small>
+        </div>
+        <select aria-label={t("Eigenes Genre ab")} value={genreRules.min_artists} onchange={(e) => setGenreRules({ min_artists: Number(e.currentTarget.value) })}>
+          {#each [1, 3, 5, 8, 12] as n (n)}
+            <option value={n}>{n === 1 ? t("1 Künstler") : t("{n} Künstlern", { n })}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="set-row">
+        <div class="set-label">
+          <strong>{t("Größter Künstler im Genre")}</strong>
+          <small>{t("Höchstens so viel Anteil an den Titeln eines Genres darf ein einzelner Künstler haben, sonst ist es eher „sein“ Genre.")}</small>
+        </div>
+        <select aria-label={t("Größter Künstler im Genre")} value={genreRules.max_artist_share} onchange={(e) => setGenreRules({ max_artist_share: Number(e.currentTarget.value) })}>
+          {#each [0.3, 0.4, 0.5, 1] as s (s)}
+            <option value={s}>{s === 1 ? t("ohne Grenze") : t("höchstens {p} %", { p: Math.round(s * 100) })}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
   </div>
   <div class="actions">
     <button class="btn ghost" onclick={regenerate}><Icon name="spark" size={18} /> {t("Neu erzeugen")}</button>

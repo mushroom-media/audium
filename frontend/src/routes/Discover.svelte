@@ -15,6 +15,7 @@
   import { msg, t } from "../lib/i18n.svelte";
 
   const MAX_GENRE_TILES = 10;
+  const MAX_GENRE_TILES_PHONE = 6; // three rows of two; the rest under "Alle Genres"
   const isAdmin = $derived(session.user?.role === "admin");
 
   let rediscover = $state<Rediscover[]>(recallEntry("discover:rediscover") ?? []);
@@ -77,7 +78,17 @@
     return rest.filter((a) => words.every((w) => fold(a.name).includes(w)));
   });
 
-  const tiles = $derived(genres?.families.slice(0, MAX_GENRE_TILES) ?? []);
+  // The app's phone layout (see App.svelte).
+  const phoneQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 860px)") : null;
+  let phone = $state(phoneQuery?.matches ?? false);
+  $effect(() => {
+    if (!phoneQuery) return;
+    const update = () => (phone = phoneQuery.matches);
+    phoneQuery.addEventListener("change", update);
+    return () => phoneQuery.removeEventListener("change", update);
+  });
+
+  const tiles = $derived(genres?.families.slice(0, phone ? MAX_GENRE_TILES_PHONE : MAX_GENRE_TILES) ?? []);
   const allGenres = $derived((genres?.families.length ?? 0) + (genres?.others.length ?? 0));
 </script>
 
