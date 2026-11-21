@@ -64,7 +64,7 @@ audium sends `X-Accel-Buffering: no` on the event stream, so nginx does not buff
 ```yaml
 services:
   audium:
-    image: ghcr.io/<owner>/audium:latest
+    image: ghcr.io/mushroom-media/audium:0.1
     environment:
       AUDIUM_TRUSTED_PROXIES: "*"   # only Traefik can reach the container
     labels:

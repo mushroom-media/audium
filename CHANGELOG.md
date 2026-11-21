@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to audium are listed here. Versions follow [semantic versioning](https://semver.org/); while audium is 0.x, a new minor version (0.2, 0.3, ...) may need you to read this file before updating, bug-fix releases (0.1.1, ...) never do.
+
+Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm64.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-22
+
+First public release.
+
+### Library
+- One container for large collections (100,000+ tracks), several read-only music folders below `/music`.
+- Incremental scanner: unchanged files cost one `stat()`, moved files keep their identity, network shares that are not mounted are marked offline instead of deleted. Scans run in the background, can be cancelled and resumed.
+- All common formats (MP3, FLAC, Ogg, Opus, AAC/ALAC, WMA, WAV, AIFF, APE, WavPack, Musepack, DSD, ...); missing tags are filled from the folder structure.
+- Covers and artist images, cached as WebP; full-text prefix search that ignores punctuation (`nwa` finds N.W.A., `ac dc` finds AC/DC).
+
+### Listening
+- Web player with queue, shuffle, repeat, gapless-style preloading, keyboard shortcuts and Media Session (lock screen, media keys); installable as a PWA.
+- Streaming of original files with seeking; on-the-fly transcoding with ffmpeg for formats the browser cannot play, and a lower quality per user for slow connections.
+- Remote control between your devices; several browser tabs act as one player.
+- Radio from a track, an album or an artist, with feedback.
+
+### Playlists and discovery
+- Playlists, favorites, listening history; sharing with individual users as viewer or editor, or with everyone; live updates.
+- Smart playlists with a rule editor (several genres per condition, "in the direction of" an artist).
+- Auto-playlists without the cloud: normalized genres and styles, decades, activities and moods, and mixes from audio analysis (Essentia: tempo, key, energy, danceability), each track with a short reason. Generated playlists get covers of their own.
+- Discover page, similar artists, "Appears on" on artist pages.
+- Audio analysis on x86_64; the style models (CC BY-NC-SA 4.0) are downloaded on first use, not shipped.
+
+### Apps
+- (Open)Subsonic API under `/rest` for apps like Symfonium, Amperfy or Feishin, with a revocable app password per app.
+
+### Accounts and administration
+- Setup wizard in the browser on first start: admin account, music check, permissions.
+- Invites, argon2id passwords, login rate limiting, API tokens; own username, display name, avatar color and password.
+- Admin area: library folders with folder picker and exclusions, accounts, background jobs.
+- English and German, per user.
+- Database migrations run on start, with a backup copy of the database first.
+
+[Unreleased]: https://github.com/mushroom-media/audium/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mushroom-media/audium/releases/tag/v0.1.0

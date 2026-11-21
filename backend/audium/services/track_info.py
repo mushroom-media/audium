@@ -68,7 +68,9 @@ def track_info(conn: Connection, user_id: int, track_id: int) -> dict:
         "genres": [{"name": r.name, "detected": r.source == "detected", "weight": r.weight} for r in genre_rows],
         # Only styles the model is fairly sure of; a track whose styles all lie below shows that
         # no style was clear instead of listing near-random guesses.
-        "styles": [{"name": r.name, "parent": r.parent, "prob": r.prob} for r in style_rows if r.prob >= MIN_STYLE_PROB],
+        "styles": [
+            {"name": r.name, "parent": r.parent, "prob": r.prob} for r in style_rows if r.prob >= MIN_STYLE_PROB
+        ],
         "styles_unclear": bool(style_rows) and style_rows[0].prob < MIN_STYLE_PROB,
         "analysis": analysis,
         "plays": plays[0] if plays else 0,

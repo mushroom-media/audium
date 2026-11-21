@@ -1,0 +1,8 @@
+# Build audium from this repository instead of pulling the published image:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# Without TensorFlow (~300 MB smaller, no style detection): add --build-arg AUDIUM_ML=0 via
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build --build-arg AUDIUM_ML=0
+services:
+  audium:
+    build: .
+    image: audium:local

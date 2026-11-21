@@ -1,14 +1,18 @@
 # audium deployment.
 #   cp .env.example .env        # optional: set AUDIUM_MUSIC_PATH (and the port, if you like)
-#   docker compose up -d --build
+#   docker compose up -d
 #   then open http://<server>:8091 in a browser within 30 minutes: it guides you through the rest
+#
+# Update: docker compose pull && docker compose up -d
+# Build the image from this repository instead (developers, or to change the image):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # audium only sees what you mount here. Mount every music folder read-only below /music;
 # each top-level folder (here: /music/main and /music/nas) becomes its own library folder.
 services:
   audium:
-    build: .                           # until a published image exists: build from this repository
-    image: audium:latest
+    # "0.1" follows bug-fix releases (0.1.1, 0.1.2, ...); a new minor version is a deliberate change here.
+    image: ghcr.io/mushroom-media/audium:0.1
     container_name: audium
     restart: unless-stopped
     ports:

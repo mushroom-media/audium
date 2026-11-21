@@ -6,11 +6,18 @@ Self-hosted music streaming for your own library: one Docker container, built fo
 
 ## Quickstart
 
+You need Docker with the Compose plugin. No need to clone the repository: two files are enough.
+
 ```bash
-git clone <repository-url> audium && cd audium
-cp .env.example .env    # optional: AUDIUM_MUSIC_PATH (default: ./music), AUDIUM_HOST_PORT (default: 8091)
-docker compose up -d --build
+mkdir audium && cd audium
+curl -fLO https://raw.githubusercontent.com/mushroom-media/audium/main/docker-compose.yml
+curl -fL -o .env https://raw.githubusercontent.com/mushroom-media/audium/main/.env.example
+# edit .env: AUDIUM_MUSIC_PATH = your music folder (default: ./music), AUDIUM_HOST_PORT (default: 8091)
+mkdir -p data && sudo chown 1000:1000 data    # the container runs as uid 1000
+docker compose up -d
 ```
+
+The image (`ghcr.io/mushroom-media/audium`) is built for x86_64 and arm64. On a NAS with a Docker UI (Synology Container Manager, Unraid, Portainer, ...) you can paste `docker-compose.yml` as a new project instead and set the music folder there.
 
 Open `http://<server>:8091` within 30 minutes. A short dialog creates your admin account, checks that audium sees your music and shows what it found, and asks what audium may do. It then scans your music in the background; you can browse and listen while it runs.
 
@@ -49,10 +56,10 @@ Each folder directly below `/music` becomes a library folder. If a network share
 ## Updating and backups
 
 ```bash
-git pull && docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-Database migrations run automatically on start; audium copies the database to `data/backups/` first. To back up, copy the `data` folder (the cover cache in `data/covers` can be skipped, it is rebuilt by a scan). Your music is never written to, so it needs no audium-specific backup.
+The image tag `0.1` in `docker-compose.yml` follows the bug-fix releases of 0.1. For a new version (0.2, ...), read the [changelog](CHANGELOG.md) and change the tag. Database migrations run automatically on start; audium copies the database to `data/backups/` first. To back up, copy the `data` folder (the cover cache in `data/covers` can be skipped, it is rebuilt by a scan). Your music is never written to, so it needs no audium-specific backup.
 
 ## Hardware
 
@@ -66,7 +73,7 @@ Health check: `GET /api/health` (used by the Docker `HEALTHCHECK`). Logs are JSO
 
 ## Development
 
-See [docs/development.md](docs/development.md).
+See [docs/development.md](docs/development.md). To run your own build of the image: `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build` in a clone of the repository.
 
 ## License
 
