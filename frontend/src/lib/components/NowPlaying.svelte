@@ -274,7 +274,7 @@
           </button>
         </div>
 
-        <div class="volume">
+        <div class="volume" class:remote={!!devices.target}>
           <button class="icon-btn" onclick={() => player.setMuted(!player.muted)} aria-label={player.muted ? "Ton an" : "Stumm"}>
             <Icon name={player.muted || player.volume === 0 ? "mute" : "volume"} size={18} />
           </button>
@@ -590,9 +590,10 @@
       width: 180px;
     }
   }
-  /* Phones set the volume with their own buttons. */
+  /* Phones set the volume with their own buttons, except while they steer another device:
+     a web page cannot take over the volume buttons. */
   @media (hover: none) and (pointer: coarse) {
-    .volume {
+    .volume:not(.remote) {
       display: none;
     }
   }
