@@ -6,11 +6,18 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-22
+
 ### Fixed
 - A first start that was stopped while the database was being created (container stopped, NAS restarted) left a half-created database, and audium no longer started (`table ... already exists`). Database upgrades are now all-or-nothing, and such a half-created database without accounts is set aside (`audium.db.unfinished-<time>`) and created again.
 
 ### Added
 - `AGENTS.md`: installation and setup guide for AI assistants. Paste the repository link into your assistant and it knows how audium is installed.
+- `SECURITY.md` (how to report vulnerabilities) and `CONTRIBUTING.md`.
+- README: automatic nightly updates with a cron job.
+
+### Changed
+- Phones show the volume slider in the now-playing view while they control another device.
 
 ## [0.1.0] - 2026-11-22
 
@@ -45,5 +52,6 @@ First public release.
 - English and German, per user.
 - Database migrations run on start, with a backup copy of the database first.
 
-[Unreleased]: https://github.com/mushroom-media/audium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mushroom-media/audium/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mushroom-media/audium/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mushroom-media/audium/releases/tag/v0.1.0
