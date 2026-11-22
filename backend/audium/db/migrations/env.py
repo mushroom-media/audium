@@ -27,17 +27,23 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connection = config.attributes.get("connection")
     if connection is not None:
-        _run(connection)
+        # From audium.db.migrate: its SQLite connection really wraps DDL in a transaction, so the
+        # whole upgrade is one transaction (Alembic otherwise assumes SQLite cannot do that).
+        _run(connection, transactional_ddl=True)
         return
     engine = create_engine(config.get_main_option("sqlalchemy.url"), poolclass=pool.NullPool)
     with engine.connect() as conn:
         _run(conn)
 
 
-def _run(connection) -> None:
+def _run(connection, transactional_ddl: bool | None = None) -> None:
     # render_as_batch: SQLite cannot ALTER most things, Alembic recreates the table instead.
     context.configure(
-        connection=connection, target_metadata=metadata, render_as_batch=True, include_object=include_object
+        connection=connection,
+        target_metadata=metadata,
+        render_as_batch=True,
+        include_object=include_object,
+        transactional_ddl=transactional_ddl,
     )
     with context.begin_transaction():
         context.run_migrations()

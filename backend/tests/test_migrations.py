@@ -112,3 +112,81 @@ def test_upgrade_from_0006_adds_subsonic_tables_and_artist_images(tmp_path):
         # 0008: existing artists have no artist image yet (the next scan looks for artist.jpg)
         assert conn.execute(text("SELECT name, image_id, image_key FROM artists")).one() == ("A", None, None)
     engine.dispose()
+
+
+def _tables(path) -> set[str]:
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    try:
+        return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        con.close()
+
+
+def test_stopped_first_start_leaves_no_half_schema(tmp_path, monkeypatch):
+    """A first start stopped half-way (here: an error in the middle) rolls everything back."""
+    from sqlalchemy import event
+
+    import audium.db.migrate as m
+
+    original = m._transactional_engine
+
+    def failing_engine(url):
+        engine = original(url)
+
+        @event.listens_for(engine, "before_cursor_execute")
+        def _stop(conn, cursor, statement, *args):
+            if statement.lstrip().upper().startswith("CREATE TABLE PLAYLISTS"):
+                raise KeyboardInterrupt  # what stopping the container mid-migration amounts to
+
+        return engine
+
+    monkeypatch.setattr(m, "_transactional_engine", failing_engine)
+    db = tmp_path / "audium.db"
+    url = f"sqlite:///{db}"
+    try:
+        migrate(url)
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("the migration should have been stopped")
+    assert current_revision(url) is None
+    assert _tables(db) == set()
+
+    monkeypatch.setattr(m, "_transactional_engine", original)
+    migrate(url)
+    assert current_revision(url) == ScriptDirectory.from_config(alembic_config(url)).get_current_head()
+
+
+def test_half_schema_from_0_1_0_is_set_aside(tmp_path):
+    """0.1.0 could leave tables without a revision; with no accounts in it, audium starts fresh."""
+    import sqlite3
+
+    db = tmp_path / "audium.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)")
+    con.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+    con.commit()
+    con.close()
+    url = f"sqlite:///{db}"
+    migrate(url, tmp_path / "backups")
+    assert current_revision(url) is not None
+    assert len(list(tmp_path.glob("audium.db.unfinished-*"))) == 1
+
+
+def test_tables_without_revision_but_with_accounts_are_not_touched(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    db = tmp_path / "audium.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+    con.execute("INSERT INTO users (id) VALUES (1)")
+    con.commit()
+    con.close()
+    with pytest.raises(RuntimeError, match="account"):
+        migrate(f"sqlite:///{db}")
+    assert _tables(db) == {"users"}
+    assert not list(tmp_path.glob("audium.db.unfinished-*"))
