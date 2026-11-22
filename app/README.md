@@ -14,7 +14,10 @@ License: MIT (like `frontend/`), see [LICENSE](LICENSE).
   (`frontend/.env.app` sets `VITE_AUDIUM_APP=1`) into `frontend/dist-app/`. In that mode the login
   screen also asks for the server address, requests use a bearer token instead of the cookie, and
   stream, cover and event URLs carry a media token (`frontend/src/lib/api.ts`).
-- `app/src-tauri/` is the Tauri shell around it: window, icons, installer. The frontend calls no
+- `app/src-tauri/` is the Tauri shell around it: window, icons, installer. On Windows the window has
+  no system title bar; the frontend draws its own (`frontend/src/lib/components/WindowFrame.svelte`)
+  with the window permissions in `capabilities/default.json`. A page lost by WebView2 is reloaded
+  (`src/recover.rs`). Otherwise the frontend calls no
   Rust code; it only talks HTTP to the server.
 - The server allows the app's origin (`http://tauri.localhost` on Windows, `tauri://localhost` on
   macOS/Linux) through `AUDIUM_APP_ORIGINS`, which contains both by default. Admins can switch apps

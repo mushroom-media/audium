@@ -10,6 +10,7 @@
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import QueuePanel from "./lib/components/QueuePanel.svelte";
   import DevicePicker from "./lib/components/DevicePicker.svelte";
+  import WindowFrame, { ownFrame } from "./lib/components/WindowFrame.svelte";
   import { devices } from "./lib/devices.svelte";
   import { startTabs } from "./lib/tabs.svelte";
   import { localPlayer, player } from "./lib/player.svelte";
@@ -251,6 +252,8 @@
   // Pages without a watched heading turn solid as soon as anything scrolls under the bar.
   const solid = $derived(headerTitle.text ? headerTitle.shown : pageScroll > 4);
   const initial = $derived(avatarInitial(session.user?.display_name));
+  // The full layout with its top bar (see the {#if} chain below), where the title bar buttons fit.
+  const inShell = $derived(session.ready && !!session.user && !PUBLIC.has(router.route.name) && router.route.name !== "setup");
 
   const active = (name: string) =>
     router.route.name === name ||
@@ -261,6 +264,8 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
+
+{#if ownFrame}<WindowFrame strip={!inShell || phone || player.nowPlayingOpen} />{/if}
 
 {#if !session.ready}
   <!-- Not a logout: the server is starting (e.g. after an update) or not reachable; startSession tries again. -->
@@ -278,7 +283,7 @@
     <Auth mode={session.needsSetup ? "setup" : "login"} />
   {/if}
 {:else}
-  <div class="shell" class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
+  <div class="shell" class:framed={ownFrame} class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
     <nav class="side" aria-label={t("Navigation")}>
       <a class="logo" href={href("/")} aria-label={t("audium Start")}>
         <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
@@ -325,6 +330,7 @@
 
     <header
       class="top"
+      data-tauri-drag-region={ownFrame || undefined}
       class:searching={router.route.name === "search"}
       class:solid={backTo && solid}
       bind:clientHeight={topHeight}
@@ -409,7 +415,7 @@
 
 <style>
   .boot {
-    height: 100dvh;
+    height: calc(100dvh - var(--frame-top, 0px));
     display: grid;
     place-items: center;
     color: var(--text-muted);
@@ -422,7 +428,20 @@
       "side top queue"
       "side main queue"
       "player player player";
-    height: 100dvh;
+    height: calc(100dvh - var(--frame-top, 0px));
+  }
+  /* Windows app: the top bar is the title bar, with the window buttons at its right end (see
+     WindowFrame.svelte), so it spans the queue column too. */
+  @media (min-width: 861px) {
+    .shell.framed {
+      grid-template-areas:
+        "side top top"
+        "side main queue"
+        "player player player";
+    }
+    .framed .top {
+      padding-right: calc(24px + 3 * 46px);
+    }
   }
   .side {
     grid-area: side;
@@ -724,7 +743,7 @@
     }
     .queue {
       position: fixed;
-      inset: 0 0 calc(var(--player-h) + var(--tabs-h)) 0;
+      inset: var(--frame-top, 0px) 0 calc(var(--player-h) + var(--tabs-h)) 0;
       z-index: 10;
     }
     .tabs {

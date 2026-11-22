@@ -300,7 +300,7 @@
 <style>
   .np {
     position: fixed;
-    inset: 0;
+    inset: var(--frame-top, 0px) 0 0 0;
     z-index: 30;
     display: flex;
     flex-direction: column;

@@ -1,6 +1,11 @@
 //! The audium app: the Svelte frontend (built with `--mode app`) in a Tauri window. It talks to
 //! the audium server only over HTTP (see frontend/src/lib/api.ts); there is no Rust command the
-//! frontend calls.
+//! frontend calls. On Windows the window has no system title bar: the frontend draws its own
+//! (frontend/src/lib/components/WindowFrame.svelte) and uses the window permissions in
+//! capabilities/default.json.
+
+#[cfg(windows)]
+mod recover;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,6 +25,16 @@ pub fn run() {
     builder
         // Size and position of the window as they were when it was closed.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .setup(|_app| {
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    recover::reload_when_renderer_fails(&window);
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running audium");
 }

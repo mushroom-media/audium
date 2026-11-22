@@ -975,4 +975,7 @@ export const en: Record<string, string> = {
   "Andere Geräte und Browser werden danach abgemeldet.": "Other devices and browsers are logged out afterwards.",
   "Passwort ändern": "Change password",
   "Passwort geändert – andere Geräte sind abgemeldet": "Password changed – other devices are logged out",
+  "Minimieren": "Minimize",
+  "Verkleinern": "Restore down",
+  "Maximieren": "Maximize",
 };

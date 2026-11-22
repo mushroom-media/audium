@@ -120,7 +120,7 @@
 
 <style>
   .auth {
-    min-height: 100dvh;
+    min-height: calc(100dvh - var(--frame-top, 0px));
     display: grid;
     place-items: center;
     padding: 24px 16px;

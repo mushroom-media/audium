@@ -18,6 +18,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-window-state = "2"
 
+[target.'cfg(windows)'.dependencies]
+# The version Tauri itself uses (see Cargo.lock), for the WebView2 events in src/recover.rs.
+webview2-com = "0.39"
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 

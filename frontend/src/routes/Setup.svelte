@@ -678,7 +678,7 @@
 
 <style>
   .wizard {
-    height: 100dvh;
+    height: calc(100dvh - var(--frame-top, 0px));
     overflow-y: auto;
   }
   main {

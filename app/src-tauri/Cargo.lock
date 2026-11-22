@@ -215,6 +215,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "webview2-com",
 ]
 
 [[package]]
