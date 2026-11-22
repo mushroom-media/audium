@@ -1,7 +1,7 @@
 <script lang="ts">
   // Passwords for Subsonic apps (Symfonium, Amperfy, Feishin, ...). Each app gets its own, shown
   // once; the login password never leaves the browser. Guide: docs/apps.md.
-  import { ApiError, del, get, post, serverUrl } from "../../lib/api";
+  import { ApiError, del, get, isApp, post, serverUrl } from "../../lib/api";
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
   import { session } from "../../lib/session.svelte";
@@ -24,6 +24,10 @@
   let naming = $state(false);
   let name = $state("");
   let created = $state<{ name: string; password: string } | null>(null);
+
+  // The desktop app's releases (tags app-v*, see .github/workflows/app.yml); "latest" on GitHub
+  // stays the server's release, so this lists the app releases instead.
+  const WINDOWS_DOWNLOAD = "https://github.com/mushroom-media/audium/releases?q=app-v&expanded=true";
 
   const server = serverUrl();
   const insecure = location.protocol === "http:" && !["localhost", "127.0.0.1"].includes(location.hostname);
@@ -68,6 +72,29 @@
     }
   }
 </script>
+
+{#if !isApp}
+  <section class="set-group">
+    <h2>{t("audium für Windows")}</h2>
+    <div class="set-card">
+      <div class="set-row">
+        <div class="set-label">
+          <strong>{t("Das Programm für den PC")}</strong>
+          <small>{t("Kann alles, was diese Seite kann, in einem eigenen Fenster. Installieren, starten und mit dieser Server-Adresse, deinem Benutzernamen und deinem normalen Passwort anmelden.")}</small>
+        </div>
+        <a class="btn small" href={WINDOWS_DOWNLOAD} target="_blank" rel="noopener noreferrer"><Icon name="desktop" size={16} /> {t("Herunterladen")}</a>
+      </div>
+      <div class="set-row">
+        <div class="set-label">
+          <strong>{t("Server-Adresse")}</strong>
+          <small class="set-mono">{server}</small>
+        </div>
+        <button class="btn small ghost" onclick={() => copy(server, "Server")}>{t("Kopieren")}</button>
+      </div>
+    </div>
+    <p class="set-note">{t("Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.")}</p>
+  </section>
+{/if}
 
 <p class="intro">
   {t("Mit einer Subsonic-App wie")} <strong>{t("Symfonium")}</strong> {t("(Android),")} <strong>{t("Amperfy")}</strong> {t("(iPhone) oder")} <strong>{t("Feishin")}</strong>
@@ -162,6 +189,10 @@
   .modal-buttons {
     justify-content: flex-end;
     margin-top: 8px;
+  }
+  a.btn {
+    text-decoration: none;
+    flex-shrink: 0;
   }
   .prefix {
     color: var(--text-faint);

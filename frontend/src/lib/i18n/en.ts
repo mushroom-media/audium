@@ -546,6 +546,14 @@ export const en: Record<string, string> = {
   "„{name}“ widerrufen? Die App kann sich danach nicht mehr anmelden.": "Revoke “{name}”? The app cannot log in any more afterwards.",
   "Widerrufen": "Revoke",
   "Kopieren geht nur über HTTPS – bitte von Hand übernehmen": "Copying works only over HTTPS – please copy it by hand",
+  "audium für Windows": "audium for Windows",
+  "Das Programm für den PC": "The program for your PC",
+  "Kann alles, was diese Seite kann, in einem eigenen Fenster. Installieren, starten und mit dieser Server-Adresse, deinem Benutzernamen und deinem normalen Passwort anmelden.":
+    "Does everything this page does, in a window of its own. Install it, start it and log in with this server address, your username and your normal password.",
+  "Herunterladen": "Download",
+  "Server-Adresse": "Server address",
+  "Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.":
+    "Windows warns on the first start because the program is not signed yet: \"More info\", then \"Run anyway\".",
   "Mit einer Subsonic-App wie": "With a Subsonic app like",
   "Symfonium": "Symfonium",
   "(Android),": "(Android),",
