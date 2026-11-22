@@ -14,3 +14,6 @@ deploy.ps1
 # local AI tooling
 .claude/
 notes/
+frontend/dist-app/
+app/src-tauri/target/
+app/src-tauri/gen/

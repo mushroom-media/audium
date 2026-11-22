@@ -23,6 +23,8 @@ backend/audium/
   jobs/        DB job queue and worker loop
   devtools/    test library generator, load test, audio fixtures
   supervisor.py  runs API + workers in one container
+frontend/      Svelte web UI; `npm run build:app` builds the same code for the apps (`--mode app`)
+app/           desktop app (Tauri 2) around the frontend, connects to an audium server: see app/README.md
 ```
 
 ## Database migrations
