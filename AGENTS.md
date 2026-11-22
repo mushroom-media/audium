@@ -77,6 +77,7 @@ Further accounts: Settings > Users (create directly or send an invite link). Eve
 docker compose pull && docker compose up -d
 ```
 
+- **Automatic updates every night:** a cron job (`crontab -e`, or the NAS task scheduler, as root) with `0 4 * * * cd <folder with docker-compose.yml> && docker compose pull -q && docker compose up -d && docker image prune -f`. It restarts audium only when a new image exists. Nothing is built on the server.
 - The tag `0.1` in `docker-compose.yml` receives bug fixes automatically. For a new version (0.2, ...), read [CHANGELOG.md](CHANGELOG.md) first, then change the tag.
 - Database migrations run on start. Before each one, audium saves a copy of the database in `data/backups/`.
 - **Backup** = the `data` folder, above all `audium.db` and `secret.key` (`data/covers` can be skipped, a scan rebuilds it). The music needs no audium backup, because audium never writes to it.

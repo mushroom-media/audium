@@ -59,6 +59,14 @@ Each folder directly below `/music` becomes a library folder. If a network share
 docker compose pull && docker compose up -d
 ```
 
+**Automatically every night:** add a cron job on the server (`crontab -e`, or the task scheduler of your NAS, e.g. Synology: Control Panel → Task Scheduler, as root). It checks at 4:00 for a new image and restarts audium only if there is one:
+
+```cron
+0 4 * * * cd /docker/audium && docker compose pull -q && docker compose up -d && docker image prune -f
+```
+
+Replace `/docker/audium` with the folder that holds your `docker-compose.yml`. Nothing is built on your server: the image comes ready from GitHub.
+
 The image tag `0.1` in `docker-compose.yml` follows the bug-fix releases of 0.1. For a new version (0.2, ...), read the [changelog](CHANGELOG.md) and change the tag. Database migrations run automatically on start; audium copies the database to `data/backups/` first. To back up, copy the `data` folder (the cover cache in `data/covers` can be skipped, it is rebuilt by a scan). Your music is never written to, so it needs no audium-specific backup.
 
 ## Hardware
