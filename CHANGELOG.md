@@ -6,6 +6,12 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+### Fixed
+- A first start that was stopped while the database was being created (container stopped, NAS restarted) left a half-created database, and audium no longer started (`table ... already exists`). Database upgrades are now all-or-nothing, and such a half-created database without accounts is set aside (`audium.db.unfinished-<time>`) and created again.
+
+### Added
+- `AGENTS.md`: installation and setup guide for AI assistants. Paste the repository link into your assistant and it knows how audium is installed.
+
 ## [0.1.0] - 2026-11-22
 
 First public release.

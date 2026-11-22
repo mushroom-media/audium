@@ -6,7 +6,7 @@ Self-hosted music streaming for your own library: one Docker container, built fo
 
 ## Quickstart
 
-You need Docker with the Compose plugin. No need to clone the repository: two files are enough.
+You need Docker with the Compose plugin. Using an AI assistant? Give it the link to this repository: [AGENTS.md](AGENTS.md) tells it how to install and set up audium. No need to clone the repository: two files are enough.
 
 ```bash
 mkdir audium && cd audium
