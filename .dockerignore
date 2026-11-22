@@ -6,3 +6,6 @@
 frontend/dist
 data
 music
+frontend/dist-app
+# the desktop app is not part of the server image
+app

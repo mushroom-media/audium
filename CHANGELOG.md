@@ -6,6 +6,10 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+### Added
+- Desktop app for Windows (`app/`, Tauri): the web interface as a program of its own that connects to your audium server. It has its own versions and releases (`app-v*` tags); see [app/README.md](app/README.md).
+- Settings > Connect apps: a section "audium for Windows" with the download link and the server address to enter.
+
 ## [0.1.1] - 2026-11-22
 
 ### Fixed
