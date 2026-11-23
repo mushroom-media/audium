@@ -29,27 +29,26 @@
   interface PageDef {
     id: string;
     title: string;
-    short: string;
     icon: IconName;
     admin?: boolean;
     component: Component;
   }
   const PAGES: PageDef[] = [
-    { id: "playback", title: msg("Wiedergabe"), short: msg("Qualität, Überblenden, Lautstärke"), icon: "play", component: Playback },
-    { id: "library-options", title: msg("Bibliothek"), short: msg("Sortierung, Künstlerbilder"), icon: "album", component: LibraryOptions },
-    { id: "appearance", title: msg("Darstellung"), short: msg("Sprache, Farbschema, Hintergrund"), icon: "palette", component: Appearance },
-    { id: "shortcuts", title: msg("Tastenkürzel"), short: msg("Steuerung per Tastatur"), icon: "keyboard", component: Shortcuts },
-    { id: "devices", title: msg("Geräte"), short: msg("Name dieses Geräts"), icon: "devices", component: Devices },
-    { id: "account", title: msg("Konto"), short: msg("Profil, Passwort, Abmelden"), icon: "user", component: Account },
-    { id: "apps", title: msg("Apps verbinden"), short: msg("Symfonium, Amperfy & Co."), icon: "phone", component: Apps },
-    { id: "library", title: msg("Musikordner"), short: msg("Ordner, Scan, Statistik"), icon: "folder", admin: true, component: Library },
-    { id: "analysis", title: msg("Audioanalyse"), short: msg("Fortschritt, Klangerkennung"), icon: "wave", admin: true, component: Analysis },
-    { id: "autoplaylists", title: msg("Auto-Playlists"), short: msg("Vorschläge für Entdecken"), icon: "compass", admin: true, component: AutoPlaylists },
-    { id: "radio", title: msg("Radio & Mixe"), short: msg("Quellen und Gewichtung"), icon: "radio", admin: true, component: RadioSources },
-    { id: "interfaces", title: msg("Schnittstellen"), short: msg("Subsonic, Apps, ListenBrainz"), icon: "plug", admin: true, component: Interfaces },
-    { id: "users", title: msg("Nutzer"), short: msg("Konten, Einladungen"), icon: "users", admin: true, component: Users },
-    { id: "jobs", title: msg("Hintergrundjobs"), short: msg("Scans, Analysen, Playlists"), icon: "jobs", admin: true, component: Jobs },
-    { id: "reset", title: msg("Zurücksetzen"), short: msg("Werkseinstellungen, neu einrichten"), icon: "trash", admin: true, component: Reset },
+    { id: "playback", title: msg("Wiedergabe"), icon: "play", component: Playback },
+    { id: "library-options", title: msg("Bibliothek"), icon: "album", component: LibraryOptions },
+    { id: "appearance", title: msg("Darstellung"), icon: "palette", component: Appearance },
+    { id: "shortcuts", title: msg("Tastenkürzel"), icon: "keyboard", component: Shortcuts },
+    { id: "devices", title: msg("Geräte"), icon: "devices", component: Devices },
+    { id: "account", title: msg("Konto"), icon: "user", component: Account },
+    { id: "apps", title: msg("Apps verbinden"), icon: "phone", component: Apps },
+    { id: "library", title: msg("Musikordner"), icon: "folder", admin: true, component: Library },
+    { id: "analysis", title: msg("Audioanalyse"), icon: "wave", admin: true, component: Analysis },
+    { id: "autoplaylists", title: msg("Auto-Playlists"), icon: "compass", admin: true, component: AutoPlaylists },
+    { id: "radio", title: msg("Radio & Mixe"), icon: "radio", admin: true, component: RadioSources },
+    { id: "interfaces", title: msg("Schnittstellen"), icon: "plug", admin: true, component: Interfaces },
+    { id: "users", title: msg("Nutzer"), icon: "users", admin: true, component: Users },
+    { id: "jobs", title: msg("Hintergrundjobs"), icon: "jobs", admin: true, component: Jobs },
+    { id: "reset", title: msg("Zurücksetzen"), icon: "trash", admin: true, component: Reset },
   ];
 
   const isAdmin = $derived(session.user?.role === "admin");
@@ -72,7 +71,7 @@
             {#each g.pages as p (p.id)}
               <a class="entry" class:on={p.id === page.id} href={href(`/settings/${p.id}`)} aria-current={p.id === page.id && section ? "page" : undefined}>
                 <span class="tile" aria-hidden="true"><Icon name={p.icon} size={18} /></span>
-                <span class="text"><strong>{t(p.title)}</strong><small>{t(p.short)}</small></span>
+                <span class="text"><strong>{t(p.title)}</strong></span>
                 <span class="chev" aria-hidden="true"><Icon name="chevron" size={16} /></span>
               </a>
             {/each}
@@ -146,13 +145,6 @@
   .text strong {
     font-weight: 550;
     font-size: 0.93rem;
-  }
-  .text small {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .chev {
     display: none;
