@@ -60,7 +60,8 @@ jobs:
             exit 1
           fi
           # For `tauri build` below, merged into tauri.conf.json: the signed installer and
-          # latest.json. (Not inline there: the `}}` would end the ${{ }} expression.)
+          # latest.json. (Not inline in `args:` below: its closing braces would end the expression
+          # there. Nor may this script name the expression syntax itself, not even in a comment.)
           echo 'TAURI_BUILD_ARGS=--config {"bundle":{"createUpdaterArtifacts":true}}' >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
