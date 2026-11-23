@@ -63,7 +63,8 @@
   {#if radios.length}
     <div class="section-head"><h2>{t("Radios für dich")}</h2></div>
     <div class="grid">
-      {#each radios as item (`${item.radio_of}:${item.id}`)}<RecentCard {item} />{/each}
+      <!-- Without the reason the server sends along ("Oft gehört"): the cards show only the name. -->
+      {#each radios as item (`${item.radio_of}:${item.id}`)}<RecentCard item={{ ...item, subtitle: null }} />{/each}
     </div>
   {/if}
 
