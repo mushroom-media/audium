@@ -19,10 +19,8 @@
   import { loadRecentSearches, rememberSearch } from "./lib/recentSearches.svelte";
   import { session, startSession } from "./lib/session.svelte";
   import { avatarInitial, avatarStyle } from "./lib/avatar";
-  import { ui } from "./lib/ui.svelte";
   import { headerTitle } from "./lib/headerTitle.svelte";
-  import RuleEditor from "./lib/components/RuleEditor.svelte";
-  import { post, type Playlist as PlaylistT, type Rule } from "./lib/api";
+  import { appUpdate, watchAppUpdate } from "./lib/appUpdate.svelte";
   import Album from "./routes/Album.svelte";
   import AutoPlaylist from "./routes/AutoPlaylist.svelte";
   import Discover from "./routes/Discover.svelte";
@@ -41,9 +39,6 @@
   import Settings from "./routes/Settings.svelte";
   import Setup from "./routes/Setup.svelte";
   import { t } from "./lib/i18n.svelte";
-
-  // Creating smart playlists from the sidebar is switched off for now; existing ones keep working.
-  const SMART_PLAYLIST_BUTTON = false;
 
   defineRoutes({
     home: "/",
@@ -92,6 +87,7 @@
     player.init();
     startTabs(); // several tabs of this browser are one player
     startSession();
+    watchAppUpdate();
   });
 
   // Gatekeeping: unauthenticated users only see login/setup/invite.
@@ -132,13 +128,6 @@
     }
     else disconnectEvents();
   });
-
-  async function createSmart(name: string, rule: Rule) {
-    const pl = await post<PlaylistT>("/playlists", { name, rule });
-    ui.smartEditor = false;
-    await loadMine();
-    navigate(`/playlists/${pl.id}`);
-  }
 
   async function newPlaylist() {
     const pl = await newPlaylistFlow();
@@ -299,9 +288,6 @@
       <div class="side-head">
         <span>{t("Playlists")}</span>
         <span class="side-btns">
-          {#if SMART_PLAYLIST_BUTTON}
-            <button class="icon-btn" title={t("Neue Smart-Playlist (füllt sich nach Regeln)")} aria-label={t("Neue Smart-Playlist")} onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={17} /></button>
-          {/if}
           <button class="icon-btn" title={t("Neue Playlist")} aria-label={t("Neue Playlist")} onclick={newPlaylist}><Icon name="plus" size={18} /></button>
         </span>
       </div>
@@ -364,6 +350,9 @@
       <!-- The page's heading, once it has scrolled away (see headerTitle.svelte.ts). -->
       <p class="top-title" class:shown={headerTitle.shown} aria-hidden="true">{headerTitle.text}</p>
       <div class="top-end">
+        <!-- Windows app: a new version is downloaded and will be installed on closing. The
+             settings page (Apps) has the details and "restart now". -->
+        {#if appUpdate.version}<a class="update-pill" href={href("/settings/apps")} title={t("Version {version} wird beim Schließen installiert", { version: appUpdate.version })}>{t("Update bereit")}</a>{/if}
         {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label={t("Einstellungen")} title={t("Einstellungen")}><Icon name="settings" /></a>{/if}
         <a class="me" class:active={active("profile")} href={href("/profile")} aria-label={t("Profil")} title={session.user.display_name} style={avatarStyle(session.user.avatar_color)}>{initial}</a>
       </div>
@@ -399,9 +388,6 @@
 
     <Overlays />
     {#if devices.picker}<DevicePicker />{/if}
-    {#if ui.smartEditor}
-      <RuleEditor title={t("Neue Smart-Playlist")} onsave={createSmart} onclose={() => (ui.smartEditor = false)} />
-    {/if}
 
     <nav class="tabs" aria-label={t("Navigation")}>
       {#each NAV as n (n.name)}
@@ -620,6 +606,20 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
+  }
+  .update-pill {
+    flex: none;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-decoration: none;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  .update-pill:hover {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
   }
   .me {
     width: 34px;

@@ -10,6 +10,7 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 - Desktop app for Windows (`app/`, Tauri): the web interface as a program of its own that connects to your audium server. It has its own versions and releases (`app-v*` tags); see [app/README.md](app/README.md).
 - Settings > Connect apps: a section "audium for Windows" with the download link and the server address to enter.
 - Desktop app: its own title bar with the search field and the window buttons, like in a browser.
+- Desktop app: updates itself. New versions are downloaded in the background and installed when you close the app (or at the next start, if Windows was shut down with the app open). It never closes by itself while you listen; "Update ready" in the top bar offers "Restart now". Apps installed before this version need the new version installed by hand once.
 
 ### Fixed
 - Desktop app: after hours in the background the window could stay black until the app was restarted (WebView2 had ended or lost the page). The app now reloads the page, or restarts itself, and notes it in `%LOCALAPPDATA%\io.github.mushroommedia.audium\logs\webview.log`.

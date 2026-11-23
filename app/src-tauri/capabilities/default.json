@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The app's own title bar (frontend/src/lib/components/WindowFrame.svelte): move, minimize, maximize and close the window.",
+  "description": "The app's own title bar (frontend/src/lib/components/WindowFrame.svelte): move, minimize, maximize and close the window. The app's version and the update-ready event for the update hint (frontend/src/lib/appUpdate.svelte.ts).",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-start-dragging",
@@ -10,6 +10,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-close",
+    "core:app:allow-version",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

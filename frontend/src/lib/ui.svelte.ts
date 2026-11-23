@@ -11,8 +11,6 @@ export const ui = $state({
   share: null as null | { playlistId: number },
   /** The "Info" dialog of a track is open. */
   info: null as null | { trackId: number },
-  /** The "new smart playlist" rule editor is open. */
-  smartEditor: false,
   /** The "new playlist" dialog is open; it resolves with the created playlist (or null). */
   newPlaylist: null as null | { resolve: (p: Playlist | null) => void },
 });

@@ -1,15 +1,23 @@
 //! The audium app: the Svelte frontend (built with `--mode app`) in a Tauri window. It talks to
-//! the audium server only over HTTP (see frontend/src/lib/api.ts); there is no Rust command the
-//! frontend calls. On Windows the window has no system title bar: the frontend draws its own
-//! (frontend/src/lib/components/WindowFrame.svelte) and uses the window permissions in
-//! capabilities/default.json.
+//! the audium server only over HTTP (see frontend/src/lib/api.ts); the only Rust commands are the
+//! app's own updates (src/update.rs). On Windows the window has no system title bar: the
+//! frontend draws its own (frontend/src/lib/components/WindowFrame.svelte) and uses the window
+//! permissions in capabilities/default.json.
 
 #[cfg(windows)]
 mod recover;
+#[cfg(windows)]
+mod update;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+
+    #[cfg(windows)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::Pending::default())
+        .invoke_handler(tauri::generate_handler![update::update_ready, update::update_now]);
 
     // A second start brings the open window to the front instead of a second player.
     #[cfg(desktop)]
@@ -38,12 +46,21 @@ pub fn run() {
             #[cfg(windows)]
             {
                 use tauri::Manager;
+                // First: exits the app when an update from last time is installed now.
+                update::install_left_over(_app.handle());
                 if let Some(window) = _app.get_webview_window("main") {
                     recover::reload_when_renderer_fails(&window);
                 }
+                update::watch(_app.handle());
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running audium");
+        .build(tauri::generate_context!())
+        .expect("error while running audium")
+        .run(|_app, _event| {
+            #[cfg(windows)]
+            if let tauri::RunEvent::Exit = _event {
+                update::install_on_exit(_app);
+            }
+        });
 }

@@ -5,8 +5,6 @@ export const en: Record<string, string> = {
   "Navigation": "Navigation",
   "audium Start": "audium home",
   "Playlists": "Playlists",
-  "Neue Smart-Playlist (füllt sich nach Regeln)": "New smart playlist (fills itself by rules)",
-  "Neue Smart-Playlist": "New smart playlist",
   "Neue Playlist": "New playlist",
   "Lieblingssongs": "Favorite songs",
   "{name} – von {owner}": "{name} – by {owner}",
@@ -397,7 +395,6 @@ export const en: Record<string, string> = {
   "Weitere Genres": "More genres",
   "Zuletzt gehört": "Recently played",
   "Radios für dich": "Radios for you",
-  "Smart": "Smart",
   "Neu": "New",
   "von {name}": "by {name}",
   "Alle Alben": "All albums",
@@ -554,6 +551,17 @@ export const en: Record<string, string> = {
   "Server-Adresse": "Server address",
   "Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.":
     "Windows warns on the first start because the program is not signed yet: \"More info\", then \"Run anyway\".",
+  "Version {version} ist bereit": "Version {version} is ready",
+  "Wird installiert, wenn du audium schließt. Oder jetzt: audium startet dann kurz neu.":
+    "It is installed when you close audium. Or now: audium then restarts briefly.",
+  "Version {version}": "Version {version}",
+  "Neue Versionen lädt audium von selbst im Hintergrund und installiert sie beim Schließen.":
+    "audium downloads new versions by itself in the background and installs them when you close it.",
+  "Jetzt neu starten": "Restart now",
+  "Das Update ließ sich nicht starten. audium versucht es beim Schließen noch einmal.":
+    "The update could not be started. audium tries again when you close it.",
+  "Update bereit": "Update ready",
+  "Version {version} wird beim Schließen installiert": "Version {version} is installed when you close audium",
   "Mit einer Subsonic-App wie": "With a Subsonic app like",
   "Symfonium": "Symfonium",
   "(Android),": "(Android),",

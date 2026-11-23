@@ -2,6 +2,7 @@
   // Passwords for Subsonic apps (Symfonium, Amperfy, Feishin, ...). Each app gets its own, shown
   // once; the login password never leaves the browser. Guide: docs/apps.md.
   import { ApiError, del, get, isApp, post, serverUrl } from "../../lib/api";
+  import { appUpdate, restartForUpdate } from "../../lib/appUpdate.svelte";
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
   import { session } from "../../lib/session.svelte";
@@ -63,6 +64,14 @@
     }
   }
 
+  async function updateNow() {
+    try {
+      await restartForUpdate();
+    } catch {
+      toast(t("Das Update ließ sich nicht starten. audium versucht es beim Schließen noch einmal."));
+    }
+  }
+
   async function copy(text: string, what: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -93,6 +102,27 @@
       </div>
     </div>
     <p class="set-note">{t("Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.")}</p>
+  </section>
+{:else if appUpdate.current}
+  <!-- The Windows app (app/src-tauri/src/update.rs): updates itself; here only the state. -->
+  <section class="set-group">
+    <h2>{t("audium für Windows")}</h2>
+    <div class="set-card">
+      <div class="set-row">
+        <div class="set-label">
+          {#if appUpdate.version}
+            <strong>{t("Version {version} ist bereit", { version: appUpdate.version })}</strong>
+            <small>{t("Wird installiert, wenn du audium schließt. Oder jetzt: audium startet dann kurz neu.")}</small>
+          {:else}
+            <strong>{t("Version {version}", { version: appUpdate.current })}</strong>
+            <small>{t("Neue Versionen lädt audium von selbst im Hintergrund und installiert sie beim Schließen.")}</small>
+          {/if}
+        </div>
+        {#if appUpdate.version}
+          <button class="btn small" disabled={appUpdate.installing} onclick={updateNow}>{t("Jetzt neu starten")}</button>
+        {/if}
+      </div>
+    </div>
   </section>
 {/if}
 

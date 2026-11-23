@@ -101,9 +101,18 @@ The app (`app/`) has its own version and tags (`app-v0.1.0`), independent of the
 
 1. Set the version in `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and `app/package.json` (the workflow refuses a tag that does not match `tauri.conf.json`).
 2. Commit, then tag and push: `git tag -a app-v0.1.0 -m "audium app 0.1.0" && git push origin main app-v0.1.0`.
-3. Check the draft release on GitHub, then publish it. **Untick "Set as the latest release"**: "latest" stays the server's release, which the install instructions point to.
+3. Check the draft release on GitHub (it has the installer, its `.sig` and `latest.json`), then publish it. **Untick "Set as the latest release"**: "latest" stays the server's release, which the install instructions point to.
+4. Publishing starts the job "Publish app update", which copies `latest.json` into the pre-release `app-update` (created on first use). From then on the installed apps find the new version.
 
 The installer is not code-signed yet, so Windows SmartScreen warns on first start.
+
+#### App updates
+
+The installed app updates itself (`app/src-tauri/src/update.rs`): it looks for `latest.json` in the release `app-update` shortly after starting and then every 6 hours, downloads a newer installer in the background and installs it when the user closes the app. If Windows shuts down with the app open, the next start installs it instead, before the window shows. It never closes by itself while in use. "Update ready" in the top bar and Settings > Connect apps offer "Restart now". Errors only go to `%LOCALAPPDATA%\io.github.mushroommedia.audium\logs\update.log`.
+
+Updates are checked with an updater signature (minisign, not the Windows code signature). The public key is `plugins.updater.pubkey` in `tauri.conf.json`; the private key is the repository secret `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, empty or unset for a key without a password). Tag builds stop without it. **Keep a backup of the private key**: without it, no installed app accepts an update anymore, and everyone would have to reinstall by hand after a new key. A new key pair: `npx tauri signer generate -w ~/.tauri/audium-updater.key` in `app/`.
+
+To build signed update files locally: `TAURI_SIGNING_PRIVATE_KEY=<path to the key> npx tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'` in `app/`.
 
 ### Running a local build
 

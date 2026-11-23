@@ -33,6 +33,16 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCQzEwREJBMTVGQzgyNTMKUldSVGd2d1Z1ZzNCSzAxVGxwQnVuUmJkU1grMWY4MWwwcTB5VVZqWnVZbzQ4b0s0Ry8weFVuRisK",
+      "endpoints": ["https://github.com/mushroom-media/audium/releases/download/app-update/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],

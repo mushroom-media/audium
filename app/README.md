@@ -48,3 +48,9 @@ SmartScreen warning ("More info" > "Run anyway").
 For development, `npm run dev` starts the frontend in app mode (Vite, port 5173) and opens it in
 the app window with hot reload. A local server to connect to: `docker compose -f
 docker-compose.dev.yml up app` in the repository root, then `http://localhost:8080` in the app.
+
+## Updates
+
+The installed app updates itself from the GitHub releases: it downloads a new version in the
+background and installs it when you close it. How it works and how to release:
+[docs/development.md](../docs/development.md#app-updates).

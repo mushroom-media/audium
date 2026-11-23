@@ -8,7 +8,6 @@
   import { mine, newPlaylistFlow } from "../lib/mine.svelte";
   import { keepScroll } from "../lib/keepScroll";
   import { href, navigate, recallEntry, rememberEntry } from "../lib/router.svelte";
-  import { ui } from "../lib/ui.svelte";
   import { session } from "../lib/session.svelte";
   import { t } from "../lib/i18n.svelte";
 
@@ -71,7 +70,6 @@
   <div class="section-head">
     <h2>{t("Playlists")}</h2>
     <span class="head-actions">
-      <button class="btn ghost small" onclick={() => (ui.smartEditor = true)}><Icon name="spark" size={16} /> {t("Smart")}</button>
       <button class="btn small" onclick={newPlaylist}><Icon name="plus" size={16} /> {t("Neu")}</button>
     </span>
   </div>
