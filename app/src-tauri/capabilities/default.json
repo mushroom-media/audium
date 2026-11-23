@@ -13,6 +13,7 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "core:app:allow-version",
+    { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }] },
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

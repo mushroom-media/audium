@@ -30,6 +30,10 @@ pub fn run() {
         }
     }));
 
+    // Links to other sites (the repository in Settings > About) open in the system browser.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_opener::init());
+
     builder
         // Size and position of the window as they were when it was closed. Not the title bar: that
         // comes from the config (none on Windows), and a saved state of an older version would

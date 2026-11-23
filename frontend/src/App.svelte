@@ -23,6 +23,7 @@
   import { appUpdate, watchAppUpdate } from "./lib/appUpdate.svelte";
   import { appFullscreen, desktopApp, setNowPlayingFullscreen } from "./lib/appFullscreen.svelte";
   import { startSwipeNav } from "./lib/swipeNav.svelte";
+  import { startExternalLinks } from "./lib/externalLinks";
   import SwipeHint from "./lib/components/SwipeHint.svelte";
   import Album from "./routes/Album.svelte";
   import AutoPlaylist from "./routes/AutoPlaylist.svelte";
@@ -91,7 +92,10 @@
     startTabs(); // several tabs of this browser are one player
     startSession();
     watchAppUpdate();
-    if (desktopApp) startSwipeNav(); // browsers swipe back and forward themselves
+    if (desktopApp) {
+      startSwipeNav(); // browsers swipe back and forward themselves
+      startExternalLinks();
+    }
   });
 
   // Gatekeeping: unauthenticated users only see login/setup/invite.

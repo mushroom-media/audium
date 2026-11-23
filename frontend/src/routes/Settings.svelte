@@ -7,6 +7,7 @@
   import { pageTitle } from "../lib/headerTitle.svelte";
   import { href } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
+  import About from "./settings/About.svelte";
   import Account from "./settings/Account.svelte";
   import Analysis from "./settings/Analysis.svelte";
   import Appearance from "./settings/Appearance.svelte";
@@ -41,6 +42,7 @@
     { id: "devices", title: msg("Geräte"), icon: "devices", component: Devices },
     { id: "account", title: msg("Konto"), icon: "user", component: Account },
     { id: "apps", title: msg("Apps verbinden"), icon: "phone", component: Apps },
+    { id: "about", title: msg("Über"), icon: "info", component: About },
     { id: "library", title: msg("Musikordner"), icon: "folder", admin: true, component: Library },
     { id: "analysis", title: msg("Audioanalyse"), icon: "wave", admin: true, component: Analysis },
     { id: "autoplaylists", title: msg("Auto-Playlists"), icon: "compass", admin: true, component: AutoPlaylists },
