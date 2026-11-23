@@ -21,7 +21,9 @@
   import { avatarInitial, avatarStyle } from "./lib/avatar";
   import { headerTitle } from "./lib/headerTitle.svelte";
   import { appUpdate, watchAppUpdate } from "./lib/appUpdate.svelte";
-  import { appFullscreen, setNowPlayingFullscreen } from "./lib/appFullscreen.svelte";
+  import { appFullscreen, desktopApp, setNowPlayingFullscreen } from "./lib/appFullscreen.svelte";
+  import { startSwipeNav } from "./lib/swipeNav.svelte";
+  import SwipeHint from "./lib/components/SwipeHint.svelte";
   import Album from "./routes/Album.svelte";
   import AutoPlaylist from "./routes/AutoPlaylist.svelte";
   import Discover from "./routes/Discover.svelte";
@@ -89,6 +91,7 @@
     startTabs(); // several tabs of this browser are one player
     startSession();
     watchAppUpdate();
+    if (desktopApp) startSwipeNav(); // browsers swipe back and forward themselves
   });
 
   // Gatekeeping: unauthenticated users only see login/setup/invite.
@@ -258,6 +261,7 @@
 
 <svelte:window onkeydown={onKey} />
 
+{#if desktopApp}<SwipeHint />{/if}
 {#if ownFrame && !appFullscreen.on}<WindowFrame strip={!inShell || phone || player.nowPlayingOpen} />{/if}
 
 {#if !session.ready}
