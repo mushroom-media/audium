@@ -97,6 +97,11 @@ class FreezeIn(BaseModel):
 
 class RulePreviewIn(BaseModel):
     rule: dict
+    tracks: int = Field(20, ge=0, le=rules.MAX_LIMIT, description="How many of the matching tracks to return")
+    seed: int = Field(1, ge=0, le=2**31, description="Random order: another seed gives another selection")
+    exclude: list[int] = Field(
+        [], max_length=rules.MAX_LIMIT, description="Track ids left out (e.g. removed by hand); others take their place"
+    )
 
 
 class RulePreviewOut(BaseModel):
@@ -228,9 +233,16 @@ def rule_fields(user: User = Depends(current_user), db: Database = Depends(get_d
 @router.post("/rules/preview", response_model=RulePreviewOut, summary="Try a rule before saving it")
 def rule_preview(body: RulePreviewIn, _user: User = Depends(current_user), db: Database = Depends(get_db)):
     rule = rules.validate(body.rule)
+    stmt = rules.query(rule, seed=body.seed, mixed=True)
+    if body.exclude:
+        stmt = stmt.where(tracks.c.id.not_in(body.exclude))
     with db.read() as conn:
-        ids = [r[0] for r in conn.execute(rules.query(rule, seed=1))]
-        return {"count": len(ids), "tracks": _tracks(conn, ids[:20]), "needs_analysis": rules.uses_analysis(rule)}
+        ids = [r[0] for r in conn.execute(stmt)]
+        return {
+            "count": len(ids),
+            "tracks": _tracks(conn, ids[: body.tracks]),
+            "needs_analysis": rules.uses_analysis(rule),
+        }
 
 
 @router.get("/tracks/{track_id}/similar", response_model=list[StationTrackOut], summary="Similar tracks")

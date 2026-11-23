@@ -3,7 +3,7 @@
 import { currentConnection, del, eventsUrl, get, post, put, refreshMediaToken, type Playlist, type Track } from "./api";
 import { deviceParams, unwireDevices, wireDevices } from "./devices.svelte";
 import { onRole, ready } from "./tabs.svelte";
-import { promptText } from "./ui.svelte";
+import { ui } from "./ui.svelte";
 
 export const mine = $state({
   playlists: [] as Playlist[],
@@ -134,8 +134,10 @@ export async function loadMine() {
   connectEvents();
 }
 
-/** "New playlist" from anywhere (sidebar on desktop, start page on phones). */
-export async function newPlaylistFlow(): Promise<Playlist | null> {
-  const name = await promptText("Neue Playlist", "", "Erstellen");
-  return name ? createPlaylist(name) : null;
+/** "New playlist" from anywhere (sidebar on desktop, start page on phones): the dialog with the
+ * name and "fill automatically" (NewPlaylist.svelte, shown by Overlays). */
+export function newPlaylistFlow(): Promise<Playlist | null> {
+  return new Promise((resolve) => {
+    ui.newPlaylist = { resolve };
+  });
 }

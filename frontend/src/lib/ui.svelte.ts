@@ -1,6 +1,6 @@
 // App-wide UI state: the track context menu, the text prompt, short notifications.
 
-import type { Track } from "./api";
+import type { Playlist, Track } from "./api";
 import { t } from "./i18n.svelte";
 
 export const ui = $state({
@@ -13,6 +13,8 @@ export const ui = $state({
   info: null as null | { trackId: number },
   /** The "new smart playlist" rule editor is open. */
   smartEditor: false,
+  /** The "new playlist" dialog is open; it resolves with the created playlist (or null). */
+  newPlaylist: null as null | { resolve: (p: Playlist | null) => void },
 });
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;

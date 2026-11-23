@@ -259,8 +259,17 @@ def shuffle_key(seed: int):
     return (tracks.c.id * 2654435761 + seed) % 4294967296
 
 
-def query(rule: dict, seed: int = 0) -> Select:
-    """SELECT tracks.id matching a *validated* rule, ordered and limited."""
+def mixed_shuffle_key(seed: int):
+    """Like shuffle_key, but each seed gives a really different order: the seed is mixed into the
+    id (XOR; SQLite has no XOR operator, (a | b) - (a & b) is the same) before it is scrambled.
+    shuffle_key only adds the seed, which keeps the order and just moves its start."""
+    mixed = tracks.c.id.op("|")(seed) - tracks.c.id.op("&")(seed)
+    return (mixed * 2654435761) % 4294967296
+
+
+def query(rule: dict, seed: int = 0, mixed: bool = False) -> Select:
+    """SELECT tracks.id matching a *validated* rule, ordered and limited. `mixed`: a random order
+    that differs per seed (mixed_shuffle_key), for "pick others" in a preview."""
     conds = [_condition(c) for c in rule["conditions"]]
     where = and_(*conds) if rule["match"] == "all" else or_(*conds)
     stmt = (
@@ -270,7 +279,7 @@ def query(rule: dict, seed: int = 0) -> Select:
     )
     order = rule["order"]
     if order == "random":
-        stmt = stmt.order_by(shuffle_key(seed))
+        stmt = stmt.order_by(mixed_shuffle_key(seed) if mixed else shuffle_key(seed), tracks.c.id)
     elif order == "added":
         stmt = stmt.order_by(tracks.c.added_at.desc(), tracks.c.id)
     elif order == "year":

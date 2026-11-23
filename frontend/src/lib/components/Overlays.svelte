@@ -5,6 +5,7 @@
   import { toast, ui } from "../ui.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
+  import NewPlaylist from "./NewPlaylist.svelte";
   import TrackInfo from "./TrackInfo.svelte";
   import TrackMenu from "./TrackMenu.svelte";
   import { t } from "../i18n.svelte";
@@ -68,6 +69,16 @@
 
 <TrackMenu />
 {#if ui.info}<TrackInfo trackId={ui.info.trackId} onclose={() => (ui.info = null)} />{/if}
+
+{#if ui.newPlaylist}
+  <NewPlaylist
+    ondone={(pl) => {
+      const p = ui.newPlaylist;
+      ui.newPlaylist = null;
+      p?.resolve(pl);
+    }}
+  />
+{/if}
 
 {#if ui.prompt}
   <Modal title={ui.prompt.title} onclose={() => answer(null)}>

@@ -512,6 +512,26 @@ def test_smart_playlist_lifecycle(analysed, db, users):
     assert bob_c.get(f"/api/v1/playlists/{pl['id']}").json()["item_count"] == 0
 
 
+def test_rule_preview_for_filling_a_playlist(analysed, db, users):
+    """The "fill automatically" dialog: the whole list, another selection per seed, removed tracks
+    replaced by the next ones."""
+    bob_c = users["bob"][1]
+    rule = {"conditions": [{"field": "year", "op": "between", "value": [1990, 1999]}], "limit": 30}
+
+    def preview(**extra) -> list[int]:
+        r = bob_c.post("/api/v1/rules/preview", json={"rule": rule, **extra})
+        assert r.status_code == 200
+        return [t["id"] for t in r.json()["tracks"]]
+
+    full = preview(tracks=30)
+    assert len(full) == 30 and full == preview(tracks=30)
+    assert preview(tracks=30, seed=7) != full
+    removed = full[:3]
+    rest = preview(tracks=30, exclude=removed)
+    assert len(rest) == 30 and not set(removed) & set(rest) and rest[:27] == full[3:]
+    assert bob_c.post("/api/v1/rules/preview", json={"rule": rule, "tracks": 5000}).status_code == 422
+
+
 def test_rule_fields_cover_genre_and_text(analysed, db, users):
     bob_c = users["bob"][1]
     with db.read() as conn:

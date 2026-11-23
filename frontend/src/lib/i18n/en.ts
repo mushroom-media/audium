@@ -978,4 +978,13 @@ export const en: Record<string, string> = {
   "Minimieren": "Minimize",
   "Verkleinern": "Restore down",
   "Maximieren": "Maximize",
+  "Name der Playlist": "Playlist name",
+  "Automatisch füllen": "Fill automatically",
+  "Nicht automatisch füllen": "Do not fill automatically",
+  "Anzahl": "Number of",
+  "– mehr passen nicht": "– no more match",
+  "{n} entfernte zurückholen": "bring back {n} removed",
+  "Andere Auswahl": "Pick others",
+  "Erstellen mit {n}": "Create with {n}",
+  "Erstellen": "Create",
 };

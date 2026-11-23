@@ -46,7 +46,9 @@
 </script>
 
 {#if strip}<div class="strip" data-tauri-drag-region></div>{/if}
-<div class="controls">
+<!-- In the top bar the buttons are as tall as the bar, so their icons line up with the search
+     field and the profile picture. -->
+<div class="controls" class:tall={!strip}>
   <button title={t("Minimieren")} aria-label={t("Minimieren")} onclick={() => win?.minimize()}>
     <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" /></svg>
   </button>
@@ -91,6 +93,9 @@
     background: transparent;
     color: var(--text);
     cursor: default;
+  }
+  .tall button {
+    height: var(--top-h);
   }
   button:hover {
     background: color-mix(in srgb, var(--text) 10%, transparent);

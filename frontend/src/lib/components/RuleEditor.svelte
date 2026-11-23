@@ -6,9 +6,9 @@
   import { untrack } from "svelte";
   import { ApiError, get, post, type Rule, type RuleCondition, type RuleField, type Track } from "../api";
   import { ruleFieldLabels } from "../errors";
-  import ChipInput from "./ChipInput.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
+  import RuleFilters, { emptyFilters, filterConditions, type FilterValues } from "./RuleFilters.svelte";
   import { locale, msg, t } from "../i18n.svelte";
 
   let {
@@ -49,18 +49,9 @@
   };
   const OPTION_LABELS: Record<string, string> = { major: msg("Dur"), minor: msg("Moll") };
 
-  type Range = { from: number | null; to: number | null };
-
   /** Splits a rule into what the form shows and the conditions it keeps as they are. */
   function parse(rule: Rule | null | undefined) {
-    const out = {
-      genres: [] as string[],
-      artists: [] as string[],
-      bpm: { from: null, to: null } as Range,
-      year: { from: null, to: null } as Range,
-      addedDays: null as number | null,
-      kept: [] as RuleCondition[],
-    };
+    const out: FilterValues & { kept: RuleCondition[] } = { ...emptyFilters(), kept: [] };
     if (!rule) return out;
     const conds = rule.conditions;
     // "any" only fits the form when every condition is a genre: then it's one list of genres.
@@ -93,20 +84,15 @@
 
   let fields = $state<RuleField[]>([]);
   let orders = $state<string[]>(["random"]);
-  let allGenres = $state<string[]>([]);
   // The editor starts from the props once and then owns its state.
   const start = untrack(() => ({ name: initialName, rule: initial, form: parse(initial) }));
   let name = $state(start.name);
   const match = start.rule?.match === "any" && start.form.kept.length ? "any" : "all";
   let limit = $state(start.rule?.limit ?? 200);
   let order = $state(start.rule?.order ?? "random");
-  let chosen = $state<string[]>(start.form.genres);
-  let bpm = $state<Range>(start.form.bpm);
-  let year = $state<Range>(start.form.year);
-  let addedDays = $state<number | null>(start.form.addedDays);
-  let kept = $state<RuleCondition[]>(start.form.kept);
-  let likeArtists = $state<string[]>(start.form.artists);
-  let artistSuggestions = $state<string[]>([]);
+  const { kept: keptStart, ...filterStart } = start.form;
+  let filters = $state<FilterValues>(filterStart);
+  let kept = $state<RuleCondition[]>(keptStart);
   let preview = $state<{ count: number; tracks: Track[]; needs_analysis: boolean } | null>(null);
   let previewError = $state<string | null>(null);
   let saving = $state(false);
@@ -117,42 +103,9 @@
       for (const f of r.fields) ruleFieldLabels[f.name] = f.label;
       orders = r.orders;
     });
-    get<{ name: string }[]>("/genres").then((g) => (allGenres = g.map((x) => x.name)));
   });
 
-  // Artist suggestions come from the search, as you type.
-  let artistQuery: AbortController | undefined;
-  function findArtists(q: string) {
-    artistQuery?.abort();
-    if (!q) return;
-    artistQuery = new AbortController();
-    get<{ artists: { name: string }[] }>("/search", { q, types: "artist", limit: 10 }, artistQuery.signal)
-      .then((r) => (artistSuggestions = r.artists.map((a) => a.name)))
-      .catch(() => {});
-  }
-
-  /** A number input's value, or null when it's empty. */
-  const numberOf = (v: unknown) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
-
-  function rangeCondition(field: string, r: Range): RuleCondition | null {
-    const from = numberOf(r.from);
-    const to = numberOf(r.to);
-    if (from !== null && to !== null) return { field, op: "between", value: [from, to] };
-    if (from !== null) return { field, op: ">=", value: from };
-    if (to !== null) return { field, op: "<=", value: to };
-    return null;
-  }
-
-  const conditions = $derived<RuleCondition[]>(
-    [
-      ...kept,
-      chosen.length ? { field: "genre", op: "is", value: chosen.length === 1 ? chosen[0] : [...chosen] } : null,
-      likeArtists.length ? { field: "like_artist", op: "is", value: [...likeArtists] } : null,
-      rangeCondition("bpm", bpm),
-      rangeCondition("year", year),
-      numberOf(addedDays) !== null ? { field: "added_days", op: "<=", value: numberOf(addedDays)! } : null,
-    ].filter((c): c is RuleCondition => c !== null),
-  );
+  const conditions = $derived<RuleCondition[]>([...kept, ...filterConditions(filters)]);
   const rule = $derived<Rule>({ match, conditions, limit: Number(limit) || 200, order });
 
   // Live preview, debounced: the server validates and counts.
@@ -209,41 +162,7 @@
       <label class="name">{t("Name")}<input bind:value={name} maxlength="200" placeholder={t("z. B. Schnelle 90er")} /></label>
     {/if}
 
-    <div class="filters">
-      <span class="label" id="genre-label">{t("Genre")}</span>
-      <ChipInput bind:values={chosen} suggestions={allGenres} labelledby="genre-label"
-        placeholder={t("Genre wählen …")} morePlaceholder={t("weiteres Genre …")} />
-
-      <span class="label" id="artist-label">{t("In Richtung von")}</span>
-      <div>
-        <ChipInput bind:values={likeArtists} suggestions={artistSuggestions} labelledby="artist-label" onquery={findArtists}
-          placeholder={t("Künstler eingeben …")} morePlaceholder={t("weiterer Künstler …")} />
-        <p class="field-hint">{t("Titel dieser Künstler, dazu ähnliche Künstler und ihre Stilrichtung.")}</p>
-      </div>
-
-      <span class="label">{t("Tempo")} ✦</span>
-      <div class="range">
-        <input type="number" min="0" max="300" bind:value={bpm.from} placeholder={t("von")} aria-label={t("Tempo von")} />
-        <span>–</span>
-        <input type="number" min="0" max="300" bind:value={bpm.to} placeholder={t("bis")} aria-label={t("Tempo bis")} />
-        <span class="unit">BPM</span>
-      </div>
-
-      <span class="label">{t("Jahr")}</span>
-      <div class="range">
-        <input type="number" min="1900" max="2100" bind:value={year.from} placeholder={t("von")} aria-label={t("Jahr von")} />
-        <span>–</span>
-        <input type="number" min="1900" max="2100" bind:value={year.to} placeholder={t("bis")} aria-label={t("Jahr bis")} />
-        <span class="unit"></span>
-      </div>
-
-      <span class="label">{t("Hinzugefügt")}</span>
-      <div class="range">
-        <span>{t("in den letzten")}</span>
-        <input type="number" min="1" bind:value={addedDays} aria-label={t("Hinzugefügt in den letzten … Tagen")} />
-        <span>{t("Tagen")}</span>
-      </div>
-    </div>
+    <RuleFilters bind:values={filters} />
 
     {#if kept.length}
       <div class="kept">
@@ -311,32 +230,6 @@
   .name input {
     width: 100%;
   }
-  .filters {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 10px 14px;
-    align-items: center;
-  }
-  .label {
-    color: var(--text-muted);
-  }
-  .field-hint {
-    margin: 4px 0 0;
-    color: var(--text-faint);
-    font-size: 0.8rem;
-  }
-  .range {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    color: var(--text-muted);
-  }
-  .range input {
-    width: 90px;
-  }
-  .unit {
-    min-width: 2.5em;
-  }
   .kept {
     display: flex;
     flex-direction: column;
@@ -394,15 +287,7 @@
     justify-content: flex-end;
     gap: 10px;
   }
-  /* Narrow screens: each label above its control. */
   @media (max-width: 640px) {
-    .filters {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 4px;
-    }
-    .filters > .label:not(:first-child) {
-      margin-top: 8px;
-    }
     .row {
       flex-direction: column;
       gap: 8px;
