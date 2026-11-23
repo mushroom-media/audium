@@ -21,6 +21,7 @@
   import { avatarInitial, avatarStyle } from "./lib/avatar";
   import { headerTitle } from "./lib/headerTitle.svelte";
   import { appUpdate, watchAppUpdate } from "./lib/appUpdate.svelte";
+  import { appFullscreen, setNowPlayingFullscreen } from "./lib/appFullscreen.svelte";
   import Album from "./routes/Album.svelte";
   import AutoPlaylist from "./routes/AutoPlaylist.svelte";
   import Discover from "./routes/Discover.svelte";
@@ -244,6 +245,9 @@
   // The full layout with its top bar (see the {#if} chain below), where the title bar buttons fit.
   const inShell = $derived(session.ready && !!session.user && !PUBLIC.has(router.route.name) && router.route.name !== "setup");
 
+  // Desktop app: "now playing" fills the screen while it is open (also via N, Esc and the back button).
+  $effect(() => setNowPlayingFullscreen(player.nowPlayingOpen));
+
   const active = (name: string) =>
     router.route.name === name ||
     (name === "library" && (router.route.name === "album" || router.route.name === "artist")) ||
@@ -254,7 +258,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-{#if ownFrame}<WindowFrame strip={!inShell || phone || player.nowPlayingOpen} />{/if}
+{#if ownFrame && !appFullscreen.on}<WindowFrame strip={!inShell || phone || player.nowPlayingOpen} />{/if}
 
 {#if !session.ready}
   <!-- Not a logout: the server is starting (e.g. after an update) or not reachable; startSession tries again. -->

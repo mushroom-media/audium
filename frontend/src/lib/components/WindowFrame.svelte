@@ -42,6 +42,8 @@
     const root = document.documentElement;
     root.style.setProperty("--frame-top", strip ? "32px" : "0px");
     root.classList.add("own-frame");
+    // Gone while "now playing" fills the screen (appFullscreen.svelte.ts): no space above the page.
+    return () => root.style.setProperty("--frame-top", "0px");
   });
 </script>
 
