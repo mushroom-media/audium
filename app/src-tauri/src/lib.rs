@@ -23,8 +23,17 @@ pub fn run() {
     }));
 
     builder
-        // Size and position of the window as they were when it was closed.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Size and position of the window as they were when it was closed. Not the title bar: that
+        // comes from the config (none on Windows), and a saved state of an older version would
+        // bring the system title bar back.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         .setup(|_app| {
             #[cfg(windows)]
             {
