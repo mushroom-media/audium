@@ -6,6 +6,10 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+### Added
+- Desktop app for macOS (one app for Apple silicon and Intel) and Linux (AppImage, .deb package), with the same features as on Windows: the top bar as the title bar, "now playing" in full screen, swipe back and forward, updates by itself. On macOS and in the AppImage a new version is put in place in the background and is there at the next start; the .deb package is updated by hand.
+- Settings > Connect apps: the download section is now "audium for Windows, macOS and Linux", with a hint for the system you use.
+
 ## [0.1.2] - 2026-11-23
 
 ### Added

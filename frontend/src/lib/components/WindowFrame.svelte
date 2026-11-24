@@ -1,9 +1,21 @@
 <script lang="ts" module>
   import { isApp } from "../api";
 
-  /** The Windows app draws its own title bar (app/src-tauri/tauri.windows.conf.json turns the
-   * system one off). Other platforms keep their system title bar. */
-  export const ownFrame = isApp && typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+
+  /** The desktop app has no system title bar; the top bar of the page takes its place.
+   * - "buttons" (Windows, Linux): no title bar at all (app/src-tauri/tauri.windows.conf.json,
+   *   tauri.linux.conf.json); this component draws minimize, maximize and close.
+   * - "mac" (macOS): the page reaches up under a transparent title bar that keeps the system's
+   *   buttons at the top left (tauri.macos.conf.json); here only the room for them. */
+  export const frameKind: "buttons" | "mac" | null = !isApp || /Android|iPhone|iPad/.test(ua)
+    ? null
+    : /Macintosh/.test(ua)
+      ? "mac"
+      : /Windows|Linux/.test(ua)
+        ? "buttons"
+        : null;
+  export const ownFrame = frameKind !== null;
 </script>
 
 <script lang="ts">
@@ -38,18 +50,22 @@
     };
   });
 
+  // macOS: the height of its standard title bar, where its buttons sit.
+  const stripHeight = frameKind === "mac" ? 28 : 32;
+
   $effect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--frame-top", strip ? "32px" : "0px");
+    root.style.setProperty("--frame-top", strip ? `${stripHeight}px` : "0px");
     root.classList.add("own-frame");
     // Gone while "now playing" fills the screen (appFullscreen.svelte.ts): no space above the page.
     return () => root.style.setProperty("--frame-top", "0px");
   });
 </script>
 
-{#if strip}<div class="strip" data-tauri-drag-region></div>{/if}
+{#if strip}<div class="strip" style:height="{stripHeight}px" data-tauri-drag-region></div>{/if}
 <!-- In the top bar the buttons are as tall as the bar, so their icons line up with the search
-     field and the profile picture. -->
+     field and the profile picture. macOS draws its own buttons. -->
+{#if frameKind === "buttons"}
 <div class="controls" class:tall={!strip}>
   <button title={t("Minimieren")} aria-label={t("Minimieren")} onclick={() => win?.minimize()}>
     <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" /></svg>
@@ -69,12 +85,12 @@
     <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" /></svg>
   </button>
 </div>
+{/if}
 
 <style>
   .strip {
     position: fixed;
     inset: 0 0 auto 0;
-    height: 32px;
     z-index: 1000;
     background: var(--bg);
   }

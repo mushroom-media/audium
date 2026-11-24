@@ -2,7 +2,7 @@
   // Passwords for Subsonic apps (Symfonium, Amperfy, Feishin, ...). Each app gets its own, shown
   // once; the login password never leaves the browser. Guide: docs/apps.md.
   import { ApiError, del, get, isApp, post, serverUrl } from "../../lib/api";
-  import { appUpdate, restartForUpdate } from "../../lib/appUpdate.svelte";
+  import { APP_DOWNLOADS, appUpdate, restartForUpdate } from "../../lib/appUpdate.svelte";
   import Icon from "../../lib/components/Icon.svelte";
   import Modal from "../../lib/components/Modal.svelte";
   import { session } from "../../lib/session.svelte";
@@ -26,9 +26,9 @@
   let name = $state("");
   let created = $state<{ name: string; password: string } | null>(null);
 
-  // The desktop app's releases (tags app-v*, see .github/workflows/app.yml); "latest" on GitHub
-  // stays the server's release, so this lists the app releases instead.
-  const WINDOWS_DOWNLOAD = "https://github.com/mushroom-media/audium/releases?q=app-v&expanded=true";
+  // The system this page runs on, for the download hint and the app's own heading.
+  const ua = navigator.userAgent;
+  const desktopOs = /Android|iPhone|iPad/.test(ua) ? null : /Macintosh/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : null;
 
   const server = serverUrl();
   const insecure = location.protocol === "http:" && !["localhost", "127.0.0.1"].includes(location.hostname);
@@ -68,7 +68,11 @@
     try {
       await restartForUpdate();
     } catch {
-      toast(t("Das Update ließ sich nicht starten. audium versucht es beim Schließen noch einmal."));
+      toast(
+        appUpdate.mode === "next-start"
+          ? t("audium ließ sich nicht neu starten. Die neue Version ist beim nächsten Start da.")
+          : t("Das Update ließ sich nicht starten. audium versucht es beim Schließen noch einmal."),
+      );
     }
   }
 
@@ -84,14 +88,14 @@
 
 {#if !isApp}
   <section class="set-group">
-    <h2>{t("audium für Windows")}</h2>
+    <h2>{t("audium für Windows, macOS und Linux")}</h2>
     <div class="set-card">
       <div class="set-row">
         <div class="set-label">
           <strong>{t("Das Programm für den PC")}</strong>
           <small>{t("Kann alles, was diese Seite kann, in einem eigenen Fenster. Installieren, starten und mit dieser Server-Adresse, deinem Benutzernamen und deinem normalen Passwort anmelden.")}</small>
         </div>
-        <a class="btn small" href={WINDOWS_DOWNLOAD} target="_blank" rel="noopener noreferrer"><Icon name="desktop" size={16} /> {t("Herunterladen")}</a>
+        <a class="btn small" href={APP_DOWNLOADS} target="_blank" rel="noopener noreferrer"><Icon name="desktop" size={16} /> {t("Herunterladen")}</a>
       </div>
       <div class="set-row">
         <div class="set-label">
@@ -101,21 +105,36 @@
         <button class="btn small ghost" onclick={() => copy(server, "Server")}>{t("Kopieren")}</button>
       </div>
     </div>
-    <p class="set-note">{t("Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.")}</p>
+    {#if desktopOs === "macOS"}
+      <p class="set-note">{t("Für den Mac die .dmg-Datei: öffnen und audium in „Programme“ ziehen. macOS blockiert den ersten Start, weil das Programm noch nicht von Apple geprüft ist: dann unter Systemeinstellungen > Datenschutz & Sicherheit „Dennoch öffnen“.")}</p>
+    {:else if desktopOs === "Linux"}
+      <p class="set-note">{t("Für Linux das AppImage (aktualisiert sich selbst; ausführbar machen und starten) oder das .deb-Paket für Debian und Ubuntu (Updates von Hand).")}</p>
+    {:else}
+      <p class="set-note">{t("Windows warnt beim ersten Start, weil das Programm noch nicht signiert ist: „Weitere Informationen“ und dann „Trotzdem ausführen“.")}</p>
+    {/if}
   </section>
-{:else if appUpdate.current}
-  <!-- The Windows app (app/src-tauri/src/update.rs): updates itself; here only the state. -->
+{:else if appUpdate.mode && appUpdate.mode !== "manual" && appUpdate.current}
+  <!-- The desktop app (app/src-tauri/src/update.rs): updates itself; here only the state. Without
+       updates of its own (Mode::Manual) Settings > About says where new versions are. -->
   <section class="set-group">
-    <h2>{t("audium für Windows")}</h2>
+    <h2>{t("audium für {os}", { os: desktopOs ?? "PC" })}</h2>
     <div class="set-card">
       <div class="set-row">
         <div class="set-label">
           {#if appUpdate.version}
             <strong>{t("Version {version} ist bereit", { version: appUpdate.version })}</strong>
-            <small>{t("Wird installiert, wenn du audium schließt. Oder jetzt: audium startet dann kurz neu.")}</small>
+            {#if appUpdate.mode === "next-start"}
+              <small>{t("Ist da, sobald du audium das nächste Mal startest. Oder jetzt: audium startet dann kurz neu.")}</small>
+            {:else}
+              <small>{t("Wird installiert, wenn du audium schließt. Oder jetzt: audium startet dann kurz neu.")}</small>
+            {/if}
           {:else}
             <strong>{t("Version {version}", { version: appUpdate.current })}</strong>
-            <small>{t("Neue Versionen lädt audium von selbst im Hintergrund und installiert sie beim Schließen.")}</small>
+            {#if appUpdate.mode === "next-start"}
+              <small>{t("Neue Versionen lädt und installiert audium von selbst im Hintergrund, für den nächsten Start.")}</small>
+            {:else}
+              <small>{t("Neue Versionen lädt audium von selbst im Hintergrund und installiert sie beim Schließen.")}</small>
+            {/if}
           {/if}
         </div>
         {#if appUpdate.version}

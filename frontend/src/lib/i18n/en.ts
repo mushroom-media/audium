@@ -543,7 +543,6 @@ export const en: Record<string, string> = {
   "„{name}“ widerrufen? Die App kann sich danach nicht mehr anmelden.": "Revoke “{name}”? The app cannot log in any more afterwards.",
   "Widerrufen": "Revoke",
   "Kopieren geht nur über HTTPS – bitte von Hand übernehmen": "Copying works only over HTTPS – please copy it by hand",
-  "audium für Windows": "audium for Windows",
   "Das Programm für den PC": "The program for your PC",
   "Kann alles, was diese Seite kann, in einem eigenen Fenster. Installieren, starten und mit dieser Server-Adresse, deinem Benutzernamen und deinem normalen Passwort anmelden.":
     "Does everything this page does, in a window of its own. Install it, start it and log in with this server address, your username and your normal password.",
@@ -842,6 +841,39 @@ export const en: Record<string, string> = {
   "Version": "Version",
   "audium-Server": "audium server",
   "Diese App": "This app",
+  "Updates": "Updates",
+  "Heruntergeladen. Wird installiert, wenn du audium schließt. Oder jetzt: audium startet dann kurz neu.":
+    "Downloaded. It is installed when you close audium. Or now: audium then restarts briefly.",
+  "Neue Version wird heruntergeladen …": "Downloading the new version …",
+  "{done} von {total} MB": "{done} of {total} MB",
+  "{done} MB": "{done} MB",
+  "Suche nach Updates …": "Checking for updates …",
+  "audium ist auf dem neuesten Stand": "audium is up to date",
+  "Suche fehlgeschlagen": "Check failed",
+  "GitHub war nicht erreichbar. Prüfe die Internetverbindung und versuch es noch einmal.":
+    "GitHub could not be reached. Check the internet connection and try again.",
+  "Nach Updates suchen": "Check for updates",
+  "Neue Versionen lädt audium auch von selbst im Hintergrund.": "audium also downloads new versions by itself in the background.",
+  "Jetzt neu starten und installieren": "Restart and install now",
+  "Installiert. Sie ist da, sobald du audium das nächste Mal startest. Oder jetzt: audium startet dann kurz neu.":
+    "Installed. It is there the next time you start audium. Or now: audium then restarts briefly.",
+  "audium ließ sich nicht neu starten. Die neue Version ist beim nächsten Start da.":
+    "audium could not restart. The new version is there at the next start.",
+  "Neue Versionen von Hand": "New versions by hand",
+  "Diese App aktualisiert sich nicht selbst: Sie ist als Paket installiert oder liegt in einem Ordner, in den sie nicht schreiben darf (auf dem Mac: zuerst in „Programme“ ziehen). Neue Versionen gibt es auf der Download-Seite.":
+    "This app does not update itself: it is installed as a package or lies in a folder it may not write to (on a Mac: move it to “Applications” first). New versions are on the download page.",
+  "Download-Seite": "Download page",
+  "Version {version} ist ab dem nächsten Start da": "Version {version} is there at the next start",
+  "audium für Windows, macOS und Linux": "audium for Windows, macOS and Linux",
+  "audium für {os}": "audium for {os}",
+  "Für den Mac die .dmg-Datei: öffnen und audium in „Programme“ ziehen. macOS blockiert den ersten Start, weil das Programm noch nicht von Apple geprüft ist: dann unter Systemeinstellungen > Datenschutz & Sicherheit „Dennoch öffnen“.":
+    "For a Mac, the .dmg file: open it and drag audium to “Applications”. macOS blocks the first start because Apple has not checked the program yet: then choose “Open Anyway” under System Settings > Privacy & Security.",
+  "Für Linux das AppImage (aktualisiert sich selbst; ausführbar machen und starten) oder das .deb-Paket für Debian und Ubuntu (Updates von Hand).":
+    "For Linux, the AppImage (updates itself; make it executable and start it) or the .deb package for Debian and Ubuntu (updates by hand).",
+  "Ist da, sobald du audium das nächste Mal startest. Oder jetzt: audium startet dann kurz neu.":
+    "It is there the next time you start audium. Or now: audium then restarts briefly.",
+  "Neue Versionen lädt und installiert audium von selbst im Hintergrund, für den nächsten Start.":
+    "audium downloads and installs new versions by itself in the background, for the next start.",
   "Projekt": "Project",
   "Quellcode": "Source code",
   "Änderungen": "Changes",

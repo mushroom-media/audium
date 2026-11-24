@@ -1,13 +1,15 @@
 name: App
 
-# The desktop app (app/, Tauri) has its own versions and tags: app-v0.1.0 builds the Windows
-# installer and puts it into a draft GitHub release. Changes to the app also build it on pull
+# The desktop app (app/, Tauri) has its own versions and tags: app-v0.1.0 builds the app for
+# Windows (NSIS installer), macOS (universal .dmg for Apple silicon and Intel) and Linux (AppImage
+# and .deb) and puts them into a draft GitHub release. Changes to the app also build it on pull
 # requests and main, without a release. Server releases (v*) are ci.yml.
 #
-# Updates (app/src-tauri/src/update.rs): a tag build also signs the installer for the updater
-# (secret TAURI_SIGNING_PRIVATE_KEY) and adds latest.json to the draft. Installed apps look for
-# that file in the fixed release "app-update"; it is copied there only when the draft is
-# published by hand, so nobody gets a version before it is released.
+# Updates (app/src-tauri/src/update.rs): a tag build also signs the Windows installer, the macOS
+# app bundle and the AppImage for the updater (secret TAURI_SIGNING_PRIVATE_KEY), and the job
+# "manifest" adds latest.json, which lists all three, to the draft. Installed apps look for that
+# file in the fixed release "app-update"; it is copied there only when the draft is published by
+# hand, so nobody gets a version before it is released.
 on:
   push:
     branches: [main]
@@ -27,20 +29,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  windows:
-    name: Windows installer
-    if: github.event_name != 'release'
-    runs-on: windows-latest
+  # A tag: check it, then one draft release that all builds upload to (created here once, so the
+  # parallel builds do not each create one).
+  draft:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    runs-on: ubuntu-latest
     permissions:
-      contents: write # the draft release
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
-      # A tag app-v0.2.0 must match the version in tauri.conf.json, else the installer would be
+      # A tag app-v0.2.0 must match the version in tauri.conf.json, else the downloads would be
       # named after another version than the release.
       - name: Check version
-        if: startsWith(github.ref, 'refs/tags/app-v')
-        shell: bash
         run: |
           version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
           if [ "app-v$version" != "$GITHUB_REF_NAME" ]; then
@@ -50,19 +56,71 @@ jobs:
 
       # Without the key a release could not update itself, and the next one could not update it.
       - name: Signing key for updates
-        if: startsWith(github.ref, 'refs/tags/app-v')
-        shell: bash
-        env:
-          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if [ -z "$KEY" ]; then
             echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY is missing (docs/development.md, app updates)"
             exit 1
           fi
-          # For `tauri build` below, merged into tauri.conf.json: the signed installer and
-          # latest.json. (Not inline in `args:` below: its closing braces would end the expression
-          # there. Nor may this script name the expression syntax itself, not even in a comment.)
-          echo 'TAURI_BUILD_ARGS=--config {"bundle":{"createUpdaterArtifacts":true}}' >> "$GITHUB_ENV"
+
+      - name: Create the draft
+        run: |
+          version=${GITHUB_REF_NAME#app-v}
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME exists already; the builds upload to it."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "audium app $version (Windows, macOS, Linux)" \
+            --notes-file - <<'NOTES'
+          Desktop app for an audium server: install, start, enter the server address and log in. It updates itself.
+
+          - **Windows:** `audium_…_x64-setup.exe`. The installer is not signed yet: Windows SmartScreen asks once (More info > Run anyway).
+          - **macOS** (Apple silicon and Intel): `audium_…_universal.dmg`. Open it and drag audium to Applications. The app is not notarized by Apple yet: macOS blocks the first start; then choose Open Anyway under System Settings > Privacy & Security.
+          - **Linux:** `audium_…_amd64.AppImage` (make it executable and start it; updates itself) or `audium_…_amd64.deb` for Debian and Ubuntu (updates by hand).
+          NOTES
+
+  build:
+    name: ${{ matrix.name }}
+    needs: draft
+    # Without a tag the draft job is skipped; the builds still run.
+    if: ${{ !cancelled() && github.event_name != 'release' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows installer
+            os: windows-latest
+            bundle: app/src-tauri/target/release/bundle
+            artifact: audium-windows
+          - name: macOS app
+            os: macos-latest
+            # One app for Apple silicon and Intel Macs.
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundle: app/src-tauri/target/universal-apple-darwin/release/bundle
+            artifact: audium-macos
+          - name: Linux AppImage and deb
+            # The oldest supported Ubuntu: the AppImage then also runs on older systems (glibc).
+            os: ubuntu-22.04
+            bundle: app/src-tauri/target/release/bundle
+            artifact: audium-linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # the draft release
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # WebKitGTK for the window; GStreamer plays the audio in it, and its plugins go into the
+      # AppImage (bundle.linux.appimage.bundleMediaFramework in tauri.linux.conf.json).
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - uses: actions/setup-node@v4
         with:
@@ -72,6 +130,8 @@ jobs:
             frontend/package-lock.json
             app/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
@@ -81,29 +141,105 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: app
 
-      # Builds the frontend in app mode (beforeBuildCommand) and the NSIS installer. With a tag it
-      # also signs it for the updater, creates the draft release and uploads the installer, its
-      # signature and latest.json; publish it by hand on GitHub. Builds without a tag (pull
-      # requests, also from forks) have no key and make no update files.
-      - uses: tauri-apps/tauri-action@v0
+      # Builds the frontend in app mode (beforeBuildCommand) and the packages. With a tag also the
+      # signed update files (tauri.updater.conf.json). Builds without a tag (pull requests, also
+      # from forks) have no key and make no update files.
+      - name: Build
+        shell: bash
+        working-directory: app
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: app
-          args: ${{ env.TAURI_BUILD_ARGS }}
-          tagName: ${{ startsWith(github.ref, 'refs/tags/app-v') && github.ref_name || '' }}
-          releaseName: "audium for Windows __VERSION__"
-          releaseBody: "Desktop app for an audium server. Install, start, enter the server address and log in. The installer is not signed yet: Windows SmartScreen asks once (More info > Run anyway)."
-          releaseDraft: true
+          ARGS: ${{ matrix.args }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/app-v* ]]; then
+            ARGS="$ARGS --config src-tauri/tauri.updater.conf.json"
+          fi
+          npx tauri build --ci $ARGS
 
-      # Every build, also without a tag: the installer to try out from the run's page.
+      # The files for the release, under the names the downloads and latest.json use.
+      - name: Collect the files
+        shell: bash
+        env:
+          BUNDLE: ${{ matrix.bundle }}
+        run: |
+          version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          mkdir out
+          case "$RUNNER_OS" in
+            Windows)
+              cp "$BUNDLE"/nsis/*-setup.exe out/
+              cp "$BUNDLE"/nsis/*-setup.exe.sig out/ 2>/dev/null || true
+              ;;
+            macOS)
+              cp "$BUNDLE"/dmg/*.dmg out/
+              # The updater's archive is named audium.app.tar.gz; with version and kind like the rest.
+              if [ -f "$BUNDLE/macos/audium.app.tar.gz" ]; then
+                cp "$BUNDLE/macos/audium.app.tar.gz" "out/audium_${version}_universal.app.tar.gz"
+                cp "$BUNDLE/macos/audium.app.tar.gz.sig" "out/audium_${version}_universal.app.tar.gz.sig"
+              fi
+              ;;
+            Linux)
+              cp "$BUNDLE"/appimage/*.AppImage out/
+              cp "$BUNDLE"/appimage/*.AppImage.sig out/ 2>/dev/null || true
+              cp "$BUNDLE"/deb/*.deb out/
+              ;;
+          esac
+          ls -l out
+
+      - name: Upload to the draft release
+        if: startsWith(github.ref, 'refs/tags/app-v')
+        shell: bash
+        run: gh release upload "$GITHUB_REF_NAME" out/* --clobber
+
+      # Every build, also without a tag: the packages to try out from the run's page.
       - uses: actions/upload-artifact@v4
         with:
-          name: audium-windows-installer
-          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          name: ${{ matrix.artifact }}
+          path: out/*
           if-no-files-found: error
+
+  # latest.json for the updater, from the signatures of all three builds: one file, written once,
+  # so the parallel builds cannot overwrite each other's entries.
+  manifest:
+    name: Update manifest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Write latest.json
+        run: |
+          version=${GITHUB_REF_NAME#app-v}
+          base="https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME"
+          gh release download "$GITHUB_REF_NAME" --pattern '*.sig' --dir sig
+          ls sig
+          entry() {
+            local file="$1"
+            if [ ! -f "sig/$file.sig" ]; then
+              echo "::error::Signature $file.sig is missing in the draft"
+              exit 1
+            fi
+            jq -n --arg url "$base/$file" --rawfile sig "sig/$file.sig" '{signature: $sig, url: $url}'
+          }
+          windows=$(entry "audium_${version}_x64-setup.exe")
+          macos=$(entry "audium_${version}_universal.app.tar.gz")
+          linux=$(entry "audium_${version}_amd64.AppImage")
+          # Each also under its kind of package ("-nsis", "-app", "-appimage"): the updater looks
+          # for that name first. Installed 0.1.x Windows apps read "windows-x86_64".
+          jq -n --arg version "$version" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson windows "$windows" --argjson macos "$macos" --argjson linux "$linux" \
+            '{version: $version, notes: "Desktop app for an audium server.", pub_date: $date, platforms: {
+              "windows-x86_64": $windows, "windows-x86_64-nsis": $windows,
+              "darwin-aarch64": $macos, "darwin-aarch64-app": $macos,
+              "darwin-x86_64": $macos, "darwin-x86_64-app": $macos,
+              "linux-x86_64": $linux, "linux-x86_64-appimage": $linux
+            }}' > latest.json
+          cat latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
 
   # Publishing an app release on GitHub (by hand, the draft from above) makes it the update for
   # the installed apps: its latest.json goes into the fixed release "app-update", the address in
@@ -128,14 +264,14 @@ jobs:
             echo "::error::latest.json of $TAG announces version $version"
             exit 1
           fi
-          # The installers must be those of this (now published) release, not a draft address.
+          # The downloads must be those of this (now published) release, not a draft address.
           if jq -r '.platforms[].url' manifest/latest.json | grep -v "/releases/download/$TAG/"; then
             echo "::error::latest.json of $TAG points to other downloads (above)"
             exit 1
           fi
           if ! gh release view app-update > /dev/null 2>&1; then
             gh release create app-update --prerelease --latest=false \
-              --title "audium for Windows: updates" \
-              --notes "Not a release. The installed Windows apps look here for new versions (latest.json). Downloads: the releases app-v*."
+              --title "audium app: updates" \
+              --notes "Not a release. The installed desktop apps (Windows, macOS, Linux) look here for new versions (latest.json). Downloads: the releases app-v*."
           fi
           gh release upload app-update manifest/latest.json --clobber

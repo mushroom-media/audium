@@ -83,7 +83,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Room for the Windows app's own title bar strip, when it has one (WindowFrame.svelte). */
+/* Room for the desktop app's own title bar strip, when it has one (WindowFrame.svelte). */
 #app {
   padding-top: var(--frame-top, 0px);
 }

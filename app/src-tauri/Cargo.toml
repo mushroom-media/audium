@@ -21,14 +21,18 @@ tauri-plugin-window-state = "2"
 [target.'cfg(windows)'.dependencies]
 # The version Tauri itself uses (see Cargo.lock), for the WebView2 events in src/recover.rs.
 webview2-com = "0.39"
-# Updates of the Windows app (src/update.rs). The app is built only as an NSIS installer for
-# Windows, so the updater is not built for other systems.
-tauri-plugin-updater = "2"
-serde_json = "1"
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+# access(2) in src/update.rs: may the app replace itself without asking for a password?
+libc = "0.2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
+# Updates of the desktop app (src/update.rs): the NSIS installer on Windows, the app bundle on
+# macOS, the AppImage on Linux.
+tauri-plugin-updater = "2"
+serde_json = "1"
 # Links to other sites open in the system browser (frontend/src/lib/externalLinks.ts).
 tauri-plugin-opener = "2"
 

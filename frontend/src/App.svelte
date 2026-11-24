@@ -10,7 +10,7 @@
   import PlayerBar from "./lib/components/PlayerBar.svelte";
   import QueuePanel from "./lib/components/QueuePanel.svelte";
   import DevicePicker from "./lib/components/DevicePicker.svelte";
-  import WindowFrame, { ownFrame } from "./lib/components/WindowFrame.svelte";
+  import WindowFrame, { frameKind, ownFrame } from "./lib/components/WindowFrame.svelte";
   import { devices } from "./lib/devices.svelte";
   import { startTabs } from "./lib/tabs.svelte";
   import { localPlayer, player } from "./lib/player.svelte";
@@ -284,7 +284,7 @@
     <Auth mode={session.needsSetup ? "setup" : "login"} />
   {/if}
 {:else}
-  <div class="shell" class:framed={ownFrame} class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
+  <div class="shell" class:framed={ownFrame} class:frame-buttons={frameKind === "buttons"} class:frame-mac={frameKind === "mac"} class:queue-open={player.queueOpen} class:own-top={router.route.name === "library"} class:overlay>
     <nav class="side" aria-label={t("Navigation")}>
       <a class="logo" href={href("/")} aria-label={t("audium Start")}>
         <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><g fill="currentColor"><rect x="14" y="26" width="6" height="12" rx="3" /><rect x="24" y="18" width="6" height="28" rx="3" /><rect x="34" y="12" width="6" height="40" rx="3" /><rect x="44" y="22" width="6" height="20" rx="3" /></g></svg>
@@ -362,9 +362,10 @@
       <!-- The page's heading, once it has scrolled away (see headerTitle.svelte.ts). -->
       <p class="top-title" class:shown={headerTitle.shown} aria-hidden="true">{headerTitle.text}</p>
       <div class="top-end">
-        <!-- Windows app: a new version is downloaded and will be installed on closing. The
-             settings page (Apps) has the details and "restart now". -->
-        {#if appUpdate.version}<a class="update-pill" href={href("/settings/apps")} title={t("Version {version} wird beim Schließen installiert", { version: appUpdate.version })}>{t("Update bereit")}</a>{/if}
+        <!-- Desktop app: a new version is downloaded and will be installed on closing (Windows)
+             or is installed for the next start (macOS, Linux). Settings > Apps has the details
+             and "restart now". -->
+        {#if appUpdate.version}<a class="update-pill" href={href("/settings/apps")} title={appUpdate.mode === "next-start" ? t("Version {version} ist ab dem nächsten Start da", { version: appUpdate.version }) : t("Version {version} wird beim Schließen installiert", { version: appUpdate.version })}>{t("Update bereit")}</a>{/if}
         {#if router.route.name === "profile"}<a class="icon-btn" href={href("/settings")} aria-label={t("Einstellungen")} title={t("Einstellungen")}><Icon name="settings" /></a>{/if}
         <a class="me" class:active={active("profile")} href={href("/profile")} aria-label={t("Profil")} title={session.user.display_name} style={avatarStyle(session.user.avatar_color)}>{initial}</a>
       </div>
@@ -428,8 +429,9 @@
       "player player player";
     height: calc(100dvh - var(--frame-top, 0px));
   }
-  /* Windows app: the top bar is the title bar, with the window buttons at its right end (see
-     WindowFrame.svelte), so it spans the queue column too. */
+  /* Desktop app: the top bar is the title bar, so it spans the queue column too. On Windows and
+     Linux the window buttons sit at its right end (see WindowFrame.svelte). On macOS the system's
+     buttons sit at the top left, above the sidebar's logo, which moves down for them. */
   @media (min-width: 861px) {
     .shell.framed {
       grid-template-areas:
@@ -437,8 +439,11 @@
         "side main queue"
         "player player player";
     }
-    .framed .top {
+    .frame-buttons .top {
       padding-right: calc(24px + 3 * 46px);
+    }
+    .frame-mac .side {
+      padding-top: 30px;
     }
   }
   .side {
