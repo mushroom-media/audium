@@ -1,6 +1,6 @@
 [package]
 name = "audium-app"
-version = "0.1.2"
+version = "0.1.3"
 description = "audium: the desktop app for an audium music server"
 license = "MIT"
 edition = "2021"

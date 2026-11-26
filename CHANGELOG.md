@@ -6,6 +6,9 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+### Fixed
+- Desktop app 0.1.3: the Mac app is there again (app 0.1.2 went out without it, GitHub had no free Mac to build it), and the apps on all three systems update themselves to it. The app builds no longer wait for each other: one system that fails to build no longer holds back the updates of the others.
+
 ## [0.1.3] - 2026-11-26
 
 ### Added
