@@ -6,9 +6,23 @@ Images: `ghcr.io/mushroom-media/audium:<version>` for linux/amd64 and linux/arm6
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-26
+
 ### Added
+- Playlists: tracks picked automatically (by a smart playlist, "fill automatically" or a saved auto-playlist) are marked with a small spark, "Added automatically".
+- Playlists filled automatically can be edited: change the filters and fill the playlist anew with the new selection.
+- When the server cannot be reached, a notice says so instead of the page looking broken; audium keeps trying and loads what was missed once the server is back. The desktop app started without network opens with the last session instead of an empty window.
+- Settings > Shortcuts: "Seek with ← / →".
 - Desktop app for macOS (one app for Apple silicon and Intel) and Linux (AppImage, .deb package), with the same features as on Windows: the top bar as the title bar, "now playing" in full screen, swipe back and forward, updates by itself. On macOS and in the AppImage a new version is put in place in the background and is there at the next start; the .deb package is updated by hand.
 - Settings > Connect apps: the download section is now "audium for Windows, macOS and Linux", with a hint for the system you use.
+
+### Changed
+- The plain ← / → keys no longer seek 10 seconds unless turned on under Settings > Shortcuts; they are left to the page (lists, sliders). Shift+← / → still skip tracks.
+
+### Fixed
+- Artist pictures: an `artist.jpg` in an artist's folder no longer goes to another artist who has an album in that folder (a collaboration, an odd album artist tag, Various Artists).
+- Artist page: "Appears on" loads faster in large libraries.
+- Linux app: the window belongs to the audium launcher in the dock and task bar (the program is now called `audium`), and the scroll bar no longer covers the last row.
 
 ## [0.1.2] - 2026-11-23
 
