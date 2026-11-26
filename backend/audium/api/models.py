@@ -177,6 +177,7 @@ class UserSettings(BaseModel):
     theme: Literal["system", "dark", "light"]
     stream_quality: Literal["auto", "high", "medium", "low"]
     shortcuts: Literal["on", "off"]
+    seek_keys: Literal["off", "on"] = Field(description="Plain left/right arrow keys seek 10 seconds")
     replay_gain: Literal["off", "track", "album"]
     crossfade: Literal["off", "on"]
     crossfade_s: int = Field(description="Crossfade length in seconds")
@@ -195,6 +196,7 @@ class UserSettingsUpdate(BaseModel):
     theme: Literal["system", "dark", "light"] | None = None
     stream_quality: Literal["auto", "high", "medium", "low"] | None = None
     shortcuts: Literal["on", "off"] | None = None
+    seek_keys: Literal["off", "on"] | None = None
     replay_gain: Literal["off", "track", "album"] | None = None
     crossfade: Literal["off", "on"] | None = None
     crossfade_s: int | None = Field(None, ge=1, le=12)

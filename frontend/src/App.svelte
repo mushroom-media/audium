@@ -18,6 +18,7 @@
   import { disconnectEvents, loadMine, mine, newPlaylistFlow } from "./lib/mine.svelte";
   import { loadRecentSearches, rememberSearch } from "./lib/recentSearches.svelte";
   import { session, startSession } from "./lib/session.svelte";
+  import { link, watchLink } from "./lib/link.svelte";
   import { avatarInitial, avatarStyle } from "./lib/avatar";
   import { headerTitle } from "./lib/headerTitle.svelte";
   import { appUpdate, watchAppUpdate } from "./lib/appUpdate.svelte";
@@ -81,6 +82,8 @@
 
   let searchInput: HTMLInputElement | undefined = $state();
   let searchValue = $state("");
+  // While the field has focus it stays visible even when the page's title has pushed it away.
+  let searchFocused = $state(false);
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(() => {
@@ -90,6 +93,7 @@
     startRouter();
     player.init();
     startTabs(); // several tabs of this browser are one player
+    watchLink();
     startSession();
     watchAppUpdate();
     if (desktopApp) {
@@ -186,10 +190,12 @@
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey || session.settings.shortcuts === "off") return;
+    const seekKeys = session.settings.seek_keys === "on";
     const actions: Record<string, (() => void) | undefined> = {
       " ": () => player.toggle(),
-      ArrowLeft: () => (e.shiftKey ? player.prev() : player.seek(player.position - 10)),
-      ArrowRight: () => (e.shiftKey ? player.next() : player.seek(player.position + 10)),
+      // Shift+←/→ skip tracks; plain ←/→ seek only when the user turned that on (seek_keys).
+      ArrowLeft: e.shiftKey ? () => player.prev() : seekKeys ? () => player.seek(player.position - 10) : undefined,
+      ArrowRight: e.shiftKey ? () => player.next() : seekKeys ? () => player.seek(player.position + 10) : undefined,
       // Plain ↑/↓ scroll the page; with Shift they change the volume.
       ArrowUp: e.shiftKey ? () => player.setVolume(player.volume + 0.05) : undefined,
       ArrowDown: e.shiftKey ? () => player.setVolume(player.volume - 0.05) : undefined,
@@ -220,7 +226,6 @@
     radio: "/",
     settingsPage: "/settings",
   };
-  const backTo = $derived(BACK[router.route.name]);
 
   // Phones lay the top bar over the page (except on the search page). With just the logo it
   // scrolls away with the page; with a back button it stays, see-through at first (the button a
@@ -233,6 +238,9 @@
     phoneQuery.addEventListener("change", update);
     return () => phoneQuery.removeEventListener("change", update);
   });
+  // Wide windows show the settings sections side by side, so a settings page needs no back
+  // button there; on phones /settings is the list and each section a page of its own.
+  const backTo = $derived(router.route.name === "settingsPage" && !phone ? undefined : BACK[router.route.name]);
   const overlay = $derived(router.route.name !== "search" && router.route.name !== "library");
   let pageScroll = $state(0);
   let topHeight = $state(0);
@@ -272,7 +280,7 @@
   <!-- Not a logout: the server is starting (e.g. after an update) or not reachable; startSession tries again. -->
   <div class="boot" aria-busy="true">
     {#if session.waiting}
-      <p role="status">{session.waiting === "starting" ? t("audium startet …") : t("Server nicht erreichbar – neuer Versuch …")}</p>
+      <p role="status">{session.waiting === "starting" ? t("audium startet …") : session.waiting === "connecting" ? t("Verbinde mit dem Server …") : t("Server nicht erreichbar – neuer Versuch …")}</p>
     {/if}
   </div>
 {:else if session.user && router.route.name === "setup"}
@@ -331,6 +339,7 @@
       data-tauri-drag-region={ownFrame || undefined}
       class:searching={router.route.name === "search"}
       class:solid={backTo && solid}
+      class:titled={headerTitle.shown && !searchFocused}
       bind:clientHeight={topHeight}
       style:transform={lift ? `translateY(${-lift}px)` : undefined}
     >
@@ -352,6 +361,8 @@
           value={searchValue}
           oninput={(e) => onSearch(e.currentTarget.value)}
           onkeydown={onSearchKey}
+          onfocus={() => (searchFocused = true)}
+          onblur={() => (searchFocused = false)}
           autocomplete="off"
           autocapitalize="off"
           autocorrect="off"
@@ -372,7 +383,8 @@
     </header>
 
     <main class="content" onscrollcapture={onPageScroll}>
-      {#key router.route.name + (router.route.params.kind ?? "") + (router.route.params.id ?? "")}
+      <!-- link.epoch: the server is back, the page loads again what it missed meanwhile. -->
+      {#key router.route.name + (router.route.params.kind ?? "") + (router.route.params.id ?? "") + link.epoch}
         {#if router.route.name === "home"}<Home />
         {:else if router.route.name === "library"}<Library />
         {:else if router.route.name === "album"}<Album id={router.route.params.id} />
@@ -393,6 +405,9 @@
         {/if}
       {/key}
     </main>
+    {#if link.offline}
+      <p class="offline" role="status"><Icon name="plug" size={15} />{t("Keine Verbindung zum Server. audium versucht es weiter …")}</p>
+    {/if}
 
     {#if player.queueOpen}<div class="queue"><QueuePanel /></div>{/if}
 
@@ -444,6 +459,20 @@
     }
     .frame-mac .side {
       padding-top: 30px;
+    }
+    /* Once the page's title shows in the bar, the search field slides up out of the way, so the
+       title only has to keep clear of the right end (update pill, profile, window buttons).
+       "/" still focuses the field, which brings it back while it has focus (searchFocused). */
+    .top.titled {
+      --title-side: 220px;
+    }
+    .frame-buttons .top.titled {
+      --title-side: calc(220px + 3 * 46px);
+    }
+    .top.titled .search {
+      opacity: 0;
+      transform: translateY(-12px);
+      pointer-events: none;
     }
   }
   .side {
@@ -599,6 +628,9 @@
     border-radius: 20px;
     background: var(--surface-1);
     color: var(--text-muted);
+    transition:
+      opacity 0.3s ease,
+      transform 0.3s ease;
   }
   .search:focus-within {
     outline: 2px solid var(--accent);
@@ -666,6 +698,26 @@
   .queue {
     grid-area: queue;
     min-height: 0;
+  }
+  /* Over the bottom of the page, above the player: the pages stay usable, the notice explains
+     why they are empty. */
+  .offline {
+    grid-area: main;
+    align-self: end;
+    justify-self: center;
+    z-index: 5;
+    margin: 0 16px 14px;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.3);
+    font-size: 0.88rem;
+    color: var(--text);
+    pointer-events: none;
   }
   .player {
     grid-area: player;

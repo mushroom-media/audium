@@ -15,6 +15,7 @@ import {
   type UserSettings,
 } from "./api";
 import { browserLanguage, setLanguage, type Lang } from "./i18n.svelte";
+import { link, linkDown } from "./link.svelte";
 
 interface SetupStatus {
   needs_setup: boolean;
@@ -27,7 +28,10 @@ interface SetupStatus {
 export const session = $state({
   ready: false,
   /** Before `ready`: why the session is not loaded yet (the server is starting or not reachable). */
-  waiting: null as "starting" | "unreachable" | null,
+  waiting: null as "starting" | "unreachable" | "connecting" | null,
+  /** Shown from the last session on this device because the server did not answer at the start
+   * (no network). startSession keeps trying and replaces it with the real one. */
+  remembered: false,
   needsSetup: false,
   /** The first admin can be created right now (only for a while after the server started). */
   setupWindowOpen: false,
@@ -40,6 +44,7 @@ export const session = $state({
     theme: "system",
     stream_quality: "auto",
     shortcuts: "on",
+    seek_keys: "off",
     replay_gain: "off",
     crossfade: "off",
     crossfade_s: 5,
@@ -83,9 +88,11 @@ export async function loadSession() {
     applyTheme(session.settings.theme);
     applyLanguage(session.settings);
     session.setupPending = !isApp && session.user.role === "admin" && (await get<SetupStatus>("/setup")).dialog_pending;
+    remember();
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 401)) throw e;
     session.user = null;
+    forget();
     if (isApp) {
       forgetToken(); // revoked in the settings, or the account was disabled
       session.needsSetup = false;
@@ -98,20 +105,76 @@ export async function loadSession() {
     }
   }
   session.waiting = null;
+  // Pages shown from the remembered session load again, now with the media token for covers.
+  if (session.remembered) link.epoch++;
+  session.remembered = false;
   session.ready = true;
 }
 
 const RETRY_MAX_MS = 10_000;
+/** No answer at the start for this long: show the remembered session instead of an empty window. */
+const SLOW_START_MS = 3000;
+
+// The last session on this device, so a start without network shows the pages (with a notice)
+// instead of a black window. Per server address; gone on logout or a revoked token.
+const REMEMBER_KEY = "audium.session";
+
+function rememberKey() {
+  return `${REMEMBER_KEY}:${currentConnection()?.server ?? ""}`;
+}
+
+function remember() {
+  try {
+    localStorage.setItem(rememberKey(), JSON.stringify({ user: session.user, settings: session.settings }));
+  } catch {
+    /* private mode */
+  }
+}
+
+function forget() {
+  try {
+    localStorage.removeItem(rememberKey());
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Shows the remembered session while the server is out of reach. False if there is none. */
+function useRemembered(): boolean {
+  if (session.ready) return true;
+  let saved: { user: User; settings: UserSettings } | null = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(rememberKey()) ?? "null");
+  } catch {
+    /* nothing usable */
+  }
+  if (!saved?.user || (isApp && !currentConnection()?.token)) return false;
+  session.user = saved.user;
+  session.settings = { ...session.settings, ...saved.settings };
+  applyTheme(session.settings.theme);
+  applyLanguage(session.settings);
+  session.remembered = true;
+  session.ready = true;
+  linkDown();
+  return true;
+}
 
 /** At start: loads the session, and while the server does not answer properly (e.g. right
- * after an update, when it migrates the database) says so and tries again. */
+ * after an update, when it migrates the database) says so and tries again. Without network the
+ * remembered session stands in, so the app opens with a notice instead of an empty window. */
 export async function startSession(attempt = 0) {
+  const slow =
+    attempt === 0 ? setTimeout(() => useRemembered() || (session.waiting ??= "connecting"), SLOW_START_MS) : undefined;
   try {
     await loadSession();
   } catch (e) {
-    session.waiting = e instanceof ApiError && e.code === "starting" ? "starting" : "unreachable";
+    const starting = e instanceof ApiError && e.code === "starting";
+    session.waiting = starting ? "starting" : "unreachable";
+    if (!starting) useRemembered();
     const after = e instanceof ApiError && e.retryAfter ? e.retryAfter * 1000 : 1000 * 2 ** attempt;
     setTimeout(() => startSession(attempt + 1), Math.min(after, RETRY_MAX_MS));
+  } finally {
+    clearTimeout(slow);
   }
 }
 
@@ -127,6 +190,7 @@ export async function logout() {
     await post("/auth/logout"); // in an app this revokes its token on the server
   } finally {
     if (isApp) forgetToken();
+    forget();
     session.user = null;
   }
 }

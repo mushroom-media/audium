@@ -144,7 +144,10 @@ def playlist_out(conn: Connection, row, role: str) -> dict:
         "description": row.description,
         "visibility": row.visibility,
         "kind": row.kind,
-        "rule": json.loads(row.rule_json) if row.rule_json else None,
+        # Manual playlists keep the filters of "fill automatically" in the same column; they never
+        # refresh themselves (only smart ones do, see analysis/autoplaylists.py).
+        "rule": json.loads(row.rule_json) if row.rule_json and row.kind != "manual" else None,
+        "fill_rule": json.loads(row.rule_json) if row.rule_json and row.kind == "manual" else None,
         "owner": {"id": row.owner_id, "username": owner.username, "display_name": owner.display_name},
         "role": role,
         "version": row.version,
@@ -198,6 +201,7 @@ def list_items(conn: Connection, user: User, playlist_id: int, limit: int, offse
             playlist_items.c.id.label("item_id"),
             playlist_items.c.added_by,
             playlist_items.c.added_at,
+            playlist_items.c.auto,
             tracks.c.missing_since,
         )
         .join(playlist_items, playlist_items.c.track_id == tracks.c.id)
@@ -214,6 +218,7 @@ def list_items(conn: Connection, user: User, playlist_id: int, limit: int, offse
             "item_id": r.item_id,
             "added_by": r.added_by,
             "added_at": r.added_at,
+            "auto": r.auto,
             "available": r.missing_since is None,
             "track": track_item(r),
         }
@@ -252,11 +257,17 @@ def create_playlist(
     visibility: str,
     track_ids: list[int],
     rule: dict | None = None,
+    fill_rule: dict | None = None,
+    auto_items: bool = False,
 ):
-    """A manual playlist, or with `rule` a smart playlist that fills (and refreshes) itself."""
+    """A manual playlist, or with `rule` a smart playlist that fills (and refreshes) itself.
+    `fill_rule`: the filters that picked `track_ids` ("fill automatically"), kept to fill it anew.
+    `auto_items`: the tracks were picked automatically all the same (a saved auto-playlist)."""
     if visibility not in VISIBILITIES:
         raise BadRequest("visibility must be private or users")
     clean_rule = rules.validate(rule) if rule is not None else None
+    clean_fill = rules.validate(fill_rule) if fill_rule is not None and clean_rule is None else None
+    stored_rule = clean_rule or clean_fill
     ts = now_ms()
     playlist_id = conn.execute(
         insert(playlists).values(
@@ -265,7 +276,7 @@ def create_playlist(
             description=(description or "").strip()[:2000] or None,
             visibility=visibility,
             kind="smart" if clean_rule else "manual",
-            rule_json=json.dumps(clean_rule) if clean_rule else None,
+            rule_json=json.dumps(stored_rule) if stored_rule else None,
             version=1,
             created_at=ts,
             updated_at=ts,
@@ -275,7 +286,8 @@ def create_playlist(
         smart.store_smart_items(conn, playlist_id, smart.evaluate_smart(conn, playlist_id, json.dumps(clean_rule)))
         row = conn.execute(select(playlists).where(playlists.c.id == playlist_id)).one()
     elif track_ids:
-        _insert_items(conn, playlist_id, user, track_ids, after_item_id=None, at_end=True)
+        auto = auto_items or clean_fill is not None
+        _insert_items(conn, playlist_id, user, track_ids, after_item_id=None, at_end=True, auto=auto)
         row = _touch(conn, playlist_id, items_changed=True)
     else:
         row = conn.execute(select(playlists).where(playlists.c.id == playlist_id)).one()
@@ -291,6 +303,8 @@ def update_playlist(
     description: str | None,
     visibility: str | None,
     rule: dict | None = None,
+    fill_rule: dict | None = None,
+    track_ids: list[int] | None = None,
     if_version: int | None = None,
 ):
     row, _ = require_playlist(conn, user, playlist_id, "manage")
@@ -300,6 +314,11 @@ def update_playlist(
         if row.kind != "smart":
             raise BadRequest("only smart playlists have a rule")
         values["rule_json"] = json.dumps(rules.validate(rule))
+    if fill_rule is not None or track_ids is not None:
+        if row.kind != "manual":
+            raise BadRequest("only manual playlists can be filled anew")
+        if fill_rule is not None:
+            values["rule_json"] = json.dumps(rules.validate(fill_rule))
     if name is not None:
         values["name"] = _clean_name(name)
     if description is not None:
@@ -308,14 +327,19 @@ def update_playlist(
         if visibility not in VISIBILITIES:
             raise BadRequest("visibility must be private or users")
         values["visibility"] = visibility
-    if not values:
+    if not values and track_ids is None:
         return playlist_out(conn, row, "owner"), None
     # Recipients before the change too: someone losing access must hear about it.
     before = _recipients(conn, row.id, row.owner_id, row.visibility)
-    conn.execute(update(playlists).where(playlists.c.id == playlist_id).values(**values))
-    if "rule_json" in values:
+    if values:
+        conn.execute(update(playlists).where(playlists.c.id == playlist_id).values(**values))
+    if "rule_json" in values and row.kind == "smart":
         smart.store_smart_items(conn, playlist_id, smart.evaluate_smart(conn, playlist_id, values["rule_json"]))
-    new = _touch(conn, playlist_id, items_changed=False)
+    if track_ids is not None:
+        # Filled anew: the new selection replaces every track.
+        conn.execute(delete(playlist_items).where(playlist_items.c.playlist_id == playlist_id))
+        _insert_items(conn, playlist_id, user, track_ids, after_item_id=None, at_end=True, auto=True)
+    new = _touch(conn, playlist_id, items_changed=track_ids is not None)
     after = _recipients(conn, new.id, new.owner_id, new.visibility)
     rec = "*" if "*" in (before, after) else sorted({*before, *after})
     return playlist_out(conn, new, "owner"), _event(conn, new, "updated", user, rec)
@@ -402,7 +426,7 @@ def _slot(
     raise Conflict("could not find a position")  # pragma: no cover - renumbering always makes room
 
 
-def _insert_items(conn, playlist_id, user, track_ids, after_item_id, at_end) -> list[int]:
+def _insert_items(conn, playlist_id, user, track_ids, after_item_id, at_end, auto=False) -> list[int]:
     track_ids = _existing_track_ids(conn, track_ids)
     if not track_ids:
         return []
@@ -416,7 +440,14 @@ def _insert_items(conn, playlist_id, user, track_ids, after_item_id, at_end) -> 
     result = conn.execute(
         insert(playlist_items).returning(playlist_items.c.id, sort_by_parameter_order=True),
         [
-            {"playlist_id": playlist_id, "track_id": t, "position": p, "added_by": user.id, "added_at": ts}
+            {
+                "playlist_id": playlist_id,
+                "track_id": t,
+                "position": p,
+                "added_by": user.id,
+                "added_at": ts,
+                "auto": auto,
+            }
             for t, p in zip(track_ids, positions, strict=True)
         ],
     )

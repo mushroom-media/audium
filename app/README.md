@@ -23,6 +23,9 @@ License: MIT (like `frontend/`), see [LICENSE](LICENSE).
   transparent title bar that keeps the system's buttons at the top left (`tauri.macos.conf.json`).
   On Windows a page lost by WebView2 is reloaded (`src/recover.rs`). Otherwise the frontend calls
   no Rust code but the updates (`src/update.rs`); it only talks HTTP to the server.
+- On Linux the program is called `audium` (`mainBinaryName` in `tauri.linux.conf.json`), not
+  `audium-app` as the Cargo package: the desktop matches a window to its launcher
+  (`audium.desktop`) by the program name, and otherwise shows the bare `audium-app`.
 - On Linux the window is WebKitGTK, which plays audio through GStreamer. The AppImage brings the
   GStreamer plugins along (`bundleMediaFramework`); the .deb package depends on the system's
   `gstreamer1.0-plugins-base` and `-good`. Formats GStreamer cannot play (AAC, for example) the

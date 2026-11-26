@@ -19,6 +19,8 @@ OPTIONS: dict[str, tuple[str, ...]] = {
     "stream_quality": ("auto", "high", "medium", "low"),
     # Keyboard shortcuts in the web UI.
     "shortcuts": ("on", "off"),
+    # Plain ←/→ seek 10 seconds (off: they are left to the page; Shift+←/→ skip tracks either way).
+    "seek_keys": ("off", "on"),
     # Volume levelling with ReplayGain tags: off, per track, or per album (keeps an album's dynamics).
     "replay_gain": ("off", "track", "album"),
     # Crossfade between tracks that follow each other on their own (length: crossfade_s).

@@ -1,6 +1,6 @@
 // The current user's own data: playlists they can see, favorites, and live updates (SSE).
 
-import { currentConnection, del, eventsUrl, get, post, put, refreshMediaToken, type Playlist, type Track } from "./api";
+import { currentConnection, del, eventsUrl, get, post, put, refreshMediaToken, type Playlist, type Rule, type Track } from "./api";
 import { deviceParams, unwireDevices, wireDevices } from "./devices.svelte";
 import { onRole, ready } from "./tabs.svelte";
 import { ui } from "./ui.svelte";
@@ -57,8 +57,9 @@ export async function toggleFavoriteOf(kind: FavoriteKind, id: number) {
   }
 }
 
-export async function createPlaylist(name: string, trackIds: number[] = []): Promise<Playlist> {
-  const pl = await post<Playlist>("/playlists", { name, track_ids: trackIds });
+/** `fillRule`: the filters that picked `trackIds` ("fill automatically"), kept to fill it anew. */
+export async function createPlaylist(name: string, trackIds: number[] = [], fillRule?: Rule): Promise<Playlist> {
+  const pl = await post<Playlist>("/playlists", { name, track_ids: trackIds, fill_rule: fillRule ?? null });
   await loadPlaylists();
   return pl;
 }

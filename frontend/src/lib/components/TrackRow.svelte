@@ -23,6 +23,7 @@
     unavailable = false,
     note,
     count,
+    auto = false,
   }: {
     track: Track | undefined;
     number?: number | null;
@@ -39,6 +40,8 @@
     note?: string | null;
     /** A number in its own last column, e.g. how often the track was played. */
     count?: number | null;
+    /** Playlists: the track was picked automatically, not added by hand. */
+    auto?: boolean;
   } = $props();
 
   const active = $derived(track && player.current?.id === track.id);
@@ -124,7 +127,7 @@
     </button>
     {#if showCover}<div class="thumb"><Cover hash={track.cover} size={64} /></div>{/if}
     <div class="main">
-      <div class="title">{track.title}</div>
+      <div class="title">{#if auto}<span class="auto" title={t("Automatisch hinzugefügt")} aria-label={t("Automatisch hinzugefügt")} role="img"><Icon name="spark" size={13} /></span>{/if}{track.title}</div>
       <div class="artist"><ArtistLinks {track} link={linkArtist || !touch} /></div>
     </div>
     {#if showAlbum}
@@ -274,6 +277,16 @@
   .active .title {
     color: var(--accent);
   }
+  /* Picked automatically: a small spark before the title, quieter than the title itself. */
+  .title .auto {
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 5px;
+    color: var(--text-muted);
+  }
+  .active .title .auto {
+    color: inherit;
+  }
   .artist,
   .album {
     color: var(--text-muted);
@@ -325,10 +338,15 @@
     align-items: flex-end;
     height: 14px;
   }
+  /* The bars scale instead of changing their height: a height animation lays the row out anew
+     every frame and snaps to whole pixels, which jitters visibly in WebKitGTK (Linux app). */
   .eq i {
     width: 3px;
+    height: 14px;
     background: var(--accent);
+    transform-origin: bottom;
     animation: eq 0.9s ease-in-out infinite alternate;
+    will-change: transform;
   }
   .eq i:nth-child(2) {
     animation-delay: -0.3s;
@@ -338,10 +356,10 @@
   }
   @keyframes eq {
     from {
-      height: 3px;
+      transform: scaleY(0.21);
     }
     to {
-      height: 14px;
+      transform: scaleY(1);
     }
   }
   .unavailable {
@@ -386,7 +404,7 @@
   @media (prefers-reduced-motion: reduce) {
     .eq i {
       animation: none;
-      height: 10px;
+      transform: scaleY(0.7);
     }
   }
 </style>

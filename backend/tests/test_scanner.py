@@ -436,6 +436,26 @@ def test_artist_image_from_the_artist_folder(library, db, monkeypatch):
     assert _artist_cover(db, "Solo").hash == solo.hash
 
 
+def test_artist_jpg_is_not_lent_to_other_artists(library, db):
+    # Band's folder also holds an album of Guest (a collaboration, or an odd album artist tag),
+    # and Guest's own albums live in Guest/ without a picture.
+    library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band"))
+    library.add("Band/Together/01.mp3", tags("B", artist="Guest", album="Together", albumartist="Guest"))
+    library.add("Guest/Solo/01.mp3", tags("C", artist="Guest", album="Solo", albumartist="Guest"))
+    (library.root / "Band/artist.jpg").write_bytes(cover_bytes((250, 250, 0)))
+    # Comp/ holds one album each of two artists, neither named like the folder: nobody's picture.
+    library.add("Comp/X/01.mp3", tags("D", artist="Xa", album="X", albumartist="Xa"))
+    library.add("Comp/Y/01.mp3", tags("E", artist="Ya", album="Y", albumartist="Ya"))
+    (library.root / "Comp/artist.jpg").write_bytes(cover_bytes((0, 250, 250)))
+    library.scan()
+    assert _artist_cover(db, "Band").source == "artist"
+    guest = _artist_cover(db, "Guest")
+    assert guest is None or guest.source != "artist"
+    for name in ("Xa", "Ya"):
+        cover = _artist_cover(db, name)
+        assert cover is None or cover.source != "artist"
+
+
 def test_folder_jpg_in_the_artist_folder(library, db, admin_client):
     library.add("Band/Record/01.mp3", tags("A", artist="Band", album="Record", albumartist="Band"))
     (library.root / "Band/Record/folder.jpg").write_bytes(cover_bytes((0, 0, 255)))

@@ -564,23 +564,49 @@ class Scanner:
                 r.id: r.image_key
                 for r in conn.execute(select(artists.c.id, artists.c.image_key).where(artists.c.image_key.is_not(None)))
             }
+            names = {
+                r.id: norm(r.name)
+                for chunk in _chunks(sorted(album_dirs))
+                for r in conn.execute(select(artists.c.id, artists.c.name).where(artists.c.id.in_(chunk)))
+            }
             use_folder_images = server_setting(conn, "artist_folder_images") == "on"
         all_album_dirs = {d for dirs in album_dirs.values() for d in dirs}
-        owners: dict[str, set[int]] = {}  # artist folder -> album artists of the albums below
+        # artist folder -> album artist -> number of their albums below
+        owners: dict[str, dict[int, int]] = {}
         for artist_id, dirs in album_dirs.items():
             for d in dirs:
-                owners.setdefault(str(PurePosixPath(d).parent), set()).add(artist_id)
+                counts = owners.setdefault(str(PurePosixPath(d).parent), {})
+                counts[artist_id] = counts.get(artist_id, 0) + 1
+
+        def owner_of(folder: str) -> int | None:
+            """The one artist an artist folder's artist.jpg shows: the album artist named like the
+            folder, else the one with the most albums in it; nobody on a tie. Without this, an
+            album of X in Y's folder (a collaboration, an odd album artist tag, Various Artists)
+            gave X the picture of Y."""
+            counts = owners[folder]
+            named = [a for a in counts if names.get(a) == norm(PurePosixPath(folder).name)]
+            if len(named) == 1:
+                return named[0]
+            ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+            if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+                return None
+            return ranked[0][0]
+
+        def only(folder: str, artist_id: int) -> bool:
+            """All albums below `folder` are this artist's (the stricter rule for folder.jpg)."""
+            return list(owners[folder]) == [artist_id]
+
         keys: dict[int, tuple[str, str]] = {}  # artist id -> (rel path, image key)
         for artist_id, dirs in album_dirs.items():
             parents = sorted({p for d in dirs if (p := str(PurePosixPath(d).parent)) != "."})
-            folder = next((p for p in parents if p in found), None)
+            folder = next((p for p in parents if p in found and owner_of(p) == artist_id), None)
             if folder is None:
                 folder = next((d for d in sorted(dirs) if d in found), None)
             if folder is not None:
                 rel = f"{folder}/{found[folder]}"
             elif use_folder_images and (
                 folder := next(
-                    (p for p in parents if p in folder_found and p not in all_album_dirs and owners[p] == {artist_id}),
+                    (p for p in parents if p in folder_found and p not in all_album_dirs and only(p, artist_id)),
                     None,
                 )
             ):

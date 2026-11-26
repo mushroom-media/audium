@@ -888,6 +888,7 @@ def store_smart_items(conn: Connection, playlist_id: int, track_ids: list[int]) 
                     "position": (i + 1) * 1024,
                     "added_by": owner,
                     "added_at": now_ms(),
+                    "auto": True,
                 }
                 for i, t in enumerate(track_ids)
             ],

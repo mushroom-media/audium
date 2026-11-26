@@ -151,7 +151,9 @@ def freeze(conn: Connection, user: User, auto_id: int, name: str | None):
             .order_by(auto_playlist_items.c.rank)
         )
     ]
-    out, event = playlist_service.create_playlist(conn, user, name or row.name, row.description, "private", track_ids)
+    out, event = playlist_service.create_playlist(
+        conn, user, name or row.name, row.description, "private", track_ids, auto_items=True
+    )
     conn.execute(update(playlists).where(playlists.c.id == out["id"]).values(kind="frozen_auto"))
     out["kind"] = "frozen_auto"
     return out, event

@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { ApiError, del, get, patch, post, type Page, type Playlist, type PlaylistItem, type Rule } from "../lib/api";
   import RuleEditor from "../lib/components/RuleEditor.svelte";
+  import NewPlaylist from "../lib/components/NewPlaylist.svelte";
   import CoverPicker from "../lib/components/CoverPicker.svelte";
   import PlaylistCover from "../lib/components/PlaylistCover.svelte";
   import Icon from "../lib/components/Icon.svelte";
@@ -81,6 +82,7 @@
   // Smart playlists fill themselves from their rule: no manual add/remove/reorder.
   const canEdit = $derived((meta?.role === "owner" || meta?.role === "editor") && !isSmart);
   let editingRule = $state(false);
+  let editing = $state(false);
   let pickingCover = $state(false);
 
   async function saveRule(_name: string, rule: Rule) {
@@ -212,7 +214,12 @@
             {#if isOwner}
               <button class="btn ghost" onclick={() => (ui.share = { playlistId: pid })}><Icon name="share" size={18} /> {t("Teilen")}</button>
               {#if isSmart}<button class="btn ghost" onclick={() => (editingRule = true)}><Icon name="spark" size={18} /> {t("Regel")}</button>{/if}
-              <button class="icon-btn" title={t("Umbenennen")} aria-label={t("Umbenennen")} onclick={rename}><Icon name="edit" size={18} /></button>
+              {#if isSmart}
+                <button class="icon-btn" title={t("Umbenennen")} aria-label={t("Umbenennen")} onclick={rename}><Icon name="edit" size={18} /></button>
+              {:else}
+                <!-- Name and, for a playlist filled automatically, its filters (fill it anew). -->
+                <button class="icon-btn" title={t("Bearbeiten")} aria-label={t("Playlist bearbeiten")} onclick={() => (editing = true)}><Icon name="edit" size={18} /></button>
+              {/if}
               <button class="icon-btn" title={t("Beschreibung")} aria-label={t("Beschreibung bearbeiten")} onclick={describe}><Icon name="list" size={18} /></button>
               <button class="icon-btn" title={t("Löschen")} aria-label={t("Playlist löschen")} onclick={remove}><Icon name="trash" size={18} /></button>
             {:else if meta!.role !== "viewer" || meta!.visibility !== "users"}
@@ -248,6 +255,7 @@
             track={item?.track}
             number={i + 1}
             unavailable={item ? !item.available : false}
+            auto={!isSmart && !!item?.auto}
             onplay={() => play(i)}
             onremove={canEdit && item ? () => removeItem(item) : undefined}
           />
@@ -268,6 +276,19 @@
       loadPlaylists();
     }}
     onclose={() => (pickingCover = false)}
+  />
+{/if}
+
+{#if editing && meta}
+  <NewPlaylist
+    playlist={meta}
+    ondone={(pl) => {
+      editing = false;
+      if (pl && pl.version !== meta?.version) {
+        reload();
+        loadPlaylists();
+      }
+    }}
   />
 {/if}
 

@@ -2,23 +2,36 @@
   // "New playlist": a name, and optionally "fill automatically": filters (genres, artists as a
   // template, tempo, year, ...) pick tracks; the list shows them before anything is saved, single
   // tracks can be removed (the next matching one takes their place), "Neu mischen" picks others.
-  // The result is an ordinary playlist with these tracks, not a smart playlist.
-  import { ApiError, coverUrl, post, type Playlist, type Track } from "../api";
+  // The result is an ordinary playlist with these tracks, not a smart playlist; the filters are
+  // kept with it (fill_rule).
+  // With `playlist` it edits one (the pencil on the playlist page): the name, and the filters it
+  // was filled with. Its tracks stay until the filters change or "Andere Auswahl" picks anew;
+  // saving then replaces all of them.
+  import { untrack } from "svelte";
+  import { ApiError, coverUrl, patch, post, type Playlist, type Rule, type Track } from "../api";
   import { duration, longDuration, plural } from "../format";
   import { createPlaylist } from "../mine.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
-  import RuleFilters, { emptyFilters, filterConditions, type FilterValues } from "./RuleFilters.svelte";
+  import RuleFilters, { emptyFilters, filterConditions, parseRule, type FilterValues } from "./RuleFilters.svelte";
   import { locale, t } from "../i18n.svelte";
 
-  let { ondone }: { ondone: (playlist: Playlist | null) => void } = $props();
+  let { playlist = null, ondone }: { playlist?: Playlist | null; ondone: (playlist: Playlist | null) => void } = $props();
 
   const MAX_TRACKS = 1000;
 
-  let name = $state("");
-  let auto = $state(false);
-  let filters = $state<FilterValues>(emptyFilters());
-  let count = $state<number | null>(50);
+  // The dialog starts from the props once and then owns its state.
+  const start = untrack(() => {
+    const rule = playlist?.fill_rule ?? null;
+    const { kept: _, ...form } = parseRule(rule);
+    return { name: playlist?.name ?? "", rule, form, count: rule?.limit ?? 50 };
+  });
+  const editing = untrack(() => playlist !== null);
+
+  let name = $state(start.name);
+  let auto = $state(start.rule !== null);
+  let filters = $state<FilterValues>(start.form);
+  let count = $state<number | null>(start.count);
   let seed = $state(1);
   /** Removed by hand; the server leaves them out and fills up with the next ones. */
   let removed = $state<number[]>([]);
@@ -29,7 +42,14 @@
 
   const conditions = $derived(filterConditions(filters));
   const wanted = $derived(Math.min(MAX_TRACKS, Math.max(1, Math.round(Number(count) || 50))));
-  const list = $derived(auto && conditions.length && preview ? preview.tracks.filter((tr) => !removed.includes(tr.id)) : []);
+  const fillRule = $derived<Rule>({ match: "all", conditions, limit: wanted, order: "random" });
+  // Editing: the playlist keeps its tracks until the filters or the number change, or
+  // "Andere Auswahl" asks for others; only then is there a new selection to save.
+  const startKey = untrack(() => JSON.stringify([filterConditions(start.form), start.count]));
+  const refill = $derived(
+    auto && conditions.length > 0 && (!editing || seed !== 1 || JSON.stringify([conditions, wanted]) !== startKey),
+  );
+  const list = $derived(refill && preview ? preview.tracks.filter((tr) => !removed.includes(tr.id)) : []);
   const total = $derived(list.reduce((sum, tr) => sum + tr.duration_ms, 0));
 
   // Live preview, debounced: the server validates the rule and picks the tracks.
@@ -37,13 +57,13 @@
   let request = 0;
   $effect(() => {
     const body = {
-      rule: { match: "all", conditions: JSON.parse(JSON.stringify(conditions)), limit: wanted, order: "random" },
+      rule: JSON.parse(JSON.stringify(fillRule)),
       tracks: wanted,
       seed,
       exclude: removed.slice(-MAX_TRACKS),
     };
     clearTimeout(timer);
-    if (!auto || !body.rule.conditions.length) {
+    if (!refill) {
       preview = null;
       error = null;
       loading = false;
@@ -81,8 +101,17 @@
     e.preventDefault();
     if (!name.trim() || saving) return;
     saving = true;
+    const ids = list.map((tr) => tr.id);
+    const rule = refill && ids.length ? JSON.parse(JSON.stringify(fillRule)) : undefined;
     try {
-      ondone(await createPlaylist(name.trim(), list.map((tr) => tr.id)));
+      if (playlist) {
+        const changes: Record<string, unknown> = {};
+        if (name.trim() !== playlist.name) changes.name = name.trim();
+        if (rule) Object.assign(changes, { fill_rule: rule, track_ids: ids });
+        ondone(Object.keys(changes).length ? await patch<Playlist>(`/playlists/${playlist.id}`, changes) : playlist);
+      } else {
+        ondone(await createPlaylist(name.trim(), ids, rule));
+      }
     } catch (err) {
       error = err instanceof ApiError ? err.message : t("Speichern fehlgeschlagen");
       saving = false;
@@ -90,7 +119,7 @@
   }
 </script>
 
-<Modal title={t("Neue Playlist")} width={auto ? 680 : 440} onclose={() => ondone(null)}>
+<Modal title={editing ? t("Playlist bearbeiten") : t("Neue Playlist")} width={auto ? 680 : 440} onclose={() => ondone(null)}>
   <form class="new" onsubmit={create}>
     <!-- svelte-ignore a11y_autofocus -->
     <input class="full" bind:value={name} autofocus maxlength="200" aria-label={t("Name")} placeholder={t("Name der Playlist")} />
@@ -120,6 +149,14 @@
             <p class="muted">{t("Wähle ein Genre oder einen Künstler, oder grenze Tempo, Jahr oder Hinzugefügt ein.")}</p>
           {:else if error}
             <p class="err">{error}</p>
+          {:else if !refill}
+            <!-- Editing, nothing changed yet: the playlist keeps its tracks. -->
+            <div class="preview-head">
+              <span class="muted">{t("Die Playlist behält ihre {n}. Ändere die Filter oder wähle andere, um sie neu zu füllen.", { n: plural(playlist?.item_count ?? 0, "Titel", "Titel") })}</span>
+              <button type="button" class="btn ghost small" onclick={reshuffle}>
+                <Icon name="shuffle" size={15} /> {t("Andere Auswahl")}
+              </button>
+            </div>
           {:else if preview}
             <div class="preview-head">
               <span>
@@ -170,8 +207,12 @@
 
     <div class="buttons">
       <button type="button" class="btn ghost" onclick={() => ondone(null)}>{t("Abbrechen")}</button>
-      <button class="btn primary" disabled={!name.trim() || saving || (auto && loading)}>
-        {auto && list.length ? t("Erstellen mit {n}", { n: plural(list.length, "Titel", "Titel") }) : t("Erstellen")}
+      <button class="btn primary" disabled={!name.trim() || saving || (refill && (loading || !list.length))}>
+        {#if editing}
+          {refill ? t("Neu füllen mit {n}", { n: plural(list.length, "Titel", "Titel") }) : t("Speichern")}
+        {:else}
+          {auto && list.length ? t("Erstellen mit {n}", { n: plural(list.length, "Titel", "Titel") }) : t("Erstellen")}
+        {/if}
       </button>
     </div>
   </form>

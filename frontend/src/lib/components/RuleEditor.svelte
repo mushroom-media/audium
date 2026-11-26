@@ -8,7 +8,7 @@
   import { ruleFieldLabels } from "../errors";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
-  import RuleFilters, { emptyFilters, filterConditions, type FilterValues } from "./RuleFilters.svelte";
+  import RuleFilters, { filterConditions, parseRule, type FilterValues } from "./RuleFilters.svelte";
   import { locale, msg, t } from "../i18n.svelte";
 
   let {
@@ -49,43 +49,10 @@
   };
   const OPTION_LABELS: Record<string, string> = { major: msg("Dur"), minor: msg("Moll") };
 
-  /** Splits a rule into what the form shows and the conditions it keeps as they are. */
-  function parse(rule: Rule | null | undefined) {
-    const out: FilterValues & { kept: RuleCondition[] } = { ...emptyFilters(), kept: [] };
-    if (!rule) return out;
-    const conds = rule.conditions;
-    // "any" only fits the form when every condition is a genre: then it's one list of genres.
-    if (rule.match === "any" && !conds.every((c) => c.field === "genre" && c.op === "is")) {
-      out.kept = conds.map((c) => ({ ...c }));
-      return out;
-    }
-    let genreTaken = false;
-    let artistTaken = false;
-    for (const c of conds) {
-      const range = c.field === "bpm" ? out.bpm : c.field === "year" ? out.year : null;
-      if (c.field === "genre" && c.op === "is" && (rule.match === "any" || !genreTaken)) {
-        out.genres.push(...(Array.isArray(c.value) ? c.value.map(String) : [String(c.value)]));
-        genreTaken = true;
-      } else if (c.field === "like_artist" && c.op === "is" && !artistTaken) {
-        out.artists.push(...(Array.isArray(c.value) ? c.value.map(String) : [String(c.value)]));
-        artistTaken = true;
-      } else if (range && range.from === null && range.to === null && ["between", ">=", "<=", "="].includes(c.op)) {
-        const [lo, hi] = Array.isArray(c.value) ? c.value.map(Number) : [Number(c.value), Number(c.value)];
-        if (c.op !== "<=") range.from = lo;
-        if (c.op !== ">=") range.to = hi;
-      } else if (c.field === "added_days" && c.op === "<=" && out.addedDays === null) {
-        out.addedDays = Number(c.value);
-      } else {
-        out.kept.push({ ...c });
-      }
-    }
-    return out;
-  }
-
   let fields = $state<RuleField[]>([]);
   let orders = $state<string[]>(["random"]);
   // The editor starts from the props once and then owns its state.
-  const start = untrack(() => ({ name: initialName, rule: initial, form: parse(initial) }));
+  const start = untrack(() => ({ name: initialName, rule: initial, form: parseRule(initial) }));
   let name = $state(start.name);
   const match = start.rule?.match === "any" && start.form.kept.length ? "any" : "all";
   let limit = $state(start.rule?.limit ?? 200);

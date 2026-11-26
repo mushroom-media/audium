@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { RuleCondition } from "../api";
+  import type { Rule, RuleCondition } from "../api";
 
   export type Range = { from: number | null; to: number | null };
 
@@ -42,6 +42,39 @@
       rangeCondition("year", f.year),
       days !== null ? { field: "added_days", op: "<=", value: days } : null,
     ].filter((c): c is RuleCondition => c !== null);
+  }
+
+  /** Splits a rule into what the form shows and the conditions it keeps as they are. */
+  export function parseRule(rule: Rule | null | undefined) {
+    const out: FilterValues & { kept: RuleCondition[] } = { ...emptyFilters(), kept: [] };
+    if (!rule) return out;
+    const conds = rule.conditions;
+    // "any" only fits the form when every condition is a genre: then it's one list of genres.
+    if (rule.match === "any" && !conds.every((c) => c.field === "genre" && c.op === "is")) {
+      out.kept = conds.map((c) => ({ ...c }));
+      return out;
+    }
+    let genreTaken = false;
+    let artistTaken = false;
+    for (const c of conds) {
+      const range = c.field === "bpm" ? out.bpm : c.field === "year" ? out.year : null;
+      if (c.field === "genre" && c.op === "is" && (rule.match === "any" || !genreTaken)) {
+        out.genres.push(...(Array.isArray(c.value) ? c.value.map(String) : [String(c.value)]));
+        genreTaken = true;
+      } else if (c.field === "like_artist" && c.op === "is" && !artistTaken) {
+        out.artists.push(...(Array.isArray(c.value) ? c.value.map(String) : [String(c.value)]));
+        artistTaken = true;
+      } else if (range && range.from === null && range.to === null && ["between", ">=", "<=", "="].includes(c.op)) {
+        const [lo, hi] = Array.isArray(c.value) ? c.value.map(Number) : [Number(c.value), Number(c.value)];
+        if (c.op !== "<=") range.from = lo;
+        if (c.op !== ">=") range.to = hi;
+      } else if (c.field === "added_days" && c.op === "<=" && out.addedDays === null) {
+        out.addedDays = Number(c.value);
+      } else {
+        out.kept.push({ ...c });
+      }
+    }
+    return out;
   }
 </script>
 

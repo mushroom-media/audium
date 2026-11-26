@@ -5,7 +5,6 @@
   const KEYS: [string, string][] = [
     // Key names are shown through t() too: only "Leertaste" has a translation, the rest are symbols.
     [msg("Leertaste"), msg("Abspielen / Pause")],
-    ["← / →", msg("10 Sekunden zurück / vor")],
     ["Shift + ← / →", msg("Vorheriger / nächster Titel")],
     ["Shift + ↑ / ↓", msg("Lautstärke")],
     ["M", msg("Stumm")],
@@ -23,6 +22,10 @@
     <label class="set-row">
       <span class="set-label"><strong>{t("Tastenkürzel verwenden")}</strong><small>{t("Gelten nicht, während du in ein Textfeld tippst.")}</small></span>
       <input type="checkbox" class="toggle" checked={on} onchange={(e) => saveSettings({ shortcuts: e.currentTarget.checked ? "on" : "off" })} />
+    </label>
+    <label class="set-row" class:off={!on}>
+      <span class="set-label"><strong>{t("Spulen mit ← / →")}</strong><small>{t("10 Sekunden zurück / vor. Aus: Die Pfeiltasten bleiben der Seite überlassen.")}</small></span>
+      <input type="checkbox" class="toggle" disabled={!on} checked={session.settings.seek_keys === "on"} onchange={(e) => saveSettings({ seek_keys: e.currentTarget.checked ? "on" : "off" })} />
     </label>
   </div>
 </section>

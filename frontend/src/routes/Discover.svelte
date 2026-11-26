@@ -205,7 +205,8 @@
     grid-auto-flow: column;
     grid-auto-columns: 160px;
     gap: 20px;
-    padding: 0 24px 6px;
+    /* Room below for the scrollbar: in the Linux app (WebKitGTK) it lies over the content. */
+    padding: 0 24px 16px;
     overflow-x: auto;
     scrollbar-width: thin;
   }

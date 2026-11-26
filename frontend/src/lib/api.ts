@@ -3,6 +3,7 @@ import type { Lang } from "./i18n.svelte";
 
 import { uiMessage } from "./errors";
 import { t } from "./i18n.svelte";
+import { linkDown, linkUp } from "./link.svelte";
 
 declare global {
   interface Window {
@@ -91,6 +92,16 @@ export async function connectServer(server: string, username: string, password: 
   saveConnection({ server: base, token: res.token });
   await refreshMediaToken();
   return res.user;
+}
+
+/** Whether the server answers and is ready (see link.svelte.ts). */
+export async function ping(): Promise<boolean> {
+  try {
+    const res = await fetch(`${connection?.server ?? basePath}/api/health`, { credentials: "omit", cache: "no-store" });
+    return res.ok; // not yet while it starts (503): the pages would load too early
+  } catch {
+    return false;
+  }
 }
 
 /** Logged out in the app: forget the token (the server address stays for the next login). */
@@ -290,6 +301,8 @@ export interface UserSettings {
   theme: Theme;
   stream_quality: StreamQuality;
   shortcuts: "on" | "off";
+  /** Plain ←/→ seek 10 seconds; off by default (Shift+←/→ skip tracks either way). */
+  seek_keys: "off" | "on";
   replay_gain: ReplayGainMode;
   /** Crossfade between tracks that follow each other on their own, over crossfade_s seconds (1-12). */
   crossfade: "off" | "on";
@@ -349,19 +362,33 @@ export async function request<T>(
 ): Promise<T> {
   // A Blob (an image upload) is sent as it is, everything else as JSON.
   const file = options.body instanceof Blob ? options.body : null;
-  const res = await fetch(`${apiBase()}${path}${query(options.params)}`, {
-    method,
-    // Apps: the token, never cookies (the server allows the apps' origin only without them).
-    credentials: usesToken() ? "omit" : "same-origin",
-    signal: options.signal,
-    keepalive: options.keepalive,
-    headers: {
-      "X-Requested-With": "audium",
-      ...(usesToken() ? { Authorization: `Bearer ${connection!.token}` } : {}),
-      ...(options.body !== undefined ? { "Content-Type": file ? file.type || "application/octet-stream" : "application/json" } : {}),
-    },
-    body: file ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase()}${path}${query(options.params)}`, {
+      method,
+      // Apps: the token, never cookies (the server allows the apps' origin only without them).
+      credentials: usesToken() ? "omit" : "same-origin",
+      signal: options.signal,
+      keepalive: options.keepalive,
+      headers: {
+        "X-Requested-With": "audium",
+        ...(usesToken() ? { Authorization: `Bearer ${connection!.token}` } : {}),
+        ...(options.body !== undefined ? { "Content-Type": file ? file.type || "application/octet-stream" : "application/json" } : {}),
+      },
+      body: file ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
+    });
+  } catch (e) {
+    // No answer at all (not an error status): the server is out of reach. Cancelled requests say nothing.
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    linkDown();
+    throw new ApiError(0, "unreachable", t("Keine Verbindung zum Server."));
+  }
+  // 502/504: a reverse proxy (or the dev server) answers for a server that does not.
+  if (res.status === 502 || res.status === 504) {
+    linkDown();
+    throw new ApiError(0, "unreachable", t("Keine Verbindung zum Server."));
+  }
+  if (res.status !== 503) linkUp(); // 503: audium is starting, not back yet
   if (!res.ok) {
     let code = "error";
     let message = res.statusText;
@@ -411,6 +438,8 @@ export interface Playlist {
   visibility: "private" | "users";
   kind: string;
   rule: Rule | null;
+  /** Ordinary playlist made with "fill automatically": its filters, to fill it anew. */
+  fill_rule: Rule | null;
   owner: UserRef;
   role: PlaylistRole;
   version: number;
@@ -428,6 +457,8 @@ export interface PlaylistItem {
   item_id: number;
   added_by: number | null;
   added_at: number;
+  /** Picked automatically (smart playlist, "fill automatically", saved auto-playlist), not by hand. */
+  auto: boolean;
   available: boolean;
   track: Track;
 }

@@ -209,7 +209,8 @@
     display: flex;
     gap: 20px;
     overflow-x: auto;
-    padding: 0 24px 8px;
+    /* Room below for the scrollbar: in the Linux app (WebKitGTK) it lies over the content. */
+    padding: 0 24px 16px;
   }
   .artist {
     width: 130px;

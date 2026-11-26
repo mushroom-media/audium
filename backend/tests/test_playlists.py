@@ -299,6 +299,38 @@ def test_versions_and_cached_stats(world):
     assert alice.patch(f"/api/v1/playlists/{world['pl']}", json={"name": "   "}).status_code == 400
 
 
+def test_filled_playlist_keeps_its_filters_and_can_be_filled_anew(world):
+    alice = client_of(world, "alice")
+    rule = {"match": "all", "conditions": [{"field": "year", "op": ">=", "value": 1990}], "limit": 3, "order": "random"}
+    pl = alice.post("/api/v1/playlists", json={"name": "Filled", "track_ids": world["tracks"][:2], "fill_rule": rule})
+    pl = pl.json()
+    # Still an ordinary playlist: the filters are kept for editing, not as a smart rule.
+    assert pl["kind"] == "manual" and pl["rule"] is None
+    assert pl["fill_rule"]["conditions"] == rule["conditions"]
+    assert pl["item_count"] == 2
+
+    new_rule = {**rule, "conditions": [{"field": "year", "op": "<=", "value": 2030}]}
+    r = alice.patch(f"/api/v1/playlists/{pl['id']}", json={"fill_rule": new_rule, "track_ids": world["tracks"][3:6]})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["fill_rule"]["conditions"] == new_rule["conditions"] and out["item_count"] == 3
+    items = alice.get(f"/api/v1/playlists/{pl['id']}/items").json()["items"]
+    assert [i["track"]["id"] for i in items] == world["tracks"][3:6]
+    # Picked by the filters: marked as such. A track added by hand afterwards is not.
+    assert all(i["auto"] for i in items)
+    alice.post(f"/api/v1/playlists/{pl['id']}/items", json={"track_ids": world["tracks"][:1]})
+    items = alice.get(f"/api/v1/playlists/{pl['id']}/items").json()["items"]
+    assert [i["auto"] for i in items] == [True, True, True, False]
+
+    # Only the owner, and never for smart playlists.
+    bob = client_of(world, "bob")
+    assert bob.patch(f"/api/v1/playlists/{world['pl']}", json={"track_ids": world["tracks"][:1]}).status_code == 403
+    smart = alice.post("/api/v1/playlists", json={"name": "Smart", "rule": rule}).json()
+    assert alice.patch(f"/api/v1/playlists/{smart['id']}", json={"track_ids": []}).status_code == 400
+    # A plain playlist has no filters.
+    assert alice.get(f"/api/v1/playlists/{world['pl']}").json()["fill_rule"] is None
+
+
 def test_cover_preset_upload_and_reset(world, library):
     alice, bob = client_of(world, "alice"), client_of(world, "bob")
     url = f"/api/v1/playlists/{world['pl']}/cover"

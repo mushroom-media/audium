@@ -464,8 +464,10 @@ def test_freeze_copies_into_own_playlist(analysed, db, users):
     assert r.status_code == 201
     pl = r.json()
     assert pl["kind"] == "frozen_auto" and pl["role"] == "owner" and pl["item_count"] == workout["track_count"]
-    # A frozen copy is a normal playlist: editable, shareable
-    first = bob_c.get(f"/api/v1/playlists/{pl['id']}/items").json()["items"][0]["item_id"]
+    # A frozen copy is a normal playlist: editable, shareable. Its tracks count as picked automatically.
+    items = bob_c.get(f"/api/v1/playlists/{pl['id']}/items").json()["items"]
+    assert all(i["auto"] for i in items)
+    first = items[0]["item_id"]
     assert bob_c.post(f"/api/v1/playlists/{pl['id']}/items/remove", json={"item_ids": [first]}).status_code == 200
 
 

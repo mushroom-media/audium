@@ -64,7 +64,7 @@ def create_playlist(
 ):
     with db.write() as conn:
         out, event = svc.create_playlist(
-            conn, user, body.name, body.description, body.visibility, body.track_ids, body.rule
+            conn, user, body.name, body.description, body.visibility, body.track_ids, body.rule, body.fill_rule
         )
     _publish(request, event)
     return out
@@ -76,7 +76,7 @@ def get_playlist(playlist_id: int, user: User = Depends(current_user), db: Datab
         return svc.get_playlist(conn, user, playlist_id)
 
 
-@router.patch("/{playlist_id}", response_model=PlaylistOut, summary="Rename, describe, change visibility (owner)")
+@router.patch("/{playlist_id}", response_model=PlaylistOut, summary="Rename, change rule, fill anew (owner)")
 def update_playlist(
     playlist_id: int,
     body: PlaylistUpdate,
@@ -94,6 +94,8 @@ def update_playlist(
             description=body.description,
             visibility=body.visibility,
             rule=body.rule,
+            fill_rule=body.fill_rule,
+            track_ids=body.track_ids,
             if_version=_version(if_match),
         )
     _publish(request, event)

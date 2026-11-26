@@ -23,6 +23,9 @@ class PlaylistOut(BaseModel):
     visibility: Visibility = Field(description="users = visible to everybody on this server")
     kind: str = Field(description="manual | smart | frozen_auto")
     rule: dict | None = Field(None, description="Rule of a smart playlist")
+    fill_rule: dict | None = Field(
+        None, description='Manual playlist filled with "fill automatically": the filters used, to fill it anew'
+    )
     owner: UserRef
     role: Literal["owner", "editor", "viewer"] = Field(description="Your role on this playlist")
     version: int = Field(description="Increases with every change; send as If-Match to detect conflicts")
@@ -41,6 +44,7 @@ class PlaylistCreate(BaseModel):
     visibility: Visibility = "private"
     track_ids: list[int] = Field(default_factory=list, max_length=5000)
     rule: dict | None = Field(None, description="Makes a smart playlist; see GET /rules/fields")
+    fill_rule: dict | None = Field(None, description="Manual playlist: the filters that picked track_ids")
 
 
 class PlaylistUpdate(BaseModel):
@@ -48,6 +52,10 @@ class PlaylistUpdate(BaseModel):
     description: str | None = Field(None, max_length=2000)
     visibility: Visibility | None = None
     rule: dict | None = None
+    fill_rule: dict | None = Field(None, description="Manual playlist: the filters that picked track_ids")
+    track_ids: list[int] | None = Field(
+        None, max_length=5000, description="Manual playlist: replaces all its tracks (fill it anew)"
+    )
 
 
 class CoverChoice(BaseModel):
@@ -58,6 +66,7 @@ class PlaylistItemOut(BaseModel):
     item_id: int
     added_by: int | None
     added_at: int
+    auto: bool = Field(description="Picked automatically (smart playlist, fill automatically), not by hand")
     available: bool = Field(description="False while the file is missing from the library")
     track: TrackOut
 

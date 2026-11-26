@@ -326,13 +326,14 @@
   .appears .section {
     margin: 28px 24px 14px;
   }
-  /* One row that scrolls sideways, so a guest on many albums doesn't push the page long. */
+  /* One row that scrolls sideways, so a guest on many albums doesn't push the page long.
+     Room below for the scrollbar: in the Linux app (WebKitGTK) it lies over the content. */
   .shelf {
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: 168px;
     gap: 20px;
-    padding: 0 24px 6px;
+    padding: 0 24px 16px;
     overflow-x: auto;
     scrollbar-width: thin;
   }

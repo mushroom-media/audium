@@ -337,6 +337,8 @@ playlist_items = Table(
     Column("position", BigInteger, nullable=False),
     Column("added_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
     Column("added_at", BigInteger, nullable=False),
+    # Picked automatically (smart playlist, "fill automatically", saved auto-playlist); migration 0019.
+    Column("auto", Boolean, nullable=False, default=False, server_default=false()),
     Index(None, "playlist_id", "position", "id"),
     Index(None, "track_id"),
 )

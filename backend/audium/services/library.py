@@ -328,12 +328,12 @@ def list_albums(
     if appears_on is not None:
         # Albums of other artists (compilations, features) with at least one track by this artist
         conditions.append(albums.c.album_artist_id != appears_on)
+        # Starts from the artist's own tracks (indexed), not from every album in the library.
         conditions.append(
-            exists().where(
-                tracks.c.album_id == albums.c.id,
-                tracks.c.missing_since.is_(None),
-                track_artists.c.track_id == tracks.c.id,
-                track_artists.c.artist_id == appears_on,
+            albums.c.id.in_(
+                select(tracks.c.album_id)
+                .join(track_artists, track_artists.c.track_id == tracks.c.id)
+                .where(track_artists.c.artist_id == appears_on, tracks.c.missing_since.is_(None))
             )
         )
     if year_from is not None:

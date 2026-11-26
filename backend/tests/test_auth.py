@@ -357,6 +357,7 @@ def test_user_settings_are_per_user(make_client, admin, db):
         "theme": "system",
         "stream_quality": "auto",
         "shortcuts": "on",
+        "seek_keys": "off",
         "replay_gain": "off",
         "crossfade": "off",
         "crossfade_s": 5,
