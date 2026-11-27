@@ -64,7 +64,56 @@ const icon = {
   logo: `<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="13" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="14" cy="14" r="8.5" fill="none" stroke="currentColor" stroke-width="1" opacity="0.6"/><circle cx="14" cy="14" r="3.5" fill="currentColor"/></svg>`,
 };
 
-export function render(t, { lang, path, alternates, siteUrl }) {
+const OS = ["windows", "mac", "linux"];
+
+const dlIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>`;
+const osIcon = {
+  windows: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>`,
+  mac: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="5" width="16" height="10" rx="1.5"/><path d="M2 18h20l-1.5 1.5h-17z"/></svg>`,
+  linux: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>`,
+};
+
+// The desktop app downloads: one card per system. main.js marks the visitor's system
+// (is-current); without JavaScript all cards look the same.
+function downloadSection(t, d) {
+  const cards = OS.map((os) => {
+    const files = d ? d.files.filter((f) => f.os === os) : [];
+    const o = t.download.os[os];
+    const links = files.length
+      ? files
+          .map(
+            (f, i) =>
+              `<a class="btn ${i === 0 ? "btn-primary" : "btn-ghost"} dl-btn" href="${f.url}">${dlIcon}<span>${t.download.kinds[f.kind]}</span>${f.size ? `<small>${f.size}</small>` : ""}</a>`,
+          )
+          .join("")
+      : `<a class="btn btn-ghost dl-btn" href="${REPO}/releases">${t.download.fallback}</a>`;
+    return `<article class="dl" data-os="${os}">
+      <div class="dl-head">${osIcon[os]}<span class="dl-badge">${t.download.recommended}</span></div>
+      <h3>${o.name}</h3>
+      <p>${o.note}</p>
+      <div class="dl-links">${links}</div>
+    </article>`;
+  }).join("\n    ");
+
+  const meta = d
+    ? `<p class="dl-meta">${t.download.version} <b>${d.version}</b>${d.date ? ` · ${t.download.released} ${d.date}` : ""} · <a href="${d.releaseUrl}">${t.download.notes}</a></p>`
+    : "";
+
+  return `<section class="wrap section" id="download">
+  <div class="head wide">
+    <span class="kicker">${t.download.kicker}</span>
+    <h2>${t.download.title}</h2>
+    <p class="muted">${t.download.lead}</p>
+    ${meta}
+  </div>
+  <p class="dl-mobile" hidden>${t.download.mobile}</p>
+  <div class="downloads">
+    ${cards}
+  </div>
+</section>`;
+}
+
+export function render(t, { lang, path, alternates, siteUrl, downloads }) {
   const abs = (p) => (siteUrl ? siteUrl.replace(/\/$/, "") + p : p);
   const other = alternates.find((a) => a.lang !== lang);
   const playing = 2;
@@ -98,6 +147,7 @@ ${siteUrl ? `<meta property="og:url" content="${abs(path)}">` : ""}
     <div class="nav-links">
       <a href="#features">${t.nav.features}</a>
       <a href="#apps">${t.nav.apps}</a>
+      <a href="#download">${t.nav.download}</a>
       <a href="#install">${t.nav.install}</a>
       <a href="${REPO}/tree/main/docs">${t.nav.docs}</a>
     </div>
@@ -192,6 +242,8 @@ ${siteUrl ? `<meta property="og:url" content="${abs(path)}">` : ""}
     <p><a href="${REPO}/blob/main/docs/apps.md">${t.apps.more}</a></p>
   </div>
 </section>
+
+${downloadSection(t, downloads)}
 
 <section class="wrap section split" id="install">
   <div class="head">

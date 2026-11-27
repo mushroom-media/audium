@@ -1,7 +1,9 @@
 name: Website
 
 # The landing page (website/) is built with plain Node and copied to the netcup webspace over SSH
-# with rsync on every push to main that touches it. Pull requests only build it.
+# with rsync on every push to main that touches it. Pull requests only build it. The page lists
+# the desktop app downloads of the current app version (read at build time from the release
+# app-update), so it is also rebuilt after the workflow "App" has published an app release.
 #
 # Repository settings > Secrets and variables > Actions (see website/README.md):
 #   secrets   WEBSITE_SSH_KEY          private key (ed25519) whose public half is on the webspace
@@ -18,6 +20,10 @@ on:
     paths: ["website/**", ".github/workflows/website.yml"]
   pull_request:
     paths: ["website/**", ".github/workflows/website.yml"]
+  # After "App" ran for a published release, latest.json in app-update is new (job update-channel).
+  workflow_run:
+    workflows: [App]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -31,6 +37,10 @@ concurrency:
 jobs:
   build:
     name: Build
+    # Of the App runs only those for a published app release that went through.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

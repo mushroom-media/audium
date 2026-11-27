@@ -151,6 +151,26 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .apps li { background: var(--surface-2); border: 1px solid #2a2b31; border-radius: 14px; padding: 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .apps span { font: 12px var(--mono); color: var(--muted); }
 
+/* Desktop downloads. main.js adds .is-current to the visitor's system and moves it first. */
+.dl-meta { font: 13px var(--mono); color: var(--muted); }
+.dl-meta b { color: var(--text); font-weight: 500; }
+.dl-mobile { padding: 16px 20px; border: 1px dashed var(--line-2); border-radius: 14px; color: var(--text-2); }
+.downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.dl { position: relative; background: var(--surface); border: 1px solid #26272d; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 12px; color: var(--muted); transition: border-color .2s, box-shadow .2s, transform .2s; }
+.dl h3 { font-size: 24px; color: var(--text); }
+.dl p { font-size: 15px; color: var(--text-2); flex: 1; }
+.dl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+.dl-badge { display: none; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--accent-contrast); background: var(--accent); padding: 5px 10px; border-radius: 999px; }
+.dl-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.dl-btn { padding: 12px 18px; font-size: 15px; }
+.dl-btn small { font: 12px var(--mono); opacity: 0.75; }
+.dl .btn-primary { background: transparent; color: var(--text); border: 1px solid #3a3b42; }
+.dl .btn-primary:hover { border-color: var(--accent); transform: none; }
+.dl.is-current { order: -1; border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 24px 80px rgba(233, 184, 114, 0.14); }
+.dl.is-current .dl-badge { display: inline-flex; }
+.dl.is-current .btn-primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.dl.is-current .btn-primary:hover { background: #f0c88d; }
+
 .checks { display: flex; flex-direction: column; gap: 12px; color: var(--text-2); }
 .checks li::before { content: "✓"; color: var(--accent); margin-right: 10px; }
 
