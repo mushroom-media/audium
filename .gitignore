@@ -17,3 +17,6 @@ notes/
 frontend/dist-app/
 app/src-tauri/target/
 app/src-tauri/gen/
+
+# website build output
+website/dist/
