@@ -1,0 +1,114 @@
+name: Website
+
+# The landing page (website/) is built with plain Node and copied to the netcup webspace over SSH
+# with rsync on every push to main that touches it. Pull requests only build it. The page lists
+# the desktop app downloads of the current app version (read at build time from the release
+# app-update), so it is also rebuilt after the workflow "App" has published an app release.
+#
+# Repository settings > Secrets and variables > Actions (see website/README.md):
+#   secrets   WEBSITE_SSH_KEY          private key (ed25519) whose public half is on the webspace
+#             WEBSITE_SSH_KNOWN_HOSTS  output of `ssh-keyscan -p <port> <host>`, pins the host key
+#   variables WEBSITE_SSH_HOST         e.g. hosting123456.a2e7f.netcup.net
+#             WEBSITE_SSH_USER         e.g. hosting123456
+#             WEBSITE_SSH_PORT         optional, default 22
+#             WEBSITE_PATH             target folder, e.g. /httpdocs (only the website lives there:
+#                                      rsync --delete removes everything else in it)
+#             WEBSITE_URL              e.g. https://audium.example, for canonical links and sitemap
+on:
+  push:
+    branches: [main]
+    paths: ["website/**", ".github/workflows/website.yml"]
+  pull_request:
+    paths: ["website/**", ".github/workflows/website.yml"]
+  # After "App" ran for a published release, latest.json in app-update is new (job update-channel).
+  workflow_run:
+    workflows: [App]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never two deploys at the same time; a newer push waits for the running one.
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    # Of the App runs only those for a published app release that went through.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node website/build.mjs
+        env:
+          SITE_URL: ${{ vars.WEBSITE_URL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: website
+          path: website/dist
+          include-hidden-files: true # .htaccess
+          retention-days: 7
+
+  deploy:
+    name: Deploy to webspace
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: website
+          path: dist
+      - name: Check configuration
+        env:
+          KEY: ${{ secrets.WEBSITE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.WEBSITE_SSH_KNOWN_HOSTS }}
+          HOST: ${{ vars.WEBSITE_SSH_HOST }}
+          USER_NAME: ${{ vars.WEBSITE_SSH_USER }}
+          TARGET: ${{ vars.WEBSITE_PATH }}
+        run: |
+          missing=""
+          [ -n "$KEY" ] || missing="$missing WEBSITE_SSH_KEY"
+          [ -n "$KNOWN_HOSTS" ] || missing="$missing WEBSITE_SSH_KNOWN_HOSTS"
+          [ -n "$HOST" ] || missing="$missing WEBSITE_SSH_HOST"
+          [ -n "$USER_NAME" ] || missing="$missing WEBSITE_SSH_USER"
+          [ -n "$TARGET" ] || missing="$missing WEBSITE_PATH"
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured:$missing (see website/README.md)"
+            exit 1
+          fi
+          case "$TARGET" in
+            ""|"/"|"~"|"~/"|"."|"./") echo "::error::WEBSITE_PATH must be the website folder, not the home or root folder"; exit 1 ;;
+          esac
+      - name: Set up SSH
+        env:
+          KEY: ${{ secrets.WEBSITE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.WEBSITE_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/website
+          chmod 600 ~/.ssh/website
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload with rsync
+        env:
+          HOST: ${{ vars.WEBSITE_SSH_HOST }}
+          USER_NAME: ${{ vars.WEBSITE_SSH_USER }}
+          PORT: ${{ vars.WEBSITE_SSH_PORT || '22' }}
+          TARGET: ${{ vars.WEBSITE_PATH }}
+        # --checksum: only changed files are sent. The filter keeps .well-known (certificate
+        # challenges) that the panel may put into the folder.
+        run: |
+          rsync -rlz --checksum --delete --chmod=D755,F644 \
+            --filter='P .well-known/' \
+            -e "ssh -p $PORT -i ~/.ssh/website -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            dist/ "$USER_NAME@$HOST:${TARGET%/}/"
+      - name: Summary
+        run: echo "Deployed ${{ github.sha }} to ${{ vars.WEBSITE_URL || vars.WEBSITE_SSH_HOST }}" >> "$GITHUB_STEP_SUMMARY"
